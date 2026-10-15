@@ -43,8 +43,13 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
   - marks carved: MarkCarved(gi, gk) where the new floor is more than CARVE_TOL under the surface. Without this a
     rut on fresh ground never draws (cells draw only if IsHoleCell AND Carved - CODE BuildSub / Quad).
   - queues the bricks whose top crosses the changed floor samples (MarkBox equivalent) - AND the neighbour brick
-    across a 4 m line when a changed sample is within one floor step (0.25 m) of that line (bilinear Floor at the
-    line reads it). Else the neighbour stays unsplit and stale -> crack on the line (see "Brick-border rule").
+    across a 4 m line when a changed sample is within ~0.75 m of that line. Else the neighbour stays unsplit and
+    stale -> crack on the line (see "Brick-border rule").
+    Why 0.75 m, not 0.25 (CODE CellPos / PolyPass): the shared edges between two bricks' quads are NOT on the line.
+    A brick's quads use cells -1 .. SUB-1, so its mesh reaches 0.5 m into the -x / -z neighbour; the border
+    vertices sit anywhere in that 0.5 m strip, and Floor there reads samples up to 0.25 m further = 0.75 m.
+    Also the brick ABOVE / BELOW (4 m y lines, same column): ground near y = 4k is common, so a rut there changes
+    triangles of two stacked bricks. Queue every brick whose y range is within ~0.5 m of the floor / surface.
 - Ops that move the ground clear the floor ONLY at samples they changed (where Put moved the surface), not in
   the whole op box (a crater box is a square well past its rim):
   - crater (0) / trench cut (2): floor = FLOOR_NONE where the new surface is ABOVE the floor (fresh rim covers the
@@ -68,6 +73,10 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
   - Overflow fallback (below) on one side of a line breaks this: brick B pulls coarse vertices only, brick A pulls
     a midpoint B does not have. Then A must not pull midpoints on edges that lie on the line to an overflowed
     brick (keep them on the straight edge = T-junction, no crack). Needs a per-brick "split" flag A can read.
+    Order problem: A may build before B finds out it overflows (same batch or earlier). So B's overflow sets a
+    persistent "no split" flag on B AND queues its rutted neighbours; they rebuild next batch reading the flag (one
+    batch of crack at most). Overflow needs > ~2000 coarse tris in one brick (MEASURED busiest ~185), so this is a
+    rare path - log it, don't optimise it.
   - Lines between a split and an unsplit brick still get T-junctions (offline: 40-85 per 12 m). Bricks are separate
     meshes / bodies, so no crack; render sparkle there is a Step 4 look check.
   - Check (Step 4): drive a rut ALONG and ACROSS a 4 m line and end one 0.1 m short of a line; look for gaps from
