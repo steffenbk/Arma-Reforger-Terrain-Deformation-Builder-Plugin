@@ -48,6 +48,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- FULL OPTIONS REVIEW 2026-10-16 (ruts / craters / trenches / tunnels / more, every untested item with an ID):
+  docs/superpowers/research/2026-10-16-ground-options-full-review.md. Its section 6A lists 6 cheap RISK checks on
+  shipped code (bullets through voxel walls, voxel ops ignore the building lock, nothing wakes objects over new
+  holes, voxel house SP-only but enabled, 1.9 vehicle sim class, crater lip slope) - candidates for Lane 1/3.
 - Rut field cost (LOG 2026-10-15 23:16: ~20 ms per rut op, mesher run twice per patch = 53%): shared build tried
   and reverted (6% hit, mud-gotchas). Next idea: schedule a patch's collider right after its mesh, then share.
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel
