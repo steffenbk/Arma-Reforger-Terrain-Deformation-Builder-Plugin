@@ -153,6 +153,7 @@ CODE line numbers are from master 34d1afe (2026-10-15); check them before editin
   existing code uses `c` / `c2`, `pt` etc. for this reason).
 - No ternary operator. Static arrays <= 65536 entries, a class <= 256 KB (MUD_VoxelVerts note at the top).
 - `map<int, int>` / `set<int>` / `array<float>` are fine; `foreach (int k, float v : map)` is used already.
+  But `set` is reserved as a NAME: never call a variable / member `set` (use e.g. `qcols` as Submit ~2242 does).
 
 ### Constants (MUD_VoxelProbe, next to RUT_*)
 - `DISPLACE_RUTS = false` (flip true for Step 4), `FCELL = 0.25`, `FSUB = 16` (floor samples per column side,
@@ -201,8 +202,10 @@ CODE line numbers are from master 34d1afe (2026-10-15); check them before editin
 - Per vertex v (world = m_vBOrg + m_Vb.m_aV[v]): f = FloorAt; pulled if f < y - DISP_EPS and y - f < DISP_GUARD.
 - Rutted brick = any vertex pulled, or any triangle edge midpoint pulled (the 6-split-point rule, MEASURED crack-
   free). Not rutted -> return (mesh unchanged).
-- Budget BEFORE splitting (m_iTop / m_iDirt are INDEX counts, 3 per triangle): m_iTop * 4 <= MAX_I,
-  m_iDirt * 4 <= MAX_I, and m_iV + m_iTop + m_iDirt <= MAX_V (new vertices <= edges <= 3 per triangle = one per
+- Budget BEFORE splitting (m_iTop / m_iDirt are INDEX counts, 3 per triangle): (m_iTop + m_iDirt) * 4 <= MAX_I
+  - COMBINED, not per section: Tri (~4036) sets m_bOverflow on `m_iTop + m_iDirt + 3 > MAX_I`, so a per-section
+  check can pass and the re-emit still overflows half way (half a brick, then the overflow path / old body kept).
+  And m_iV + m_iTop + m_iDirt <= MAX_V (new vertices <= edges <= 3 per triangle = one per
   index - a safe upper bound; with shared midpoints the real number is ~1.5 per triangle). Fails -> pull the coarse vertices only, no split, log
   `rut split overflow brick i j k` (rare: MEASURED busiest ~185 tris vs ~2000 needed). Neighbour midpoint rule for an
   overflowed brick (plan Step 2): NOT needed for the first build - log first, add it only if the log ever shows one.
@@ -224,3 +227,7 @@ CODE line numbers are from master 34d1afe (2026-10-15); check them before editin
 ### Not touched
 CarveRut, RUT_LOOK (op 6), op text / net / JIP format, RutWheel / RutFlush / RUT_BEHIND. DISPLACE_RUTS false =
 v035 exactly.
+RUT_LOOK guard: RUT_LOOK is false today (CODE ~230), so op 6 never runs. If it is ever turned on with DISPLACE_RUTS,
+op 6 still cuts the 3D look field (PutLook) while op 4 only writes the floor, so the look mesh would show the soft
+voxel rut first and the sharp floor rut later (and Displace runs on the look pass too - Polygonize(lookAny) ~3468).
+Add an Init check: DISPLACE_RUTS && RUT_LOOK -> Print error and treat RUT_LOOK as false.
