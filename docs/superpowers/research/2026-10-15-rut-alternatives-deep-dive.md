@@ -124,6 +124,28 @@ and the brick count (ruts were most of the bricks made in the freeze-test "After
 | Batman: Arkham Origins snow (GDC 2014), Rise of the Tomb Raider, UE5 RVT trail packs | render-target / virtual-texture displacement on the GPU | no shaders for mods |
 | Unity SnowRunner-like prototype (80.lv) | chunked terrain, per-chunk track storage, per-frame deformation by wheel load | same as option 1 |
 
+## 6b. Follow-up findings (same session, later)
+- **Why the old heightfield ruts cost 3-4 ms per patch build** (CODE MUD_WorldGround.c BuildMeshBand ~5980,
+  BuildColliderBand ~6112): every rebuild runs the band mesher (layered-SDF surface nets over the 33 x 33 patch,
+  `m_Band.Build`), then a 2nd mesh section (groove), and on the collider side ONE TRIMESH PER MATERIAL SLOT + a
+  reversed "bullet slab" trimesh on FireGeo + a safety "plate" trimesh, then destroy + CreateStaticEx. Plus the
+  smoothed heights (UpdateSmooth). So the cost is the extras, not the 0.25 m grid. INFERENCE: a rut-field patch
+  build that skips what a rut does not need could be much cheaper - profile `m_iBandCoreMs` vs the rest first
+  (the counters already exist in BandStats).
+- **Heightfield MP already syncs data, not ops** (CODE: RpcDo_Heights / SendChanges / ApplyRect send packed mm
+  height rects; JIP sends deformed patches - QueueJip / SendJip). The rut field can use either: the voxel op stream
+  (small, deterministic) or this patch path (bounded per patch). Chrono SCM syncs modified nodes the same way.
+- **AffectFoliage is per frame** (READ API: "submit an obstacle in this frame", flatten / sway / strength / falloff):
+  grass springs back when we stop calling it. Only useful if re-submitted every frame for tracks near the camera -
+  IDA item 3 checks the decay.
+- **Grass already reacts to our ground** (PROVEN mud-gotchas ~75: clutter on our ground, crater pits come out clean).
+  If ruts can clear it too (IDA item 2), that is a whole-map track look with no new system.
+- **Vehicles moved to server authority** (READ: Bohemia "server authoritative vehicles"; prefabs use
+  VehicleWheeledSimulation_SA / SCR_CarControllerComponent_SA; 1.9 notes mention wheeled simulation changes). Our
+  stutter research (2026-10-11-driver-stutter-deep-dive.md) was on the older path - re-check which class the test
+  vehicles use before the displaced-ruts MP test (IDA item 5).
+- IDA questions for all of this: [2026-10-15-ida-rut-questions.md](2026-10-15-ida-rut-questions.md).
+
 ## 7. Suggested order (user decides)
 1. Let the displaced-ruts build finish - its Displace() is option 1's voxel half anyway, and its debug tools carry
    over. Change its storage later from per-column to per-patch if option 1 goes ahead.
