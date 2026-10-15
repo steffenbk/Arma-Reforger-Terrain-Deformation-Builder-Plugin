@@ -51,6 +51,7 @@ class MUD_FinePatch
 	bool m_bColDirty;
 	bool m_bQueued;             // key is in MUD_WorldGroundEntity.m_aDirty
 	bool m_bDeformed;           // some vertex moved: kept for the match, sent to joiners
+	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - kept (not freed), may sleep; NOT sent / hashed
 	bool m_bTraceHidden;        // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
 	int m_iBuildFails;          // collider steps that made no body

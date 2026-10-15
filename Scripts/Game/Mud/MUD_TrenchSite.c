@@ -9,7 +9,8 @@ class MUD_TrenchSiteComponentClass : ScriptComponentClass
 class MUD_TrenchSiteComponent : ScriptComponent
 {
 	static const ResourceName PREFAB = "{4D55445452454E30}Prefabs/Mud/MudTrenchSite.et";
-	static const int MAX_SITES = 20;
+	static const int MAX_SITES = 20;                // server-wide
+	static const int MAX_SITES_PER_PLAYER = 5;      // per placing player (release, master list lane 2)
 	static const int SKIPPED = 99;              // > any MUD_TrenchPlan.MAX_LAYERS: a skipped piece counts as done
 	static const string SKIP_CHAR = "x";
 	// one char per layer count: more than 9 layers since 2026-10-13 (2.5 m = 10)
@@ -29,6 +30,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	protected ref MUD_TrenchGhosts m_Ghosts = new MUD_TrenchGhosts();
 	protected bool m_bDeleting;
 	protected int m_iId;                // server: log name
+	protected int m_iOwner;             // server: player id that placed it (per-player cap)
 
 	protected static ref array<MUD_TrenchSiteComponent> s_aAll = {};   // every site on this machine
 	protected static int s_iNextId;
@@ -67,12 +69,23 @@ class MUD_TrenchSiteComponent : ScriptComponent
 
 	//------------------------------------------------------------------------------------------------
 	//! Server: spawn a site for plan. null and why when refused.
-	static MUD_TrenchSiteComponent Spawn(MUD_TrenchPlan plan, out string why)
+	static MUD_TrenchSiteComponent Spawn(MUD_TrenchPlan plan, int owner, out string why)
 	{
 		s_aAll.RemoveItem(null);
 		if (s_aAll.Count() >= MAX_SITES)
 		{
 			why = string.Format("%1 trench sites already (max %2)", s_aAll.Count(), MAX_SITES);
+			return null;
+		}
+		int mine = 0;
+		foreach (MUD_TrenchSiteComponent other : s_aAll)
+		{
+			if (other.m_iOwner == owner && !other.m_bDeleting)
+				mine++;
+		}
+		if (mine >= MAX_SITES_PER_PLAYER)
+		{
+			why = string.Format("player %1 has %2 trench sites already (max %3 each)", owner, mine, MAX_SITES_PER_PLAYER);
 			return null;
 		}
 		MUD_TrenchLayout lay = new MUD_TrenchLayout();
@@ -112,6 +125,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 			RplComponent.DeleteRplEntity(ent, false);
 			return null;
 		}
+		site.m_iOwner = owner;
 		site.SetPlan(plan.Pack());
 		return site;
 	}

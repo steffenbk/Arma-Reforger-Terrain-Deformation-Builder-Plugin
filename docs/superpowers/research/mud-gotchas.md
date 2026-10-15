@@ -95,6 +95,9 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   Always pass {GUID}path, then check the saved .layer. Creating by bare class name (no prefab) did NOT stick at all (19:27).
 - PROVEN in play 2026-10-08 10:50 (Exp 192624): a script static collider on preset Terrain makes vehicle get in/out
   "Obstructed"; adding EPhysicsLayerDefs.Foliage (0x40000 = ExcludePhysicsLayer in CompartmentAccess_base.conf) fixes it.
+- 2026-10-15 (WB log 20-14-47, 21:13-21:15): get in / out blocked in a voxel rut although 'mud hidden from traces' ran 6x:
+  HideFromTraces never covered voxel bricks (MUD_VoxelSubEntity). EVERY new ground entity type must join
+  MUD_GroundEntity.HideFromTraces (fix MUD_VoxelProbe.SetTraceHidden, v092 = before; user-tested OK 21:2x).
 - PROVEN in play 2026-10-08 09:26 (Exp 192624, dedicated): open script trimesh on Terrain preset lets bullets pass
   (rim -> next crater). Adding a lowered, downward-facing trimesh copy on EPhysicsLayerPresets.FireGeo stops them.
   FireGeo compiles as an enum value.
@@ -436,3 +439,15 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   never writes the 4-byte normal slot (stride 20, writes pos + UV only) -> garbage normals = the scaly shading.
   Engine bug, no script workaround. Keep flags 0 + rebuild. Details: KB runtime-procedural-mesh.md.
 - PROVEN 2026-10-15 (compile error): all locals of ONE Enforce method must fit an 80 KB VM stack ("Can't add more variables to ... method, it's too large so it can't fit on VM stack (80KB)"). Local static arrays count fully (vector 12 B, int/float 4 B going by the sizes: ~56 KB compiled, ~94 KB refused). MudSheet.BuildTile sits near ~69 KB - check before growing its arrays. Also: '&' in '(hsh & 1023) / 1023.0' gave "Unknown operator '&'", and 'Vector((m % TV) * CELL, ...)' gave "Unknown operator '%'" (PROVEN 2026-10-15): an int-only operator in parentheses inside a float expression is refused - put the int part in an int local first.
+- PROVEN 2026-10-15 (rut field Stage 3, user look test + logs 21-30-16 / 21-35-43): the cut was the same size as v097
+  (41 floor samples per rut op vs 40-82), yet ruts on patches looked ~2x wide - the patch groove reveal starts soil at
+  m_fRevealDepth 0.01 m, so almost the whole 1 m RUT_R trough went soil (v097 bricks: soil from ~0.03 m). Field ruts
+  now reveal from FIELD_SOIL_D 0.03 (user: right). Also proven: a no-column hard check needs Convert's FULL rule
+  (Kept || Hard); Hard alone let ruts cut onto asphalt / concrete edges.
+- PROVEN 2026-10-15 (WB log 20-14-47, run 1 vs 3): voxel brick vertices (m_Vb) are brick-LOCAL (origin m_vBOrg);
+  anything stored in world y (rut floor) must subtract m_vBOrg[1] before comparing - else 0 split bricks, ruts invisible.
+- PROVEN 2026-10-15 (rut field, user screenshots + WB log 22:47): anything that lowers patch verts outside m_aH must
+  scale the depth by p.m_aLock[v] like presses do - unscaled, a rut at a kept-terrain edge (road / path) dips the band
+  rim while the terrain stays: a see-through V gap. And brick soil measured only against the SEEDED ground leaves a rut
+  over a raised crater rim grass next to soil patches; soil by pull depth (m_aDispY - y > 0.03) fixed it (soil walls
+  0-82 -> up to 733 per batch).

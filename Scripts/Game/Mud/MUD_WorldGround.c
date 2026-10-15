@@ -86,6 +86,10 @@ class MUD_JipItem
 class MUD_WorldGroundEntity : GenericEntity
 {
 	static const int PCELLS = 32;       // fine cells per patch side
+	// RUT FIELD: a field rut vertex shows the groove (soil) only this deep under the undug ground - v097's brick rule
+	// (MUD_VoxelProbe.DISP_SOIL_CUT under the seeded top, which is LIFT over the ground). The reveal's own 0.01 m
+	// (tuned for one-pass heightfield ruts) made the whole 1 m wide trough soil: ruts looked ~2x wider (user 2026-10-15)
+	static const float FIELD_SOIL_D = 0.03;
 	static const int PVERTS = 33;
 	static const int SKIN = 4;          // skin cells per patch side
 	static const int FINE = 8;          // fine cells per skin cell side
@@ -542,6 +546,22 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iBandColMs;
 	protected int m_iBandColWorst;
 	protected int m_iBandCoreMs;          // of both: the mesher itself
+	// cost split (rut field Stage 4 follow-up, 2026-10-15): where a band build's ms go, 10 s sums. ms ticks, so
+	// small parts round down; 'rest' = total - parts
+	protected int m_iCsMeshIn;          // mesh: input loop (m_aH, ahead hold, rut floor)
+	protected int m_iCsMeshCore;        // mesh: m_Band.Build
+	protected int m_iCsMeshUv;          // mesh: groove reveal + UV loop
+	protected int m_iCsMeshRes;         // mesh: MeshObject.Create + Update* + SetObject
+	protected int m_iCsColIn;           // collider: input loop (smooth, rut floor, wheel hold, plate)
+	protected int m_iCsColCore;         // collider: m_Band.Build
+	protected int m_iCsColGeom;         // collider: per-material + slab + plate CreateTriMesh
+	protected int m_iCsColDrop;         // collider: DropBody
+	protected int m_iCsColStatic;       // collider: MakeStatic
+	protected int m_iCsColGeoms;        // collider: geoms made (count)
+	// shared band build (user 2026-10-15): a collider after the same patch's mesh, no other band build between, same inputs,
+	// reuses that mesh's m_Band surface (m_Vb / m_Ib / m_Slot are not changed by the mesh's groove pass)
+	protected int m_iShareKey = -1;     // patch whose band surface m_Band holds now (-1 = none)
+	protected int m_iBandShared;        // collider builds that reused it, 10 s
 	protected int m_iBandCells;           // sums / max per build
 	protected int m_iBandCellsMax;
 	protected int m_iBandTris;
@@ -2958,6 +2978,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	{
 		int cx0 = p.m_iPx * SKIN;
 		int cz0 = p.m_iPz * SKIN;
+		p.m_bFloor = MUD_VoxelProbe.FieldInBox(p.m_iPx * PCELLS, p.m_iPx * PCELLS + PCELLS, p.m_iPz * PCELLS, p.m_iPz * PCELLS + PCELLS);
 		float h00;
 		float h10;
 		float h01;
@@ -3183,7 +3204,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! Ahead stops here. A deformed patch (edges copied from a dug neighbour) or a waking one goes on.
 	protected bool IsLazyReady(MUD_FinePatch p)
 	{
-		return m_bLazy && p.m_iBuild == BUILD_COLLIDER && !p.m_bAsleep && !p.m_bDeformed;
+		return m_bLazy && p.m_iBuild == BUILD_COLLIDER && !p.m_bAsleep && !p.m_bDeformed && !p.m_bFloor;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3797,7 +3818,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				if (key == m_iBuildKey)
 					continue;
-				if (!p.m_bDeformed && m_fTime - p.m_fNearAt > m_fFreeAfter)
+				if (!p.m_bDeformed && !p.m_bFloor && m_fTime - p.m_fNearAt > m_fFreeAfter)
 					m_aFreeQueue.Insert(key);
 				else if (MaySleep(p))
 					m_aSleepQueue.Insert(key);
@@ -3822,7 +3843,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			int last = m_aFreeQueue.Count() - 1;
 			MUD_FinePatch q = m_mPatches.Get(m_aFreeQueue[last]);
 			m_aFreeQueue.Remove(last);
-			if (q && !q.m_bDeformed && m_fTime - q.m_fNearAt > m_fFreeAfter)
+			if (q && !q.m_bDeformed && !q.m_bFloor && m_fTime - q.m_fNearAt > m_fFreeAfter)
 			{
 				FreePatch(q);
 				break;
@@ -3834,7 +3855,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! Deformed, live, no rebuild pending, not building, no vehicle near for m_fSleepAfter
 	protected bool MaySleep(MUD_FinePatch p)
 	{
-		return p.m_bDeformed && !p.m_bAsleep && p.m_iBuild == 0 && p.m_Phys && !p.m_bQueued
+		return (p.m_bDeformed || p.m_bFloor) && !p.m_bAsleep && p.m_iBuild == 0 && p.m_Phys && !p.m_bQueued
 			&& p.m_iKey != m_iBuildKey && m_fTime - p.m_fNearAt > m_fSleepAfter;
 	}
 
@@ -3864,6 +3885,60 @@ class MUD_WorldGroundEntity : GenericEntity
 				break;
 			}
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD (MUD_VoxelProbe.RUT_FIELD): rut floor samples [gx0..gx1] x [gz0..gz1] (= global fine verts) changed.
+	//! The patches there are made / woken as a wheel press does (server too: it needs the collider), then rebuild
+	//! mesh + collider. The floor is never written into m_aH and never queued for the net (the op stream carries
+	//! it; m_aH would go to every client and again in the patch JIP). Returns the patches marked.
+	static int FloorDirty(int gx0, int gx1, int gz0, int gz1)
+	{
+		if (!s_Inst || !s_Inst.m_bReady)
+			return 0;
+		s_Inst.EnsureRange(gx0, gx1, gz0, gz1, true);
+		return s_Inst.MarkFloorDirty(gx0, gx1, gz0, gz1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: MarkDirty without the blur reach (the floor is not blurred) and without the net rect
+	protected int MarkFloorDirty(int gx0, int gx1, int gz0, int gz1)
+	{
+		int marked = 0;
+		for (int pz = PatchLo(gz0, m_iNPZ); pz <= PatchHi(gz1, m_iNPZ); pz++)
+		{
+			for (int px = PatchLo(gx0, m_iNPX); px <= PatchHi(gx1, m_iNPX); px++)
+			{
+				MUD_FinePatch p = m_mPatches.Get(pz * m_iNPX + px);
+				if (!p)
+					continue;
+				p.m_bFloor = true;
+				if (m_bRender)
+					p.m_bMeshDirty = true;
+				p.m_bColDirty = true;
+				if (!p.m_bQueued)
+				{
+					p.m_bQueued = true;
+					m_aDirty.Insert(p.m_iKey);
+				}
+				marked++;
+			}
+		}
+		return marked;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: p's mesh / collider read the rut floor (a floor tile reaches it; also keeps it from being freed)
+	protected bool RutFieldOn(MUD_FinePatch p)
+	{
+		if (!MUD_VoxelProbe.RUT_FIELD)
+			return false;
+		int gx0 = p.m_iPx * PCELLS;
+		int gz0 = p.m_iPz * PCELLS;
+		if (!MUD_VoxelProbe.FieldInBox(gx0, gx0 + PCELLS, gz0, gz0 + PCELLS))
+			return false;
+		p.m_bFloor = true;
+		return true;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -4126,6 +4201,20 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: edge lock at global fine vertex gx, gz - the patch's m_aLock (kept edge + buildings), else EdgeLock
+	protected float LockAt(int gx, int gz)
+	{
+		int px = Math.ClampInt(gx / PCELLS, 0, m_iNPX - 1);
+		int pz = Math.ClampInt(gz / PCELLS, 0, m_iNPZ - 1);
+		int vx = gx - px * PCELLS;
+		int vz = gz - pz * PCELLS;
+		MUD_FinePatch p = m_mPatches.Get(pz * m_iNPX + px);
+		if (p && vx >= 0 && vx < PVERTS && vz >= 0 && vz < PVERTS)
+			return p.m_aLock[vz * PVERTS + vx];
+		return EdgeLock(gx, gz);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Ground heights at world (x, z): dug = what is there now (bilinear over the fine verts), undug =
 	//! before any deformation (skin triangles). On kept terrain both are the heightmap. False off the
 	//! patch grid.
@@ -4149,6 +4238,19 @@ class MUD_WorldGroundEntity : GenericEntity
 		float w = Math.Clamp(fz - iz, 0, 1);
 		float h = GetH(ix, iz) * (1 - u) * (1 - w) + GetH(ix + 1, iz) * u * (1 - w) + GetH(ix, iz + 1) * (1 - u) * w + GetH(ix + 1, iz + 1) * u * w;
 		dug = undug + h;
+		// RUT FIELD: the rut floor under it (a crater converting a rutted column later seeds the rut, the floor stays
+		// on top: the min of both)
+		if (MUD_VoxelProbe.RUT_FIELD)
+		{
+			float rf = MUD_VoxelProbe.FieldFloorAt(x, z, dug);
+			if (rf < undug)
+			{
+				float rfL = LockAt(ix, iz) * (1 - u) * (1 - w) + LockAt(ix + 1, iz) * u * (1 - w) + LockAt(ix, iz + 1) * (1 - u) * w + LockAt(ix + 1, iz + 1) * u * w;
+				rf = undug + (rf - undug) * rfL;     // edge lock, as the patch mesh / collider
+			}
+			if (rf < dug)
+				dug = rf;
+		}
 		return true;
 	}
 
@@ -5712,6 +5814,9 @@ class MUD_WorldGroundEntity : GenericEntity
 		int uz = (p.m_iPz - (p.m_iPz / chunkPatches) * chunkPatches) * PCELLS;
 		float uvDiv = chunkPatches * PCELLS;
 		bool hideOwed;      // ahead ruts: a hidden vertex still shows an old height
+		bool rfOn = RutFieldOn(p);     // RUT FIELD: as BuildMeshBand (band overflow falls back here)
+		int rfX0 = p.m_iPx * PCELLS;
+		int rfZ0 = p.m_iPz * PCELLS;
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
@@ -5728,12 +5833,26 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					p.m_aShow[v] = d;
 				}
+				float rfD = d;     // groove reveal input: a field rut shows soil only from FIELD_SOIL_D deep (as v097)
+				if (rfOn)
+				{
+					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz) - p.m_aBase[v];
+					if (rfF < 0)
+						rfF = rfF * p.m_aLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+					if (rfF < d)
+					{
+						d = rfF;
+						float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
+						if (rfS < rfD)
+							rfD = rfS;
+					}
+				}
 				float h = p.m_aBase[v] + d;
 				// groove reveal (MUD_GroundEntity.c:1440-1448)
 				if (m_bGroove)
 				{
 					m_Buf.m_aUnder[v] = Vector(vx * m_fFine, h - m_fRevealGap, vz * m_fFine);
-					float t = Math.Clamp((-d - m_fRevealDepth) / Math.Max(m_fRevealBlend, 0.01), 0, 1);
+					float t = Math.Clamp((-rfD - m_fRevealDepth) / Math.Max(m_fRevealBlend, 0.01), 0, 1);
 					h -= t * t * (3 - 2 * t) * m_fRevealGap * 3;
 				}
 				m_Buf.m_aVerts[v] = Vector(vx * m_fFine, h, vz * m_fFine);
@@ -5827,6 +5946,9 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_IdxSet ix = IdxSet(p);
 		// wheel hold (P1a): a vert under a wheel keeps the height the live body has
 		bool hold = m_fWheelHold > 0 && p.m_bColValid && p.m_Phys != null;
+		bool rfOn = RutFieldOn(p);     // RUT FIELD: y = base + min(smooth, floor - base), the floor not blurred
+		int rfX0 = p.m_iPx * PCELLS;
+		int rfZ0 = p.m_iPz * PCELLS;
 		bool hadBody = p.m_bColValid && p.m_Phys != null;   // TEMP probe 2026-10-11
 		bool moved;
 		int held;
@@ -5836,6 +5958,14 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				int v = vz * PVERTS + vx;
 				float y = p.m_aBase[v] + p.m_aSmooth[v];
+				if (rfOn)
+				{
+					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz);
+					if (rfF < p.m_aBase[v])
+						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aLock[v];     // edge lock, as the mesh
+					if (rfF < y)
+						y = rfF;
+				}
 				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.m_aRutTouch[v], p.m_aBermTouch[v]) < m_fWheelHold)
 				{
 					y = p.m_aColH[v];
@@ -5955,6 +6085,22 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Shared band build: m_Band.m_aSkin is what FillBandOn(p) would write now
+	protected bool SameBandOn(MUD_FinePatch p)
+	{
+		for (int c = 0; c < SKIN * SKIN; c++)
+		{
+			int cell = p.m_aCell[c];
+			int slot = -1;
+			if (cell >= 0 && (cell & VOX) == 0)
+				slot = cell & SLOT;
+			if (m_Band.m_aSkin[c] != slot)
+				return false;
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Layered-SDF test: per-build counts of the mesher for the 'MUD band' stats line
 	protected void BandCount()
 	{
@@ -5983,6 +6129,12 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (!m_Band)
 			m_Band = new MUD_BandMesher();
 		bool hideOwed = false;
+		int csIn = System.GetTickCount();
+		// RUT FIELD: the rut floor goes into the mesher INPUTS (d = min(m_aH, floor - base)), never into m_aH;
+		// the groove reveal then works for field ruts too. m_aShow keeps the m_aH value (no floor): ahead-rut hold.
+		bool rfOn = RutFieldOn(p);
+		int rfX0 = p.m_iPx * PCELLS;
+		int rfZ0 = p.m_iPz * PCELLS;
 		for (int v = 0; v < PVERTS * PVERTS; v++)
 		{
 			float d = p.m_aH[v];
@@ -5992,21 +6144,41 @@ class MUD_WorldGroundEntity : GenericEntity
 					hideOwed = true;
 				d = p.m_aShow[v];
 			}
-			m_Band.m_aD[v] = d;
+			p.m_aShow[v] = d;      // = BuildMesh: a hidden vertex keeps its m_aShow, the rest show m_aH
+			float rfD = d;         // groove reveal input (m_aD): a field rut shows soil only from FIELD_SOIL_D deep
+			if (rfOn)
+			{
+				int rfVx = v % PVERTS;
+				int rfVz = v / PVERTS;
+				float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + rfVx, rfZ0 + rfVz) - p.m_aBase[v];
+				if (rfF < 0)
+					rfF = rfF * p.m_aLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+				if (rfF < d)
+				{
+					d = rfF;
+					float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
+					if (rfS < rfD)
+						rfD = rfS;
+				}
+			}
+			m_Band.m_aD[v] = rfD;
 			m_Band.m_aY[v] = p.m_aBase[v] + d;
 		}
 		FillBandOn(p);
+		m_iCsMeshIn += System.GetTickCount(csIn);
 		int tc = System.GetTickCount();
+		m_iShareKey = -1;
 		bool ok = m_Band.Build(m_fFine, m_fBandSkirt);
 		m_iBandCoreMs += System.GetTickCount(tc);
+		m_iCsMeshCore += System.GetTickCount(tc);
+		int csUv = System.GetTickCount();
 		if (!ok)
 		{
 			if (m_Band.m_bOverflow)
 				m_iBandFallback++;     // else: no on cell (all kept terrain) - the grid collapses it the same way
 			return false;
 		}
-		for (int vs = 0; vs < PVERTS * PVERTS; vs++)
-			p.m_aShow[vs] = m_Band.m_aD[vs];      // = BuildMesh: a hidden vertex keeps its m_aShow, the rest show m_aH
+		m_iShareKey = p.m_iKey;
 
 		int chunkPatches = MUD_CoarseSkinEntity.CELLS / SKIN;     // 8 patches per skin chunk side
 		int ux = (p.m_iPx - (p.m_iPx / chunkPatches) * chunkPatches) * PCELLS;
@@ -6026,6 +6198,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		for (int i = 0; i < nAll; i++)
 		{
 			vector q = m_Band.m_Vb.m_aV[i];
+			m_Band.m_Show.m_aV[i] = q;
 			float qx = q[0] * invFine;
 			float qz = q[2] * invFine;
 			int i2 = i * 2;
@@ -6043,13 +6216,15 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					if (t > 1)
 						t = 1;
-					m_Band.m_Vb.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
+					m_Band.m_Show.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
 				}
 			}
 			m_Band.m_Uv.m_aTop[i2] = (ux + qx) * invDiv;
 			m_Band.m_Uv.m_aTop[i2 + 1] = 1 - (uz + qz) * invDiv;
 		}
 
+		m_iCsMeshUv += System.GetTickCount(csUv);
+		int csRes = System.GetTickCount();
 		int ni = m_Band.m_iI;
 		int niAll = ni + m_Band.m_iSkirtI;
 		Resource res;
@@ -6084,7 +6259,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		MeshObject mesh = res.GetResource().ToMeshObject();
 		// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 		mesh.UpdateIndices(0, m_Band.m_Ib.m_aI);
-		mesh.UpdateVerts(0, m_Band.m_Vb.m_aV, m_Band.m_Uv.m_aTop);
+		mesh.UpdateVerts(0, m_Band.m_Show.m_aV, m_Band.m_Uv.m_aTop);
 		if (m_bGroove)
 		{
 			mesh.UpdateIndices(1, m_Band.m_Ib.m_aI);       // its first ni: the surface without skirts
@@ -6092,6 +6267,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		}
 		p.m_Ent.SetObject(mesh, "");
 		p.m_Ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
+		m_iCsMeshRes += System.GetTickCount(csRes);
 		p.m_MeshRes = res;
 		p.m_bMeshDirty = hideOwed;     // ahead ruts: rebuild again (Mesh Interval) until every hidden change shows
 		m_iMeshBuilds++;
@@ -6115,16 +6291,31 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (!m_Band)
 			m_Band = new MUD_BandMesher();
 		MUD_IdxSet ix = IdxSet(p);     // plate
+		int csIn = System.GetTickCount();
 		bool hold = m_fWheelHold > 0 && p.m_bColValid && p.m_Phys != null;
+		bool rfOn = RutFieldOn(p);     // RUT FIELD: y = base + min(smooth, floor - base), the floor not blurred
+		int rfX0 = p.m_iPx * PCELLS;
+		int rfZ0 = p.m_iPz * PCELLS;
 		bool hadBody = p.m_bColValid && p.m_Phys != null;
 		bool moved = false;
 		int held = 0;
+		// no same-frame rule: the frame budget puts the collider a frame after its mesh (log 23:21, shared 0); any
+		// other build clears m_iShareKey, and the inputs + slots are compared below
+		bool share = m_iShareKey == p.m_iKey;
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
 			{
 				int v = vz * PVERTS + vx;
 				float y = p.m_aBase[v] + p.m_aSmooth[v];
+				if (rfOn)
+				{
+					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz);
+					if (rfF < p.m_aBase[v])
+						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aLock[v];     // edge lock, as the mesh
+					if (rfF < y)
+						y = rfF;
+				}
 				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.m_aRutTouch[v], p.m_aBermTouch[v]) < m_fWheelHold)
 				{
 					y = p.m_aColH[v];
@@ -6132,15 +6323,32 @@ class MUD_WorldGroundEntity : GenericEntity
 				}
 				if (hadBody && Math.AbsFloat(y - p.m_aColH[v]) > 0.001)
 					moved = true;
+				if (share && m_Band.m_aY[v] != y)
+					share = false;
 				m_Band.m_aY[v] = y;
-				m_Band.m_aD[v] = 0;
+				m_Band.m_aD[v] = 0;     // the reveal input: no effect on the surface the collider takes
 				m_Buf.m_aPlate[v] = Vector(vx * m_fFine, p.m_aBase[v] + p.m_aFloor[v] - m_fPlateGap, vz * m_fFine);
 			}
 		}
-		FillBandOn(p);
+		if (share)
+			share = SameBandOn(p);     // BreakHard (BeforeCollider) may have changed a cell's slot since the mesh
+		if (!share)
+			FillBandOn(p);
+		m_iCsColIn += System.GetTickCount(csIn);
 		int tc = System.GetTickCount();
-		bool ok = m_Band.Build(m_fFine, 0);
-		m_iBandCoreMs += System.GetTickCount(tc);
+		bool ok = true;
+		if (share)
+		{
+			m_iBandShared++;     // the mesh's skirt verts / tris sit after m_iV / m_iI: the collider never reads them
+		}
+		else
+		{
+			m_iShareKey = -1;
+			ok = m_Band.Build(m_fFine, 0);
+			m_iBandCoreMs += System.GetTickCount(tc);
+		}
+		m_iShareKey = -1;
+		m_iCsColCore += System.GetTickCount(tc);
 		if (!ok)
 		{
 			if (m_Band.m_bOverflow)
@@ -6150,6 +6358,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		for (int vc = 0; vc < PVERTS * PVERTS; vc++)
 			p.m_aColH[vc] = m_Band.m_aY[vc];
 
+		int csGeom = System.GetTickCount();
 		int nv = m_Band.m_iV;
 		int ni = m_Band.m_iI;
 		array<PhysicsGeom> geoms = {};
@@ -6212,16 +6421,20 @@ class MUD_WorldGroundEntity : GenericEntity
 			}
 		}
 
+		m_iCsColGeom += System.GetTickCount(csGeom);
+		m_iCsColGeoms += geoms.Count();
 		// from here as BuildCollider
 		int td = System.GetTickCount();
 		DropBody(p);
 		m_iLastDropMs = System.GetTickCount(td);
+		m_iCsColDrop += m_iLastDropMs;
 		m_iLastStaticMs = 0;
 		if (!geoms.IsEmpty())
 		{
 			int tsx = System.GetTickCount();
 			p.m_Phys = MakeStatic(p.m_Ent, geoms, mats, layers);
 			m_iLastStaticMs = System.GetTickCount(tsx);
+			m_iCsColStatic += m_iLastStaticMs;
 			if (geoms.Count() > m_iMaxGeoms)
 				m_iMaxGeoms = geoms.Count();
 			if (p.m_Phys)
@@ -6283,12 +6496,28 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_bBandMesher, m_iBandMeshN, meshMean, m_iBandMeshWorst, m_iBandColN, colMean, m_iBandColWorst, m_iBandCoreMs));
 			Print(string.Format("MUD band: per build - cells mean %1 max %2, tris mean %3 max %4 (grid 2048), verts mean %5 (grid 1089), skirt tris mean %6 | degen %7, missing %8, overflowed (grid built) %9",
 				m_iBandCells / b, m_iBandCellsMax, m_iBandTris / b, m_iBandTrisMax, m_iBandVerts / b, m_iBandSkirtTris / Math.Max(m_iBandMeshN, 1.0), m_iBandDegen, m_iBandMissing, m_iBandFallback));
+			Print(string.Format("MUD band: mesh split ms - input %1, mesher %2, reveal + uv %3, mesh object %4, rest %5 (of %6)",
+				m_iCsMeshIn, m_iCsMeshCore, m_iCsMeshUv, m_iCsMeshRes, m_iBandMeshMs - m_iCsMeshIn - m_iCsMeshCore - m_iCsMeshUv - m_iCsMeshRes, m_iBandMeshMs));
+			Print(string.Format("MUD band: collider split ms - input %1, mesher %2, trimeshes %3 (%4 geoms), drop %5, static %6, rest %7 (of %8) | shared %9",
+				m_iCsColIn, m_iCsColCore, m_iCsColGeom, m_iCsColGeoms, m_iCsColDrop, m_iCsColStatic,
+				m_iBandColMs - m_iCsColIn - m_iCsColCore - m_iCsColGeom - m_iCsColDrop - m_iCsColStatic, m_iBandColMs, m_iBandShared));
 			Print(string.Format("MUD band: grid path - mesh %1 builds, mean %2 ms, worst %3 | collider %4, mean %5 ms, worst %6 | band fast verts mean %7, fast quads mean %8",
 				m_iGridMeshN, gMeshMean, m_iGridMeshWorst, m_iGridColN, gColMean, m_iGridColWorst, m_iBandFastV / b, m_iBandFastQ / b));
 		}
 		m_iBandMeshN = 0;
 		m_iBandMeshMs = 0;
 		m_iBandMeshWorst = 0;
+		m_iCsMeshIn = 0;
+		m_iCsMeshCore = 0;
+		m_iCsMeshUv = 0;
+		m_iCsMeshRes = 0;
+		m_iCsColIn = 0;
+		m_iCsColCore = 0;
+		m_iCsColGeom = 0;
+		m_iCsColDrop = 0;
+		m_iCsColStatic = 0;
+		m_iCsColGeoms = 0;
+		m_iBandShared = 0;
 		m_iBandColN = 0;
 		m_iBandColMs = 0;
 		m_iBandColWorst = 0;

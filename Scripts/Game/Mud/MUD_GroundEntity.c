@@ -380,6 +380,8 @@ class MUD_GroundEntity : GenericEntity
 		MUD_CoarseSkinEntity.SetTraceHidden(hide);
 		// mud sheet colliders (2026-10-15: get in / out blocked on the mud; the native check ignores layers)
 		MUD_MudSheet.SetTraceHidden(hide);
+		// voxel bricks (2026-10-15: can't get in / out in a rut, they were never hidden)
+		MUD_VoxelProbe.SetTraceHidden(hide);
 	}
 
 	//------------------------------------------------------------------------------------------------

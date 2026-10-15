@@ -22,7 +22,7 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 | 1 | Recompile + SP smoke test after the archive | 2026-10-15 cleanup removed probe calls (CODE). Must compile clean |
 | 2 | Mud-zone run with voxel ruts (SP): sheet cost + does the sheet clear mud along voxel ruts? | Wipe risk NOT real: rut ops (kind 4) never call GroundChanged (CODE 2026-10-15). Check instead: does the sheet float over a deep voxel rut (slow re-trace)? |
 | 3 | MP run: DS or WB host + 1 peer, drive through a mud zone, dig, crater | Sheet is client-only: check each client draws its own marks, no errors, no snaps. Last MP numbers are from v035 (no sheet) |
-| 4 | JIP: join mid-match after ruts + craters + trench | Step A numbers (docs/superpowers/results/2026-10-14-jip-size.md) are pre-sheet; papers plan Step D only if joins hitch |
+| 4 | JIP: join mid-match after ruts + craters + trench (+ rut field Stage 5 JIP: joiner disp hash / columns / op count, docs/features/ruts/README.md) | Step A numbers (docs/superpowers/results/2026-10-14-jip-size.md) are pre-sheet; papers plan Step D only if joins hitch |
 | 5 | Sheet loose ends: collider-only rebuild for held tiles (CollPending double rebuild), UV stretch (DRAG_MAX 0.6 vs 0.15 cells, UV clamp at 12 m edges, steep sides) | remember.md LATER list |
 | 6 | F2 stress test: 5-10 vehicles, shelling, DS + 2 peers | Every number today is one vehicle |
 
@@ -50,7 +50,7 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 ## Parked ideas (not now - add here, don't start)
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel
   mesh down - as sharp as 0.25 m voxels without the 3D cost, one mesh = look = feel. Plus cheap probes MatTerrainObject /
-  GlobalLayer on voxel tops. docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md; build plan docs/superpowers/plans/2026-10-15-displaced-ruts-plan.md
+  GlobalLayer on voxel tops. docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md
 - FIRST IN LINE: solid ruts in mud zones - voxel rut profile with raised side ridges + zone-tuned step/cap
   (ideas A+B, MP-safe, no new op). docs/superpowers/research/2026-10-15-raised-ruts-ideas.md
 - MudRunner-style mud feel: sinking that gets deeper and more slippery with each pass, belly drag, topsoil break.

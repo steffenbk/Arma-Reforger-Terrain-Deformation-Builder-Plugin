@@ -66,6 +66,7 @@ class MUD_BandMesher
 	ref MUD_BandTriSlot m_Slot = new MUD_BandTriSlot();
 	ref MUD_BandIdx m_Scratch = new MUD_BandIdx();      // collider: one slot's tris / the reversed slab
 	ref MUD_BandVerts m_Aux = new MUD_BandVerts();      // groove under-layer (mesh) or slab (collider)
+	ref MUD_BandVerts m_Show = new MUD_BandVerts();     // mesh: m_Vb after the groove sink (m_Vb stays as built: shared build)
 	ref MUD_BandUVs m_Uv = new MUD_BandUVs();
 	int m_iV;               // surface verts
 	int m_iVAll;            // + skirt verts

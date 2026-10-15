@@ -139,6 +139,15 @@ class MUD_VoxelColumn
 	ref map<int, ref MUD_VoxelBrick> m_mRows = new map<int, ref MUD_VoxelBrick>();
 }
 
+//! RUT FIELD Stage 1 (plan docs/superpowers/plans/2026-10-15-rut-field-plan.md): the rut floor of one 4 x 4 m tile
+//! (same key as its voxel column, ColKey), on its own - a tile can exist without a column. Made at its first floor
+//! write (MUD_VoxelProbe.RutTileMake fills it with FLOOR_NONE: a fresh float array reads 0 = a floor at y 0).
+class MUD_RutTile
+{
+	static const int SIZE_F = 256;  // = MUD_VoxelProbe.FSUB^2 (SizesOk checks)
+	float m_aFloor[SIZE_F];         // rut floor (world y) per floor sample fk_local * FSUB + fi_local, FLOOR_NONE = none
+}
+
 class MUD_VoxelOp
 {
 	int m_iSeq;                         // server order, 1 = first (MP: clients apply in this order)
@@ -254,6 +263,42 @@ class MUD_VoxelProbe
 	static const int CN = SUB + 1;      // cell cache side: the brick's cells + one ring below
 	static const int CN2 = CN * CN;
 	static const int CN3 = CN2 * CN;
+	// DISPLACED RUTS (plan docs/superpowers/plans/2026-10-15-displaced-ruts-plan.md, checkpoint v086 = before): op 4
+	// writes a 2D rut floor (FCELL grid, world y, CarveFloor) instead of the 3D samples; a brick the floor reaches is
+	// split 2 x 2 and its vertices pulled down to it (Displace). false = the v035 voxel ruts (CarveRut), exactly.
+	static const bool DISPLACE_RUTS = true;     // Stage C / plan Step 4 (user 2026-10-15); false = v035 ruts exactly (checkpoint v089)
+	static const float FCELL = 0.25;            // floor sample spacing = CELL / 2 (SizesOk checks)
+	static const int FSUB = SUB * 2;            // floor samples per column side
+	static const float FLOOR_NONE = 1000000;    // no rut floor at this sample
+	// RUT FIELD (plan docs/superpowers/plans/2026-10-15-rut-field-plan.md, checkpoint v098 = before): ruts stop
+	// converting voxel columns, the floor lives in its own tile map (m_mRutTiles) and the heightfield patches draw it.
+	// Needs DISPLACE_RUTS. false = v097 (Stage 1: the tile map is filled exactly where v097 filled the columns).
+	static const bool RUT_FIELD = true;    // Stage 2 on (user 2026-10-15); false = v097 (checkpoint v098)
+	static const float DISP_GUARD = 1.0;        // pull only vertices less than this above the floor (tunnel roofs stay)
+	static const float DISP_EPS = 0.001;
+	static const float DISP_SOIL_CUT = 0.05; // a top tri this far (m) under the seeded ground is groove: soil (DispEmit)
+	static const int DISP_PAD = 3;              // Displace floor grid: the brick's floor samples + this many each side
+	static const int DISP_N = FSUB + DISP_PAD * 2;
+	static const int DISP_N2 = DISP_N * DISP_N;
+	// DISPLACED RUTS debug (Stage B): diag menu GameCode > Mud > Displaced ruts (diag builds only: Workbench, Diag exe),
+	// every switch off by default. A dedicated server has no menu: the *_ALWAYS consts turn its log / hash on.
+	static const bool DISP_LOG_ALWAYS = false;
+	static const bool DISP_HASH_ALWAYS = false;
+	static const int DSW_LOG = 0;               // DispOn switch numbers (= menu id - SCR_DebugMenuID.MUD_DISP_LOG)
+	static const int DSW_FLOOR = 1;
+	static const int DSW_BRICKS = 2;
+	static const int DSW_HOLE = 3;
+	static const int DSW_HASH = 4;
+	static const int DISP_LOG_EVERY_S = 10;     // 'MUD disp:' summary line period (only when something happened)
+	static const float DISP_FLOOR_DRAW_R = 12;  // draw floor: samples this far round the controlled entity
+	static const int DISP_FLOOR_MAX = 4000;     // ... at most this many
+	static const float DISP_BRICK_DRAW_R = 30;  // draw bricks: overflow / fold bricks this far round it
+	static const int DISP_MARK_MS = 5000;       // brick / hole marks stay this long
+	static const int DISP_MARK_MAX = 300;
+	static const int DISP_HOLE_EVERY_MS = 500;  // hole check (and draw floor refresh) period
+	static const float DISP_HOLE_TOL = 0.25;    // hit this far off the expected top = hole (v035 ruts baseline 2026-10-15: 0.10 .. 0.16, docs/superpowers/results/2026-10-15-disp-hole-baseline.md)
+	static const int DISP_HOLE_MAX_LOG = 5;     // HOLE lines per check
+	static const int DISP_HASH_M = 1000003;
 	static const float LIFT = 0.02;     // seeded surface above our ground
 	static const int GRAVE_MS = 1000;   // a dropped brick entity is deleted this long after (MUD_VoxelGrave)
 	static const float FLOOR = 3;       // nothing digs deeper than this under the undug ground
@@ -308,6 +353,7 @@ class MUD_VoxelProbe
 	static const ResourceName GAMEMAT = "{C3691F2D8FE0234F}Common/Materials/Game/dirt.gamemat";
 
 	protected static ref MUD_VoxelProbe s_Inst;
+	protected static bool s_bTraceHidden;  // MUD_GroundEntity.HideFromTraces: bricks off traces (get in / out)
 	protected static bool s_bDigHeld;
 	protected static int s_iDigAt;
 	// MP client: ops by seq until they can go in order (held before s_Inst exists too)
@@ -319,6 +365,8 @@ class MUD_VoxelProbe
 	protected static ref array<ref MUD_VoxelRutTrack> s_aTracks = {};
 
 	protected ref map<int, ref MUD_VoxelColumn> m_mCols = new map<int, ref MUD_VoxelColumn>();
+	// RUT FIELD: rut floor tiles (ColKey), only where a floor sample was ever written
+	protected ref map<int, ref MUD_RutTile> m_mRutTiles = new map<int, ref MUD_RutTile>();
 	// DIG NOW (2026-10-15): surface height per sample column, read from the field (no traces); cleared every go-live
 	protected ref map<int, float> m_mSurf = new map<int, float>();
 	protected ref array<ref MUD_VoxelOp> m_aOps = {};    // every op, in seq order (JIP)
@@ -370,6 +418,16 @@ class MUD_VoxelProbe
 	protected int m_iSmoothMs;
 	protected int m_iRutI0;             // CarveRut: key origin (sample column of the op's first segment)
 	protected int m_iRutK0;
+	protected int m_iFloorI0;           // CarveFloor: key origin (floor sample of the op's first segment)
+	protected int m_iFloorK0;
+	protected int m_iOpKind = -1;       // Submit: kind of the op being applied (Put reads it)
+	protected ref array<int> m_aClrI = {};  // DISPLACE_RUTS: sample columns this op's Put moved (ClearFloor)
+	protected ref array<int> m_aClrK = {};
+	protected float m_aDispF[DISP_N2];  // Displace: floor samples round the brick being built
+	protected float m_aDispY[MAX_V];    // Displace: each vertex's y before the pull (fold check)
+	protected ref MUD_VoxelIdx m_IbDispTop;     // Displace: the coarse index lists while the split ones are written
+	protected ref MUD_VoxelIdx m_IbDispDirt;    // (made on first use)
+	protected ref map<int, int> m_mDispSoil = new map<int, int>();  // Displace: soil-UV copy of a vertex, key v * 4 + kind - 1
 	protected vector m_vBOrg;           // its world corner
 	protected int m_iStamp;
 	protected int m_iV;
@@ -413,6 +471,48 @@ class MUD_VoxelProbe
 	protected int m_iScanChecks;        // TEMP: Polygonize calls (SCAN_CHECK_EVERY), checks run, mismatches
 	protected int m_iScanChecked;
 	protected int m_iScanBad;
+	protected int m_iBatchSplit;        // DISPLACE_RUTS: bricks split, verts they added, wall tris dropped as folded,
+	protected int m_iBatchSplitV;       // bricks too big to split (coarse pull only)
+	protected int m_iBatchFold;
+	protected int m_iBatchDispOvf;
+	protected int m_iBatchSoil;        // grass tris the pull made steep: drawn as soil (user 2026-10-15: soil rut walls)
+	// DISPLACED RUTS debug (Stage B): counts since the last 'MUD disp:' line (DispTick), this op's hash (DispOpDone)
+	protected int m_iDispT0;
+	protected int m_iDispOps;
+	protected int m_iDispWritten;
+	protected int m_iDispCleared;
+	protected int m_iDispCarved;
+	protected int m_iDispSplit;
+	protected int m_iDispSplitV;
+	protected int m_iDispFold;
+	protected int m_iDispOvf;
+	protected int m_iDispBorder;        // pulled vertices within 0.5 m of a brick side
+	protected int m_iDispMs;
+	protected int m_iDispWorst;
+	protected int m_iDispHoles;
+	protected int m_iDispChecks;
+	protected int m_iDispHash;
+	protected int m_iDispOpW;           // this op: floor samples written, cleared
+	protected int m_iFieldDirty;        // RUT FIELD: this op's heightfield patches marked dirty (Stage 3)
+	protected bool m_bFChg;             // RUT FIELD: this op changed a floor sample; box m_iFi0..1 x m_iFk0..1
+	protected int m_iFi0;
+	protected int m_iFi1;
+	protected int m_iFk0;
+	protected int m_iFk1;
+	protected int m_iDispOpC;
+	protected int m_iDispHoleT;
+	protected int m_iDispFloorT;
+	protected ref array<vector> m_aDispFloorP = {};     // draw floor: sample points and colours (refreshed every 0.5 s)
+	protected ref array<int> m_aDispFloorC = {};
+	protected ref array<vector> m_aDispMarkLo = {};     // draw bricks: brick corner, colour, until (ms)
+	protected ref array<int> m_aDispMarkC = {};
+	protected ref array<int> m_aDispMarkUntil = {};
+	protected ref array<vector> m_aDispHolePos = {};    // hole check: marks, until (ms)
+	protected ref array<int> m_aDispHoleUntil = {};
+	protected ref TraceParam m_DispTrace;
+#ifdef ENABLE_DIAG
+	protected static bool s_bDispMenu;
+#endif
 
 	// budgets of this frame (JOIN_MS while a client joins)
 	protected int m_iUrgent = URGENT_MS;
@@ -497,6 +597,7 @@ class MUD_VoxelProbe
 		}
 		s_Inst.Graves();
 		s_Inst.Step();
+		s_Inst.DispTick();
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -676,7 +777,7 @@ class MUD_VoxelProbe
 			t.m_aSegA.Insert(last);
 			t.m_aSegB.Insert(cp);
 		}
-		if (RUT_LOOK)
+		if (LookRuts())
 		{
 			// the segment before this one shows now: it ends >= RUT_STEP behind the tyre, so the tyre hides where the
 			// look rut starts (the newest one would show under it while the wheel still rides the feel ground)
@@ -710,7 +811,7 @@ class MUD_VoxelProbe
 			sent = true;
 		}
 		// RUT_LOOK: the look op before the feel one (a feel cut then never lands before its look)
-		if (RUT_LOOK && !t.m_aLookA.IsEmpty())
+		if (LookRuts() && !t.m_aLookA.IsEmpty())
 		{
 			s_Inst.DoRutOp(t, t.m_aLookA, t.m_aLookB, 6);
 			sent = true;
@@ -997,9 +1098,29 @@ class MUD_VoxelProbe
 			Print(string.Format("MUD voxel probe: skin cell %1 m - bricks need 2 m cells, off", m_fCell), LogLevel.ERROR);
 			return false;
 		}
+		// RUT FIELD (plan 'facts'): floor sample fi, fk must be fine patch vertex gx, gz (same origin, same spacing)
+		if (RUT_FIELD)
+		{
+			float pgx0;
+			float pgz0;
+			float psize = MUD_WorldGroundEntity.ProbePatchGrid(pgx0, pgz0);
+			float pfine = psize / MUD_WorldGroundEntity.PCELLS;
+			bool same = Math.AbsFloat(pfine - FCELL) < 0.0001 && Math.AbsFloat(pgx0 - m_fX0) < 0.001 && Math.AbsFloat(pgz0 - m_fZ0) < 0.001;
+			LogLevel sameLvl = LogLevel.NORMAL;
+			if (!same)
+				sameLvl = LogLevel.ERROR;
+			Print(string.Format("MUD rut field: floor grid on the patch vertices %1 (patch fine %2 m, floor %3 m, origin %4 %5 / %6 %7)",
+				same, pfine, FCELL, pgx0, pgz0, m_fX0, m_fZ0), sameLvl);
+		}
 		if (!SizesOk())
 			return false;
+		if (DISPLACE_RUTS && RUT_LOOK)
+			Print("MUD voxel probe: DISPLACE_RUTS and RUT_LOOK both on - LookRuts() keeps the look rut off; turn RUT_LOOK off", LogLevel.ERROR);
 		m_bHeadless = RplSession.Mode() == RplMode.Dedicated;    // as MUD_CoarseSkin m_bRender
+		m_iDispT0 = System.GetTickCount();
+#ifdef ENABLE_DIAG
+		DispMenu();
+#endif
 		// x edges, y edges, z edges of a cube (corner bit 1 = +x, 2 = +y, 4 = +z)
 		int ea[] = {0, 2, 4, 6, 0, 1, 4, 5, 0, 1, 2, 3};
 		int eb[] = {1, 3, 5, 7, 2, 3, 6, 7, 4, 5, 6, 7};
@@ -1028,6 +1149,9 @@ class MUD_VoxelProbe
 		ok = ok && MUD_VoxelVerts.SIZE_V == MAX_V && MUD_VoxelIdx.SIZE_I == MAX_I && MUD_VoxelSlots.SIZE_C == CN3;
 		ok = ok && MUD_VoxelGather.SIZE_G == GN3 && MUD_VoxelGather.SIZE_T == GN2 && MUD_VoxelGather.SIZE_C == CN3;
 		ok = ok && MUD_VoxelBrick.SIZE_D == SUB3 && MUD_VoxelColumn.SIZE_N == SUB2;
+		ok = ok && MUD_RutTile.SIZE_F == FSUB * FSUB;
+		if (DISPLACE_RUTS)
+			ok = ok && Math.AbsFloat(FCELL * 2 - CELL) < 0.001;
 		if (!ok)
 		{
 			Print(string.Format("MUD voxel probe: SIZE SWITCH mixed (SUB %1 CELL %2, brick %3 column %4 verts %5) - run Tools/voxel_size.py, off",
@@ -1062,6 +1186,7 @@ class MUD_VoxelProbe
 			col.m_mRows.Clear();
 		}
 		m_mCols.Clear();
+		m_mRutTiles.Clear();
 		m_aOps.Clear();
 		m_aQueue.Clear();
 		m_aShow.Clear();
@@ -1354,6 +1479,12 @@ class MUD_VoxelProbe
 			m_iMarkGi = gi;
 			m_iMarkGk = gk;
 			MarkCarved(gi, gk);
+			// DISPLACED RUTS: crater / trench / fill moved the ground here - its rut floor goes (ClearFloor)
+			if (DISPLACE_RUTS && (m_iOpKind == 0 || m_iOpKind == 2 || m_iOpKind == 3))
+			{
+				m_aClrI.Insert(gi);
+				m_aClrK.Insert(gk);
+			}
 		}
 		MarkBox(gi, gj, gk);
 	}
@@ -1504,9 +1635,16 @@ class MUD_VoxelProbe
 	//! patch collider kept)
 	static bool IsLookCell(int cx, int cz)
 	{
-		if (!s_Inst || !RUT_LOOK)
+		if (!s_Inst || !LookRuts())
 			return false;
 		return s_Inst.LookCarved(cx, cz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT_LOOK code paths run: never with DISPLACE_RUTS (op 6 would draw the soft voxel rut over the floor)
+	static bool LookRuts()
+	{
+		return RUT_LOOK && !DISPLACE_RUTS;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1765,34 +1903,39 @@ class MUD_VoxelProbe
 			Print(string.Format("MUD voxel probe: op kind %1 did not round-trip or its plan does not build - dropped", src.m_iKind), LogLevel.ERROR);
 			return false;
 		}
-		array<int> keys = {};
-		ConvCols(op.m_vLo, op.m_vHi, keys);
-		if (keys.Count() > MAX_OP_COLUMNS)
-		{
-			Refused(op, string.Format("box needs %1 columns > %2", keys.Count(), MAX_OP_COLUMNS));
-			return false;
-		}
-		array<int> fresh = {};
-		foreach (int key : keys)
-		{
-			if (!m_mCols.Contains(key))
-				fresh.Insert(key);
-		}
-		if (m_mCols.Count() + fresh.Count() > MAX_COLUMNS)
-		{
-			Refused(op, string.Format("column cap %1 reached (%2 + %3 new)", MAX_COLUMNS, m_mCols.Count(), fresh.Count()));
-			return false;
-		}
+		// RUT FIELD: a rut op converts no column (the floor field takes it): no box / cap / seed check, empty seed.
+		// Still numbered, sent and logged (JIP replays it in order).
 		string seed;
-		if (!MakeSeed(fresh, seed))
+		if (!RUT_FIELD || op.m_iKind != 4)
 		{
-			Refused(op, "no ground height under a new column");
-			return false;
-		}
-		if (seed.Length() > SEED_CHARS)
-		{
-			Refused(op, string.Format("seed %1 chars > %2 for %3 new columns", seed.Length(), SEED_CHARS, fresh.Count()));
-			return false;
+			array<int> keys = {};
+			ConvCols(op.m_vLo, op.m_vHi, keys);
+			if (keys.Count() > MAX_OP_COLUMNS)
+			{
+				Refused(op, string.Format("box needs %1 columns > %2", keys.Count(), MAX_OP_COLUMNS));
+				return false;
+			}
+			array<int> fresh = {};
+			foreach (int key : keys)
+			{
+				if (!m_mCols.Contains(key))
+					fresh.Insert(key);
+			}
+			if (m_mCols.Count() + fresh.Count() > MAX_COLUMNS)
+			{
+				Refused(op, string.Format("column cap %1 reached (%2 + %3 new)", MAX_COLUMNS, m_mCols.Count(), fresh.Count()));
+				return false;
+			}
+			if (!MakeSeed(fresh, seed))
+			{
+				Refused(op, "no ground height under a new column");
+				return false;
+			}
+			if (seed.Length() > SEED_CHARS)
+			{
+				Refused(op, string.Format("seed %1 chars > %2 for %3 new columns", seed.Length(), SEED_CHARS, fresh.Count()));
+				return false;
+			}
 		}
 		op.m_sSeed = seed;
 		string text = Encode(op);
@@ -2090,7 +2233,12 @@ class MUD_VoxelProbe
 	protected void ApplyOpKind(MUD_VoxelOp op)
 	{
 		if (op.m_iKind == 4)
-			CarveRut(op, false);
+		{
+			if (DISPLACE_RUTS)
+				CarveFloor(op);
+			else
+				CarveRut(op, false);
+		}
 		else if (op.m_iKind == 6)
 			CarveRut(op, true);
 		else if (op.m_iKind == 5)
@@ -2155,6 +2303,11 @@ class MUD_VoxelProbe
 			m_iBatchFullMs = 0;
 			m_iBatchBandMs = 0;
 			m_iBatchFirstSeq = op.m_iSeq;
+			m_iBatchSplit = 0;
+			m_iBatchSplitV = 0;
+			m_iBatchFold = 0;
+			m_iBatchDispOvf = 0;
+			m_iBatchSoil = 0;
 		}
 		m_iBatchOps++;
 		if (op.m_iKind <= 3)
@@ -2168,8 +2321,10 @@ class MUD_VoxelProbe
 			m_aMudR.Insert(mudR);
 		}
 		int made0 = m_iBatchMade;
+		int fieldCols0 = m_mCols.Count();
 		array<int> keys = {};
-		ConvCols(op.m_vLo, op.m_vHi, keys);
+		if (!RUT_FIELD || op.m_iKind != 4)
+			ConvCols(op.m_vLo, op.m_vHi, keys);     // RUT FIELD: a rut op converts nothing (Issue sent no seed)
 		array<int> fresh = {};
 		foreach (int key : keys)
 		{
@@ -2223,11 +2378,28 @@ class MUD_VoxelProbe
 		m_iMarkGk = -1000000;
 		m_aOpCarved.Clear();
 		m_aOpLook.Clear();
+		m_iOpKind = op.m_iKind;
+		m_aClrI.Clear();
+		m_aClrK.Clear();
+		m_iDispHash = 0;
+		m_iDispOpW = 0;
+		m_iDispOpC = 0;
+		m_iFieldDirty = 0;
+		m_bFChg = false;
 		ApplyOp(op);
+		int fieldW = m_iDispOpW;
 		m_iSmoothN = 0;
 		m_iSmoothMs = 0;
 		if (m_bChanged && SMOOTH_OPS && op.m_iKind >= 0 && op.m_iKind <= 4 && (SMOOTH_KINDS & (1 << op.m_iKind)) != 0)
 			SmoothBox();
+		ClearFloor();
+		// RUT FIELD Stage 3: the heightfield patches holding changed floor samples (+1 vertex) redraw - mesh + collider,
+		// never m_aH, never a net send (the op stream carries the floor)
+		if (RUT_FIELD && m_bFChg)
+			m_iFieldDirty = MUD_WorldGroundEntity.FloorDirty(m_iFi0 - 1, m_iFi1 + 1, m_iFk0 - 1, m_iFk1 + 1);
+		m_iOpKind = -1;
+		if (DISPLACE_RUTS)
+			DispOpDone(op);
 		if (m_bChanged)
 		{
 			m_bQueueLook = op.m_iKind == 6;
@@ -2333,6 +2505,9 @@ class MUD_VoxelProbe
 			+ string.Format(", %1 queued", queued)
 			+ string.Format(", %1 ms | %2 columns, %3 bricks in all", System.GetTickCount(t0), m_mCols.Count(), m_iBricks)
 			+ string.Format(" | smooth %1 samples %2 ms", m_iSmoothN, m_iSmoothMs), LogLevel.NORMAL);
+		if (RUT_FIELD && op.m_iKind == 4)
+			Print(string.Format("MUD rut field: %1 samples, %2 patches dirty, %3 new columns | %4 floor tiles, %5 columns in all",
+				fieldW, m_iFieldDirty, m_mCols.Count() - fieldCols0, m_mRutTiles.Count(), m_mCols.Count()), LogLevel.NORMAL);
 		return true;
 	}
 
@@ -2696,6 +2871,345 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS (op 4 when DISPLACE_RUTS): CarveRut's profile on the FCELL floor grid, written into the
+	//! columns' rut floor (m_aFloor = min) - no sample changes, no Put. Marks the cells carved where the floor goes
+	//! under the field (a rut on fresh ground must go voxel to draw) and the changed box (Submit's QueueBox rebuilds
+	//! the bricks there + 1 m, which covers the brick-line margin and the bricks above / below).
+	protected void CarveFloor(MUD_VoxelOp op)
+	{
+		int t0 = System.GetTickCount();
+		float r = RUT_R;
+		map<int, float> best = new map<int, float>();      // floor sample key -> strongest profile (fall)
+		map<int, float> atY = new map<int, float>();       // wheel height there
+		if (op.m_aSegA.IsEmpty())
+			return;
+		vector a0 = op.m_aSegA[0];
+		m_iFloorI0 = Math.Floor((a0[0] - m_fX0) / FCELL);
+		m_iFloorK0 = Math.Floor((a0[2] - m_fZ0) / FCELL);
+		for (int s = 0; s < op.m_aSegA.Count(); s++)
+		{
+			vector a = op.m_aSegA[s];
+			vector b = op.m_aSegB[s];
+			float abx = b[0] - a[0];
+			float abz = b[2] - a[2];
+			float len2 = abx * abx + abz * abz;
+			if (len2 < 0.000001)
+				continue;
+			int fi0 = Math.Floor((Math.Min(a[0], b[0]) - r - m_fX0) / FCELL);
+			int fi1 = Math.Ceil((Math.Max(a[0], b[0]) + r - m_fX0) / FCELL);
+			int fk0 = Math.Floor((Math.Min(a[2], b[2]) - r - m_fZ0) / FCELL);
+			int fk1 = Math.Ceil((Math.Max(a[2], b[2]) + r - m_fZ0) / FCELL);
+			for (int fk = fk0; fk <= fk1; fk++)
+			{
+				for (int fi = fi0; fi <= fi1; fi++)
+				{
+					float px = m_fX0 + fi * FCELL;
+					float pz = m_fZ0 + fk * FCELL;
+					// as CarveRut: u < 0 || u >= 1 skipped, never clamped (a sample on a joint is cut once)
+					float u = ((px - a[0]) * abx + (pz - a[2]) * abz) / len2;
+					if (u < 0 || u >= 1)
+						continue;
+					float qx = a[0] + abx * u - px;
+					float qz = a[2] + abz * u - pz;
+					float dist = Math.Sqrt(qx * qx + qz * qz);
+					if (dist >= r)
+						continue;
+					int ri = fi - m_iFloorI0 + RUT_KEY_OFF;
+					int rk = fk - m_iFloorK0 + RUT_KEY_OFF;
+					if (ri < 0 || ri >= RUT_KEY_OFF * 2 || rk < 0 || rk >= RUT_KEY_OFF * 2)
+						continue;   // over 256 m from the first segment: the keys would overlap
+					float k = dist / r;
+					// plan Step 4 Feel fix (user 2026-10-15: stuck in the rut): fall 0 at the rim, not 0.5 (CarveRut's
+					// half-depth step showed as a curb on the 0.25 m floor)
+					float fall = 1 - k * k;
+					int key = rk * RUT_KEY_W + ri;
+					float had = -1;
+					if (best.Contains(key))
+						had = best.Get(key);
+					if (fall <= had)
+						continue;
+					best.Set(key, fall);
+					atY.Set(key, a[1] + (b[1] - a[1]) * u);
+				}
+			}
+		}
+		int written = 0;
+		foreach (int ck, float cf : best)
+		{
+			int cfi = ck % RUT_KEY_W - RUT_KEY_OFF + m_iFloorI0;
+			int cfk = ck / RUT_KEY_W - RUT_KEY_OFF + m_iFloorK0;
+			// the nearest 0.5 m sample column: hard check, carved cells, changed box
+			int cgi = Math.Round(cfi * 0.5);
+			int cgk = Math.Round(cfk * 0.5);
+			MUD_VoxelColumn col = ColAt(cgi, cgk);
+			if (!col && !RUT_FIELD)
+				continue;
+			if (col)
+			{
+				if (col.m_aHard[(cgk - col.m_iBk * SUB) * SUB + cgi - col.m_iBi * SUB] != 0)
+					continue;
+			}
+			else if (Kept(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL) || Hard(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL))
+				continue;   // RUT FIELD, no column: Convert's hard rule (kept within 0.5 m OR hard), skin hole map = same
+				            // on every machine. Hard alone cut ruts up to the asphalt / concrete edge (user 2026-10-15)
+			int fbi = FloorDiv(cfi, FSUB);
+			int fbk = FloorDiv(cfk, FSUB);
+			MUD_VoxelColumn fcol = m_mCols.Get(ColKey(fbi, fbk));
+			if (!fcol && !RUT_FIELD)
+				continue;
+			MUD_RutTile ftile = m_mRutTiles.Get(ColKey(fbi, fbk));
+			float wheelY = atY.Get(ck);
+			float fieldY = 0;
+			float undug = 0;
+			bool vox = col != null && FieldSurfAt(cfi, cfk, wheelY, fieldY);
+			if (vox)
+				undug = UndugAt(cfi, cfk);
+			else
+			{
+				// RUT FIELD plain ground (no column, or one FieldSurfAt can't read): the undug ground, deterministic
+				// on every machine (not m_aH: it comes by net and can lag)
+				if (!RUT_FIELD)
+					continue;
+				if (!MUD_WorldGroundEntity.UndugY(m_fX0 + cfi * FCELL, m_fZ0 + cfk * FCELL, undug))
+					continue;
+				fieldY = undug;
+			}
+			int fn = (cfk - fbk * FSUB) * FSUB + cfi - fbi * FSUB;
+			float surf = fieldY;
+			if (ftile && ftile.m_aFloor[fn] < surf)
+				surf = ftile.m_aFloor[fn];    // the rut so far: else ruts never deepen
+			if (Math.AbsFloat(surf - wheelY) > RUT_ON)
+				continue;
+			float floorY = surf - op.m_fDepth * cf;
+			float capY = undug - op.m_fB * cf;
+			if (floorY < capY)
+				floorY = capY;
+			float deepY = undug - FLOOR;
+			if (floorY < deepY)
+				floorY = deepY;
+			if (floorY >= surf)
+				continue;   // already at its deepest
+			if (!ftile)
+				ftile = RutTileMake(fbi, fbk);
+			ftile.m_aFloor[fn] = floorY;    // under surf, so under the old floor too: the min
+			FloorChanged(cfi, cfk);
+			written++;
+			m_iDispOpW++;
+			int rv = Math.Round(floorY * 1000);
+			m_iDispHash = (m_iDispHash + (rv * (fn + 1) + ColKey(fbi, fbk)) % DISP_HASH_M) % DISP_HASH_M;
+			if (!RUT_FIELD && floorY < fieldY - CARVE_TOL)
+				MarkCarved(cgi, cgk);     // RUT FIELD: never - the heightfield draws plain ruts, bricks draw theirs
+			int gjLo = Math.Floor(floorY / CELL);
+			int gjHi = Math.Ceil(surf / CELL);
+			MarkBox(cgi, gjLo, cgk);
+			MarkBox(cgi, gjHi, cgk);
+		}
+		m_iDispCarved += m_aOpCarved.Count();
+		Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: rut floor (world y) at global floor sample fi, fk; FLOOR_NONE = none (or no tile)
+	protected float FloorSample(int fi, int fk)
+	{
+		int bi = FloorDiv(fi, FSUB);
+		int bk = FloorDiv(fk, FSUB);
+		MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+		if (!tile)
+			return FLOOR_NONE;
+		return tile.m_aFloor[(fk - bk * FSUB) * FSUB + fi - bi * FSUB];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: floor sample fi, fk changed in this op (grows the box Submit hands to FloorDirty)
+	protected void FloorChanged(int fi, int fk)
+	{
+		if (!m_bFChg)
+		{
+			m_bFChg = true;
+			m_iFi0 = fi;
+			m_iFi1 = fi;
+			m_iFk0 = fk;
+			m_iFk1 = fk;
+			return;
+		}
+		if (fi < m_iFi0)
+			m_iFi0 = fi;
+		if (fi > m_iFi1)
+			m_iFi1 = fi;
+		if (fk < m_iFk0)
+			m_iFk0 = fk;
+		if (fk > m_iFk1)
+			m_iFk1 = fk;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD (heightfield side): rut floor (world y) at global fine vertex gx, gz - the floor sample on the same
+	//! point (one grid, Ensure checks). FLOOR_NONE = none, or the field is off.
+	static float FieldFloor(int gx, int gz)
+	{
+		if (!RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return FLOOR_NONE;
+		return s_Inst.FloorSample(gx, gz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: rut floor at world x, z, bilinear (a corner without floor counts as ownY); FLOOR_NONE = none
+	static float FieldFloorAt(float x, float z, float ownY)
+	{
+		if (!RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return FLOOR_NONE;
+		return s_Inst.FloorAtW(x, z, ownY);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: a floor tile reaches global fine vertices [gx0..gx1] x [gz0..gz1] (a patch that must draw it)
+	static bool FieldInBox(int gx0, int gx1, int gz0, int gz1)
+	{
+		if (!RUT_FIELD || !DISPLACE_RUTS || !s_Inst || s_Inst.m_mRutTiles.IsEmpty())
+			return false;
+		int bi0 = FloorDiv(gx0, FSUB);
+		int bi1 = FloorDiv(gx1, FSUB);
+		int bk0 = FloorDiv(gz0, FSUB);
+		int bk1 = FloorDiv(gz1, FSUB);
+		for (int bk = bk0; bk <= bk1; bk++)
+		{
+			for (int bi = bi0; bi <= bi1; bi++)
+			{
+				if (s_Inst.m_mRutTiles.Contains(ColKey(bi, bk)))
+					return true;
+			}
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: a new floor tile for column bi, bk, every sample FLOOR_NONE
+	protected MUD_RutTile RutTileMake(int bi, int bk)
+	{
+		MUD_RutTile tile = new MUD_RutTile();
+		for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
+			tile.m_aFloor[f] = FLOOR_NONE;
+		m_mRutTiles.Insert(ColKey(bi, bk), tile);
+		return tile;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: y, or the rut floor at sample column li, lk of col (floor sample 2 gi, 2 gk) if lower
+	protected float FloorMin(MUD_VoxelColumn col, int li, int lk, float y)
+	{
+		if (!DISPLACE_RUTS)
+			return y;
+		float f = FloorSample((col.m_iBi * SUB + li) * 2, (col.m_iBk * SUB + lk) * 2);
+		if (f < y)
+			return f;
+		return y;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: undug ground at floor sample fi, fk - bilinear over the sample columns round it (the
+	//! converted ones; integer weights, so a floor sample on a sample column reads that column only)
+	protected float UndugAt(int fi, int fk)
+	{
+		int gi = FloorDiv(fi, 2);
+		int gk = FloorDiv(fk, 2);
+		float tx = (fi - gi * 2) * 0.5;
+		float tz = (fk - gk * 2) * 0.5;
+		float sum = 0;
+		float wsum = 0;
+		for (int q = 0; q < 4; q++)
+		{
+			int qx = q & 1;
+			int qz = q >> 1;
+			float w = 1 - tx;
+			if (qx == 1)
+				w = tx;
+			if (qz == 1)
+				w = w * tz;
+			else
+				w = w * (1 - tz);
+			if (w <= 0)
+				continue;
+			MUD_VoxelColumn col = ColAt(gi + qx, gk + qz);
+			if (!col)
+				continue;
+			sum += w * col.m_aUndug[(gk + qz - col.m_iBk * SUB) * SUB + gi + qx - col.m_iBi * SUB];
+			wsum += w;
+		}
+		if (wsum <= 0)
+			return m_fLastG;
+		return sum / wsum;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: the field's top surface at floor sample fi, fk (SurfaceY near nearY, bilinear over the
+	//! sample columns round it). False = a column it needs is missing or has no surface there (skip the sample).
+	protected bool FieldSurfAt(int fi, int fk, float nearY, out float y)
+	{
+		y = 0;
+		int gi = FloorDiv(fi, 2);
+		int gk = FloorDiv(fk, 2);
+		float tx = (fi - gi * 2) * 0.5;
+		float tz = (fk - gk * 2) * 0.5;
+		for (int q = 0; q < 4; q++)
+		{
+			int qx = q & 1;
+			int qz = q >> 1;
+			float w = 1 - tx;
+			if (qx == 1)
+				w = tx;
+			if (qz == 1)
+				w = w * tz;
+			else
+				w = w * (1 - tz);
+			if (w <= 0)
+				continue;
+			MUD_VoxelColumn col = ColAt(gi + qx, gk + qz);
+			if (!col)
+				return false;
+			float h = 0;
+			if (!SurfaceY(col, gi + qx - col.m_iBi * SUB, gk + qz - col.m_iBk * SUB, nearY, h))
+				return false;
+			y += w * h;
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: after the op, the floor samples round each sample column its Put moved go (a rim or a fill
+	//! covers the rut; where the op dug deeper the field is under the floor anyway). Put's MarkBox queues them.
+	protected void ClearFloor()
+	{
+		for (int n = 0; n < m_aClrI.Count(); n++)
+		{
+			int fi0 = m_aClrI[n] * 2;
+			int fk0 = m_aClrK[n] * 2;
+			for (int fk = fk0 - 1; fk <= fk0 + 1; fk++)
+			{
+				for (int fi = fi0 - 1; fi <= fi0 + 1; fi++)
+				{
+					int bi = FloorDiv(fi, FSUB);
+					int bk = FloorDiv(fk, FSUB);
+					MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+					if (tile)
+					{
+						int cn = (fk - bk * FSUB) * FSUB + fi - bi * FSUB;
+						if (tile.m_aFloor[cn] < FLOOR_NONE * 0.5)
+						{
+							FloorChanged(fi, fk);
+							m_iDispOpC++;
+							m_iDispHash = (m_iDispHash + (7919 * (cn + 1) + ColKey(bi, bk)) % DISP_HASH_M) % DISP_HASH_M;
+						}
+						tile.m_aFloor[cn] = FLOOR_NONE;
+					}
+				}
+			}
+		}
+		m_aClrI.Clear();
+		m_aClrK.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Top surface of sample column li, lk of col within RUT_ON + CELL of nearY: the highest solid -> air crossing.
 	//! False = none there.
 	protected bool SurfaceY(MUD_VoxelColumn col, int li, int lk, float nearY, out float y)
@@ -2916,7 +3430,7 @@ class MUD_VoxelProbe
 				rBot = bj;
 		}
 		if (rTop < rBot)
-			return col.m_aUndug[n] - col.m_aTop[n];     // no rows: the seed
+			return col.m_aUndug[n] - FloorMin(col, li, lk, col.m_aTop[n]);     // no rows: the seed
 		float y = rBot * BRICK;
 		for (int gj = rTop * SUB + SUB; gj >= rBot * SUB; gj--)
 		{
@@ -2929,7 +3443,7 @@ class MUD_VoxelProbe
 				y += CELL * d / (d - du);
 			break;
 		}
-		return col.m_aUndug[n] - y;
+		return col.m_aUndug[n] - FloorMin(col, li, lk, y);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3209,6 +3723,10 @@ class MUD_VoxelProbe
 		m_aMudHi.Clear();
 		m_aMudWp.Clear();
 		m_aMudR.Clear();
+		m_iDispSplit += m_iBatchSplit;
+		m_iDispSplitV += m_iBatchSplitV;
+		m_iDispFold += m_iBatchFold;
+		m_iDispOvf += m_iBatchDispOvf;
 		Print(string.Format("MUD voxel probe: live %1 ms after seq %2 - %3 ops, %4 bricks made, %5 new meshes shown, %6 rebuilt swapped, %7 skin cells to voxel (%8 ms)",
 			System.GetTickCount(m_iBatchT0), m_iBatchFirstSeq, m_iBatchOps, m_iBatchMade, shown, swapped, cells, voxMs)
 			+ string.Format(" | %1 builds, %2 verts, build %3 ms over %4 frames (worst frame %5 ms, worst brick %6 ms), go-live frame %7 ms",
@@ -3216,7 +3734,324 @@ class MUD_VoxelProbe
 			+ string.Format(" | %1 columns, %2 bricks, mem %3 KB, %4 look meshes", m_mCols.Count(), m_iBricks, System.MemoryAllocationKB(), m_iBatchLook)
 			+ string.Format(" (%1 kept their body, %2 look-only builds skipped)", m_iBatchMeshOnly, m_iBatchSkipped)
 			+ string.Format(" | scan: gather %1 ms, poly %2 ms, %3 samples scanned, checks %4 (%5 bad), checked full %6 ms vs band %7 ms", m_iBatchGatherMs, m_iBatchPolyMs,
-			m_iBatchScanned, m_iScanChecked, m_iScanBad, m_iBatchFullMs, m_iBatchBandMs), LogLevel.NORMAL);
+			m_iBatchScanned, m_iScanChecked, m_iScanBad, m_iBatchFullMs, m_iBatchBandMs) + DispBatch(), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! GoLive: the batch line's displaced-ruts part (empty with DISPLACE_RUTS off: the v035 line)
+	protected string DispBatch()
+	{
+		if (!DISPLACE_RUTS)
+			return "";
+		return string.Format(" | disp: %1 split bricks, %2 split verts, %3 fold drops, %4 overflows, %5 soil walls", m_iBatchSplit,
+			m_iBatchSplitV, m_iBatchFold, m_iBatchDispOvf, m_iBatchSoil);
+	}
+
+#ifdef ENABLE_DIAG
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS debug (Stage B): diag menu GameCode > Mud > Displaced ruts, all off (once per game)
+	protected static void DispMenu()
+	{
+		if (s_bDispMenu)
+			return;
+		if (SCR_DebugMenuID.MUD_DISP_HASH >= 512)
+		{
+			Print(string.Format("MUD disp: diag ids reach %1 (max 511) - no Displaced ruts menu", SCR_DebugMenuID.MUD_DISP_HASH), LogLevel.ERROR);
+			return;
+		}
+		s_bDispMenu = true;
+		DiagMenu.RegisterMenu(SCR_DebugMenuID.MUD_DISP_MENU_MUD, "Mud", "GameCode");
+		DiagMenu.RegisterMenu(SCR_DebugMenuID.MUD_DISP_MENU, "Displaced ruts", "Mud");
+		DiagMenu.RegisterBool(SCR_DebugMenuID.MUD_DISP_LOG, "", "Summary log (10 s)", "Displaced ruts");
+		DiagMenu.RegisterBool(SCR_DebugMenuID.MUD_DISP_DRAW_FLOOR, "", "Draw floor", "Displaced ruts");
+		DiagMenu.RegisterBool(SCR_DebugMenuID.MUD_DISP_DRAW_BRICKS, "", "Draw overflow / fold bricks", "Displaced ruts");
+		DiagMenu.RegisterBool(SCR_DebugMenuID.MUD_DISP_HOLE_CHECK, "", "Hole check", "Displaced ruts");
+		DiagMenu.RegisterBool(SCR_DebugMenuID.MUD_DISP_HASH, "", "Floor hash log", "Displaced ruts");
+		Print(string.Format("MUD disp: diag menu GameCode > Mud > Displaced ruts, ids %1 .. %2", SCR_DebugMenuID.MUD_DISP_MENU_MUD, SCR_DebugMenuID.MUD_DISP_HASH), LogLevel.NORMAL);
+	}
+#endif
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS debug switch n (DSW_*): the diag menu, else off (retail / DS; the *_ALWAYS consts)
+	protected static bool DispOn(int n)
+	{
+		if (n == DSW_LOG && DISP_LOG_ALWAYS)
+			return true;
+		if (n == DSW_HASH && DISP_HASH_ALWAYS)
+			return true;
+#ifdef ENABLE_DIAG
+		if (!s_bDispMenu)
+			return false;
+		return DiagMenu.GetBool(SCR_DebugMenuID.MUD_DISP_LOG + n);
+#else
+		return false;
+#endif
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: its time into the summary counters
+	protected void DispTime(int t0)
+	{
+		int ms = System.GetTickCount(t0);
+		m_iDispMs += ms;
+		if (ms > m_iDispWorst)
+			m_iDispWorst = ms;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Submit, DISPLACE_RUTS: this op's floor counts into the summary, its hash line (every machine logs the same
+	//! hash per seq when their floors agree)
+	protected void DispOpDone(MUD_VoxelOp op)
+	{
+		if (op.m_iKind == 4)
+			m_iDispOps++;
+		m_iDispWritten += m_iDispOpW;
+		m_iDispCleared += m_iDispOpC;
+		if (DispOn(DSW_HASH) && (op.m_iKind == 4 || m_iDispOpC > 0))
+			Print(string.Format("MUD disp hash seq %1 kind %2: %3 (%4 written, %5 cleared)", op.m_iSeq, op.m_iKind, m_iDispHash, m_iDispOpW, m_iDispOpC), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Every frame (Tick): summary line, then (rendering machines) hole check, floor + brick + hole draws
+	protected void DispTick()
+	{
+		int now = System.GetTickCount();
+		if (now - m_iDispT0 >= DISP_LOG_EVERY_S * 1000)
+		{
+			if (DispOn(DSW_LOG) && m_iDispOps + m_iDispCleared + m_iDispSplit + m_iDispOvf + m_iDispHoles > 0)
+				DispLog(now);
+			DispReset(now);
+		}
+		if (m_bHeadless)
+			return;
+		IEntity me = SCR_PlayerController.GetLocalControlledEntity();
+		if (me && DispOn(DSW_HOLE) && !m_bOpen && now - m_iDispHoleT >= DISP_HOLE_EVERY_MS)
+		{
+			m_iDispHoleT = now;
+			DispHoles(me.GetOrigin(), now);
+		}
+		if (me && DISPLACE_RUTS && DispOn(DSW_FLOOR))
+		{
+			if (now - m_iDispFloorT >= DISP_HOLE_EVERY_MS)
+			{
+				m_iDispFloorT = now;
+				DispFloorList(me.GetOrigin());
+			}
+			for (int n = 0; n < m_aDispFloorP.Count(); n++)
+				Shape.CreateSphere(m_aDispFloorC[n], ShapeFlags.ONCE | ShapeFlags.NOZBUFFER, m_aDispFloorP[n], 0.05);
+		}
+		DispMarks(me, now);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void DispLog(int now)
+	{
+		Print(string.Format("MUD disp %1 s: %2 rut ops, %3 floor written, %4 cleared, %5 carved cells | %6 split bricks, %7 split verts, %8 fold drops, %9 overflows",
+			(now - m_iDispT0) / 1000, m_iDispOps, m_iDispWritten, m_iDispCleared, m_iDispCarved, m_iDispSplit, m_iDispSplitV, m_iDispFold, m_iDispOvf)
+			+ string.Format(" | %1 border pulls, displace %2 ms (worst brick %3 ms) | holes %4 in %5 checks", m_iDispBorder, m_iDispMs, m_iDispWorst,
+			m_iDispHoles, m_iDispChecks), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void DispReset(int now)
+	{
+		m_iDispT0 = now;
+		m_iDispOps = 0;
+		m_iDispWritten = 0;
+		m_iDispCleared = 0;
+		m_iDispCarved = 0;
+		m_iDispSplit = 0;
+		m_iDispSplitV = 0;
+		m_iDispFold = 0;
+		m_iDispOvf = 0;
+		m_iDispBorder = 0;
+		m_iDispMs = 0;
+		m_iDispWorst = 0;
+		m_iDispHoles = 0;
+		m_iDispChecks = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Draw floor: the floor samples round o, coloured by depth under the field (grey < 5 cm, yellow < 15 cm, red
+	//! deeper, white = no field surface found)
+	protected void DispFloorList(vector o)
+	{
+		m_aDispFloorP.Clear();
+		m_aDispFloorC.Clear();
+		float rr = DISP_FLOOR_DRAW_R;
+		int bi0 = Math.Floor((o[0] - rr - m_fX0) / BRICK);
+		int bi1 = Math.Floor((o[0] + rr - m_fX0) / BRICK);
+		int bk0 = Math.Floor((o[2] - rr - m_fZ0) / BRICK);
+		int bk1 = Math.Floor((o[2] + rr - m_fZ0) / BRICK);
+		for (int bk = bk0; bk <= bk1; bk++)
+		{
+			for (int bi = bi0; bi <= bi1; bi++)
+			{
+				MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+				if (!tile)
+					continue;
+				for (int n = 0; n < MUD_RutTile.SIZE_F; n++)
+				{
+					float fy = tile.m_aFloor[n];
+					if (fy > FLOOR_NONE * 0.5)
+						continue;
+					int fi = bi * FSUB + n % FSUB;
+					int fk = bk * FSUB + n / FSUB;
+					vector p = Vector(m_fX0 + fi * FCELL, fy, m_fZ0 + fk * FCELL);
+					if (vector.DistanceSqXZ(p, o) > rr * rr)
+						continue;
+					int c = ARGB(255, 255, 255, 255);
+					float sy = 0;
+					if (FieldSurfAt(fi, fk, fy, sy))
+					{
+						float d = sy - fy;
+						c = ARGB(255, 150, 150, 150);
+						if (d >= 0.05)
+							c = ARGB(255, 255, 230, 0);
+						if (d >= 0.15)
+							c = ARGB(255, 255, 30, 30);
+					}
+					m_aDispFloorP.Insert(p);
+					m_aDispFloorC.Insert(c);
+					if (m_aDispFloorP.Count() >= DISP_FLOOR_MAX)
+						return;
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check: a 9 x 9 grid (CELL apart, on the sample columns) round o, in carved cells only. Expected top =
+	//! min(field top, rut floor); an ENTS trace onto our bricks must hit within DISP_HOLE_TOL of it, with an upward
+	//! normal. Not while a batch is open (bricks not live yet). A tunnel roof < 2 m over the ground reads as a hole.
+	protected void DispHoles(vector o, int now)
+	{
+		BaseWorld world = GetGame().GetWorld();
+		if (!m_DispTrace)
+			m_DispTrace = new TraceParam();
+		int logged = 0;
+		float x0 = Math.Round((o[0] - m_fX0) / CELL) * CELL + m_fX0;
+		float z0 = Math.Round((o[2] - m_fZ0) / CELL) * CELL + m_fZ0;
+		for (int hz = -4; hz <= 4; hz++)
+		{
+			for (int hx = -4; hx <= 4; hx++)
+			{
+				float x = x0 + hx * CELL;
+				float z = z0 + hz * CELL;
+				if (!DrawsAt(x, z))
+					continue;
+				float sy = 0;
+				if (!SurfaceAtI(x, z, sy))
+					continue;
+				float ey = sy;
+				if (DISPLACE_RUTS)
+				{
+					float fy = FloorAtW(x, z, sy);
+					if (fy < ey)
+						ey = fy;
+				}
+				m_DispTrace.Start = Vector(x, ey + 2, z);
+				m_DispTrace.End = Vector(x, ey - 3, z);
+				m_DispTrace.Flags = TraceFlags.ENTS;
+				m_DispTrace.LayerMask = EPhysicsLayerPresets.Projectile;
+				m_DispTrace.TraceEnt = null;
+				float f = world.TraceMove(m_DispTrace, DispOurs);
+				m_iDispChecks++;
+				float hy = ey + 2 - 5 * f;
+				vector hn = m_DispTrace.TraceNorm;
+				bool bad = f >= 1 || Math.AbsFloat(hy - ey) > DISP_HOLE_TOL || hn[1] < 0;
+				if (!bad)
+					continue;
+				m_iDispHoles++;
+				if (logged < DISP_HOLE_MAX_LOG)
+				{
+					logged++;
+					string hit = "none";
+					if (f < 1)
+						hit = string.Format("%1 (normal y %2)", hy, hn[1]);
+					Print(string.Format("MUD disp HOLE at %1 %2: expected %3, hit %4", x, z, ey, hit), LogLevel.WARNING);
+				}
+				if (m_aDispHolePos.Count() < DISP_MARK_MAX)
+				{
+					m_aDispHolePos.Insert(Vector(x, ey, z));
+					m_aDispHoleUntil.Insert(now + DISP_MARK_MS);
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check trace: our voxel bricks only
+	protected bool DispOurs(notnull IEntity e)
+	{
+		return MUD_VoxelSubEntity.Cast(e) != null;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check: rut floor at world x, z (bilinear over the floor samples, a corner with none counts as ownY;
+	//! all four none = FLOOR_NONE) - as Displace's DispFloor
+	protected float FloorAtW(float x, float z, float ownY)
+	{
+		float fx = (x - m_fX0) / FCELL;
+		float fz = (z - m_fZ0) / FCELL;
+		int ix = Math.Floor(fx);
+		int iz = Math.Floor(fz);
+		float tx = fx - ix;
+		float tz = fz - iz;
+		float f00 = FloorSample(ix, iz);
+		float f10 = FloorSample(ix + 1, iz);
+		float f01 = FloorSample(ix, iz + 1);
+		float f11 = FloorSample(ix + 1, iz + 1);
+		float isNone = FLOOR_NONE * 0.5;
+		if (f00 > isNone && f10 > isNone && f01 > isNone && f11 > isNone)
+			return FLOOR_NONE;
+		if (f00 > isNone)
+			f00 = ownY;
+		if (f10 > isNone)
+			f10 = ownY;
+		if (f01 > isNone)
+			f01 = ownY;
+		if (f11 > isNone)
+			f11 = ownY;
+		return (f00 * (1 - tx) + f10 * tx) * (1 - tz) + (f01 * (1 - tx) + f11 * tx) * tz;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Brick and hole marks: drop the old ones, draw the rest (switch on; within DISP_BRICK_DRAW_R of me if any)
+	protected void DispMarks(IEntity me, int now)
+	{
+		bool bricksOn = DispOn(DSW_BRICKS);
+		bool holesOn = DispOn(DSW_HOLE);
+		bool haveMe = me != null;
+		vector o = vector.Zero;
+		if (haveMe)
+			o = me.GetOrigin();
+		float rr = DISP_BRICK_DRAW_R;
+		vector size = Vector(BRICK, BRICK, BRICK);
+		for (int n = m_aDispMarkLo.Count() - 1; n >= 0; n--)
+		{
+			if (now > m_aDispMarkUntil[n] || !bricksOn)
+			{
+				m_aDispMarkLo.RemoveOrdered(n);
+				m_aDispMarkC.RemoveOrdered(n);
+				m_aDispMarkUntil.RemoveOrdered(n);
+				continue;
+			}
+			vector lo = m_aDispMarkLo[n];
+			if (haveMe && vector.DistanceSqXZ(lo + size * 0.5, o) > rr * rr)
+				continue;
+			Shape.Create(ShapeType.BBOX, m_aDispMarkC[n], ShapeFlags.WIREFRAME | ShapeFlags.ONCE, lo, lo + size);
+		}
+		for (int h = m_aDispHolePos.Count() - 1; h >= 0; h--)
+		{
+			if (now > m_aDispHoleUntil[h] || !holesOn)
+			{
+				m_aDispHolePos.RemoveOrdered(h);
+				m_aDispHoleUntil.RemoveOrdered(h);
+				continue;
+			}
+			Shape.CreateSphere(ARGB(255, 255, 0, 0), ShapeFlags.ONCE | ShapeFlags.NOZBUFFER, m_aDispHolePos[h], 0.15);
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3596,6 +4431,7 @@ class MUD_VoxelProbe
 			int tp = System.GetTickCount();
 			PolyPass(emitAny, false);
 			m_iBatchPolyMs += System.GetTickCount(tp);
+			Displace();
 			return;
 		}
 		// full scan first (timed apart), then the band scan on the same samples, which is kept
@@ -3625,6 +4461,322 @@ class MUD_VoxelProbe
 			Print(string.Format("MUD scan check: MISMATCH brick %1 %2 %3: full %4 verts %5 top %6 dirt, band %7 %8 %9",
 				m_B.m_iBi, m_B.m_iBj, m_B.m_iBk, nv, nt, nd, m_iV, m_iTop, m_iDirt), LogLevel.ERROR);
 		}
+		Displace();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS, after Polygonize: a brick the rut floor reaches - any vertex or triangle edge middle would be
+	//! pulled (the plan's 6-split-point rule; every brick runs the same test on the same floor, so the lines between
+	//! bricks match) - gets every triangle split 2 x 2 (one shared midpoint per edge), every vertex pulled to
+	//! min(y, floor) (only if less than DISP_GUARD above it: tunnel roofs stay), then re-emitted through Tri.
+	//! A wall triangle the pull turns over is dropped (fold). Too many triangles to split: coarse pull only (logged).
+	//! Mesh and body read the same buffers, so the wheels feel what is drawn.
+	protected void Displace()
+	{
+		if (!DISPLACE_RUTS || m_bOverflow || m_iTop + m_iDirt == 0)
+			return;
+		int bi = m_B.m_iBi;
+		int bk = m_B.m_iBk;
+		bool any = false;
+		for (int dk = -1; dk <= 1; dk++)
+		{
+			for (int di = -1; di <= 1; di++)
+			{
+				if (m_mRutTiles.Contains(ColKey(bi + di, bk + dk)))
+					any = true;
+			}
+		}
+		if (!any)
+			return;
+		int dt0 = System.GetTickCount();
+		// the floor round the brick: its quads reach local -0.5 .. 4 (cells -1 .. SUB-1), the bilinear one more.
+		// Stored brick-local (minus m_vBOrg y) like m_Vb: the floor is world y (user 2026-10-15: ruts not drawn)
+		int fi0 = bi * FSUB - DISP_PAD;
+		int fk0 = bk * FSUB - DISP_PAD;
+		float oy = m_vBOrg[1];
+		for (int gz = 0; gz < DISP_N; gz++)
+		{
+			for (int gx = 0; gx < DISP_N; gx++)
+			{
+				float fs = FloorSample(fi0 + gx, fk0 + gz);
+				if (fs < FLOOR_NONE * 0.5)
+					fs = fs - oy;
+				m_aDispF[gz * DISP_N + gx] = fs;
+			}
+		}
+		bool rutted = false;
+		for (int v = 0; v < m_iV && !rutted; v++)
+			rutted = DispPulled(m_Vb.m_aV[v]);
+		for (int t = 0; t < m_iTop && !rutted; t += 3)
+			rutted = DispEdgesPulled(m_IbTop.m_aI[t], m_IbTop.m_aI[t + 1], m_IbTop.m_aI[t + 2]);
+		for (int t2 = 0; t2 < m_iDirt && !rutted; t2 += 3)
+			rutted = DispEdgesPulled(m_IbDirt.m_aI[t2], m_IbDirt.m_aI[t2 + 1], m_IbDirt.m_aI[t2 + 2]);
+		if (!rutted)
+		{
+			DispTime(dt0);
+			return;
+		}
+		// budget, COMBINED (Tri caps m_iTop + m_iDirt): 4 x the indices, at most one new vertex per index
+		bool split = (m_iTop + m_iDirt) * 4 <= MAX_I && m_iV + m_iTop + m_iDirt <= MAX_V;
+		if (!split)
+		{
+			m_iBatchDispOvf++;
+			Print(string.Format("MUD voxel probe: rut split overflow brick %1 %2 %3 (%4 verts, %5 tris) - coarse pull only",
+				bi, m_B.m_iBj, bk, m_iV, (m_iTop + m_iDirt) / 3), LogLevel.WARNING);
+		}
+		if (!m_IbDispTop)
+		{
+			m_IbDispTop = new MUD_VoxelIdx();
+			m_IbDispDirt = new MUD_VoxelIdx();
+		}
+		int nTop = m_iTop;
+		int nDirt = m_iDirt;
+		for (int i = 0; i < nTop; i++)
+			m_IbDispTop.m_aI[i] = m_IbTop.m_aI[i];
+		for (int i2 = 0; i2 < nDirt; i2++)
+			m_IbDispDirt.m_aI[i2] = m_IbDirt.m_aI[i2];
+		int v0 = m_iV;
+		map<int, int> mids = new map<int, int>();
+		if (split)
+		{
+			for (int s = 0; s < nTop; s += 3)
+				DispMids(m_IbDispTop.m_aI[s], m_IbDispTop.m_aI[s + 1], m_IbDispTop.m_aI[s + 2], mids);
+			for (int s2 = 0; s2 < nDirt; s2 += 3)
+				DispMids(m_IbDispDirt.m_aI[s2], m_IbDispDirt.m_aI[s2 + 1], m_IbDispDirt.m_aI[s2 + 2], mids);
+		}
+		// pull every vertex (the midpoints too), keeping the old y for the fold check
+		for (int p = 0; p < m_iV; p++)
+		{
+			vector pv = m_Vb.m_aV[p];
+			m_aDispY[p] = pv[1];
+			float f = DispFloor(pv[0], pv[2], pv[1]);
+			if (f < pv[1] - DISP_EPS && pv[1] - f < DISP_GUARD)
+			{
+				pv[1] = f;
+				m_Vb.m_aV[p] = pv;
+				if (pv[0] < 0.5 || pv[0] > BRICK - 0.5 || pv[2] < 0.5 || pv[2] > BRICK - 0.5)
+					m_iDispBorder++;
+			}
+		}
+		// re-emit; a top tri the pull made steep turns soil (DispEmit; user 2026-10-15: soil rut walls)
+		m_mDispSoil.Clear();
+		m_iTop = 0;
+		m_iDirt = 0;
+		int fold0 = m_iBatchFold;
+		for (int e = 0; e < nTop; e += 3)
+			DispTri(m_IbDispTop.m_aI[e], m_IbDispTop.m_aI[e + 1], m_IbDispTop.m_aI[e + 2], true, split, mids);
+		for (int e2 = 0; e2 < nDirt; e2 += 3)
+			DispTri(m_IbDispDirt.m_aI[e2], m_IbDispDirt.m_aI[e2 + 1], m_IbDispDirt.m_aI[e2 + 2], false, split, mids);
+		if (split)
+		{
+			m_iBatchSplit++;
+			m_iBatchSplitV += m_iV - v0;
+		}
+		DispTime(dt0);
+		// draw bricks: overflow (blue) / fold drops (orange), rendering machines
+		if (!m_bHeadless && (!split || m_iBatchFold > fold0) && DispOn(DSW_BRICKS) && m_aDispMarkLo.Count() < DISP_MARK_MAX)
+		{
+			int mc = ARGB(255, 255, 140, 0);
+			if (!split)
+				mc = ARGB(255, 40, 120, 255);
+			m_aDispMarkLo.Insert(m_vBOrg);
+			m_aDispMarkC.Insert(mc);
+			m_aDispMarkUntil.Insert(System.GetTickCount() + DISP_MARK_MS);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: rut floor at brick-local x, z (bilinear over m_aDispF); a corner with no floor counts as ownY,
+	//! all four none (or off the grid) = FLOOR_NONE
+	protected float DispFloor(float lx, float lz, float ownY)
+	{
+		float fx = lx / FCELL + DISP_PAD;
+		float fz = lz / FCELL + DISP_PAD;
+		int ix = Math.Floor(fx);
+		int iz = Math.Floor(fz);
+		if (ix < 0 || iz < 0 || ix + 1 >= DISP_N || iz + 1 >= DISP_N)
+			return FLOOR_NONE;
+		float tx = fx - ix;
+		float tz = fz - iz;
+		int c = iz * DISP_N + ix;
+		float f00 = m_aDispF[c];
+		float f10 = m_aDispF[c + 1];
+		float f01 = m_aDispF[c + DISP_N];
+		float f11 = m_aDispF[c + DISP_N + 1];
+		float isNone = FLOOR_NONE * 0.5;
+		if (f00 > isNone && f10 > isNone && f01 > isNone && f11 > isNone)
+			return FLOOR_NONE;
+		if (f00 > isNone)
+			f00 = ownY;
+		if (f10 > isNone)
+			f10 = ownY;
+		if (f01 > isNone)
+			f01 = ownY;
+		if (f11 > isNone)
+			f11 = ownY;
+		return (f00 * (1 - tx) + f10 * tx) * (1 - tz) + (f01 * (1 - tx) + f11 * tx) * tz;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: brick-local point p would be pulled (floor under it, less than DISP_GUARD under)
+	protected bool DispPulled(vector p)
+	{
+		float f = DispFloor(p[0], p[2], p[1]);
+		return f < p[1] - DISP_EPS && p[1] - f < DISP_GUARD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: an edge middle of triangle a, b, c would be pulled
+	protected bool DispEdgesPulled(int a, int b, int c)
+	{
+		vector pa = m_Vb.m_aV[a];
+		vector pb = m_Vb.m_aV[b];
+		vector pc = m_Vb.m_aV[c];
+		return DispPulled((pa + pb) * 0.5) || DispPulled((pb + pc) * 0.5) || DispPulled((pc + pa) * 0.5);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: the midpoints of triangle a, b, c's edges (made once per edge)
+	protected void DispMids(int a, int b, int c, map<int, int> mids)
+	{
+		DispMid(a, b, mids);
+		DispMid(b, c, mids);
+		DispMid(c, a, mids);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: the midpoint vertex of edge a, b (key = the two ids sorted; VKEY > MAX_V). Position and UV = the
+	//! mean of the ends (both ends of a quad's edge share its UV tile). CellV's UV-parity copies of one cell vertex
+	//! give separate midpoints at the same position: no crack.
+	protected int DispMid(int a, int b, map<int, int> mids)
+	{
+		int lo = a;
+		int hi = b;
+		if (b < a)
+		{
+			lo = b;
+			hi = a;
+		}
+		int key = lo * VKEY + hi;
+		int m;
+		if (mids.Find(key, m))
+			return m;
+		m = m_iV;
+		m_Vb.m_aV[m] = (m_Vb.m_aV[a] + m_Vb.m_aV[b]) * 0.5;
+		m_Vb.m_aUV[m * 2] = (m_Vb.m_aUV[a * 2] + m_Vb.m_aUV[b * 2]) * 0.5;
+		m_Vb.m_aUV[m * 2 + 1] = (m_Vb.m_aUV[a * 2 + 1] + m_Vb.m_aUV[b * 2 + 1]) * 0.5;
+		m_iV++;
+		mids.Insert(key, m);
+		return m;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: coarse triangle a, b, c back into the buffers - as it is, or as 4 (same winding)
+	protected void DispTri(int a, int b, int c, bool top, bool split, map<int, int> mids)
+	{
+		if (!split)
+		{
+			DispEmit(a, b, c, top);
+			return;
+		}
+		int ab = DispMid(a, b, mids);
+		int bc = DispMid(b, c, mids);
+		int ca = DispMid(c, a, mids);
+		DispEmit(a, ab, ca, top);
+		DispEmit(ab, b, bc, top);
+		DispEmit(ca, bc, c, top);
+		DispEmit(ab, bc, ca, top);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: copy of vertex v with soil UVs (kind 1-3, tile ta / tb as CellV), made once per vertex + kind;
+	//! a copy whose tile differs from the cached one is made again (a tile line between two walls)
+	protected int DispSoilV(int v, int kind, int ta, int tb)
+	{
+		int key = v * 4 + kind - 1;
+		int got;
+		vector p = m_Vb.m_aV[v];
+		float a;
+		float b;
+		float tile;
+		KindAB(kind, p, a, b, tile);
+		float u = (a - ta * tile) / tile;
+		float w = 1 - (b - tb * tile) / tile;
+		if (m_mDispSoil.Find(key, got) && Math.AbsFloat(m_Vb.m_aUV[got * 2] - u) < 0.0001 && Math.AbsFloat(m_Vb.m_aUV[got * 2 + 1] - w) < 0.0001)
+			return got;
+		int nv = m_iV;
+		m_Vb.m_aV[nv] = p;
+		m_Vb.m_aUV[nv * 2] = u;
+		m_Vb.m_aUV[nv * 2 + 1] = w;
+		m_iV++;
+		m_mDispSoil.Set(key, nv);
+		return nv;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Displace: one triangle through Tri; a wall (non-top) triangle whose normal the pull turned over is dropped
+	//! (top ones can't fold: the pull moves y only - MEASURED 0 folds offline). A top one the pull made steeper
+	//! than Quad's grass rule (n.y <= 0.7 |n|) or lying in the groove (user 2026-10-15: soil only in a few patches,
+	//! should fill the groove) is soil, on soil-UV copies of its corners
+	protected void DispEmit(int a, int b, int c, bool top)
+	{
+		if (top)
+		{
+			vector ta = m_Vb.m_aV[a];
+			vector tn = Cross(m_Vb.m_aV[b] - ta, m_Vb.m_aV[c] - ta);
+			vector tmid = (ta + m_Vb.m_aV[b] + m_Vb.m_aV[c]) * 0.3333333;
+			// in the groove (more than DISP_SOIL_CUT under the seeded ground, Quad's reference) or steep
+			bool groove = GroundLocal(tmid[0], tmid[2]) - tmid[1] > DISP_SOIL_CUT;
+			// RUT FIELD: also soil where the floor pulled it more than FIELD_SOIL_D under the voxel surface, as the
+			// patches (a rut over a raised crater rim stays above the seeded ground: was grass beside soil patches)
+			if (RUT_FIELD && !groove)
+			{
+				float pulled = (m_aDispY[a] + m_aDispY[b] + m_aDispY[c]) * 0.3333333 - tmid[1];
+				groove = pulled > MUD_WorldGroundEntity.FIELD_SOIL_D;
+			}
+			if ((groove || tn[1] <= 0.7 * tn.Length()) && m_iV + 3 <= MAX_V)
+			{
+				// UV plane as Quad picks it: top-down soil (3) unless a side faces more (1 along x, 2 along z)
+				float ax = Math.AbsFloat(tn[0]);
+				float az = Math.AbsFloat(tn[2]);
+				int kind = 3;
+				if (ax > tn[1] || az > tn[1])
+				{
+					kind = 2;
+					if (ax >= az)
+						kind = 1;
+				}
+				float ma;
+				float mb;
+				float tile;
+				KindAB(kind, tmid, ma, mb, tile);
+				int tia = Math.Floor(ma / tile);
+				int tib = Math.Floor(mb / tile);
+				int sa = DispSoilV(a, kind, tia, tib);
+				int sb = DispSoilV(b, kind, tia, tib);
+				int sc = DispSoilV(c, kind, tia, tib);
+				m_iBatchSoil++;
+				Tri(sa, sb, sc, false);
+				return;
+			}
+		}
+		else
+		{
+			vector pa = m_Vb.m_aV[a];
+			vector pb = m_Vb.m_aV[b];
+			vector pc = m_Vb.m_aV[c];
+			vector oa = Vector(pa[0], m_aDispY[a], pa[2]);
+			vector ob = Vector(pb[0], m_aDispY[b], pb[2]);
+			vector oc = Vector(pc[0], m_aDispY[c], pc[2]);
+			vector n = Cross(pb - pa, pc - pa);
+			vector n0 = Cross(ob - oa, oc - oa);
+			if (vector.Dot(n, n0) < 0)
+			{
+				m_iBatchFold++;
+				return;
+			}
+		}
+		Tri(a, b, c, top);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3785,6 +4937,8 @@ class MUD_VoxelProbe
 				prev = v;
 			}
 		}
+		if (h > -9000)
+			h = FloorMin(col, li, lk, h);     // DISPLACED RUTS: the rut floor under the field's top
 		m_mSurf.Set(key, h);
 		return h > -9000;
 	}
@@ -4087,6 +5241,37 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! TRACEABLE off (hide) or back on for every brick; bricks spawned while hidden follow (MeshEntity).
+	//! Called by MUD_GroundEntity.HideFromTraces: the native get in / out check sweeps the feet box against
+	//! every script entity (user 2026-10-15: can't get in / out in a rut, the bricks were never hidden)
+	static void SetTraceHidden(bool hide)
+	{
+		s_bTraceHidden = hide;
+		if (!s_Inst)
+			return;
+		foreach (int key, MUD_VoxelColumn col : s_Inst.m_mCols)
+		{
+			foreach (int row, MUD_VoxelBrick b : col.m_mRows)
+			{
+				if (b.m_Ent)
+				{
+					if (hide)
+						b.m_Ent.ClearFlags(EntityFlags.TRACEABLE, false);
+					else
+						b.m_Ent.SetFlags(EntityFlags.TRACEABLE, false);
+				}
+				if (b.m_NewEnt)
+				{
+					if (hide)
+						b.m_NewEnt.ClearFlags(EntityFlags.TRACEABLE, false);
+					else
+						b.m_NewEnt.SetFlags(EntityFlags.TRACEABLE, false);
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! The built buffers (not empty) as a mesh on ent (spawned at the brick when null, hidden when asked). A
 	//! dedicated server gets a 2-triangle bounds mesh over the vertices instead (MUD_BoundsMesh.c: no mesh = point
 	//! bounds = traces skip it). res = the mesh resource (keep it), null on failure. Returns the entity.
@@ -4106,6 +5291,8 @@ class MUD_VoxelProbe
 				return null;
 			if (hidden)
 				ent.ClearFlags(EntityFlags.VISIBLE, false);
+			if (s_bTraceHidden)
+				ent.ClearFlags(EntityFlags.TRACEABLE, false);
 		}
 		if (m_bHeadless)
 		{
@@ -4220,3 +5407,18 @@ class MUD_VoxelProbe
 		return Vector(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
 	}
 }
+
+#ifdef ENABLE_DIAG
+//! DISPLACED RUTS debug ids (Stage B; vanilla pattern SCR_AutotestDebugMenu.c): after vanilla's, must stay < 512
+//! (MUD_VoxelProbe.DispMenu checks). MUD_DISP_LOG .. MUD_DISP_HASH in DSW_* order.
+modded enum SCR_DebugMenuID
+{
+	MUD_DISP_MENU_MUD,
+	MUD_DISP_MENU,
+	MUD_DISP_LOG,
+	MUD_DISP_DRAW_FLOOR,
+	MUD_DISP_DRAW_BRICKS,
+	MUD_DISP_HOLE_CHECK,
+	MUD_DISP_HASH
+}
+#endif

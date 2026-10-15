@@ -138,6 +138,27 @@ Same idea, bigger: if displaced ruts work, trenches and the shovel could use the
 2. Displaced ruts in game behind a switch (checkpoint first): SP look + rut ms/s vs v035, then the MP robot test.
 3. Wheel sink probe 1 (option 2), then the gamemat -> mud depth table.
 
+## 7. IDA re-check (2026-10-15, same ArmaReforgerSteamDiag.exe, image base 0x140000000)
+
+Re-read the code behind the PROVEN-IDA rows this doc leans on. All hold:
+- UpdateVerts (sub_140C38540): copies positions (12 B in, 16 B slot) + UV0 (`uv*65534-32767`, clamped), then ALWAYS
+  calls normals sub_140AB3270 + tangents sub_140AB3630. No normal input, no skip flag.
+- Normals (sub_140AB3270): per triangle of THIS section's index buffer, cross product -> sub_1409F6E60 (normalise;
+  returns the vector unchanged when len^2 <= 1.1754944e-38) -> added to its 3 vertices; then each sum normalised and
+  packed 11/11/10. Equal weight per triangle, zero-area adds nothing. Indices and vertex count read as u16.
+- CreateTriMesh backend (sub_140A52060): copies verts (12 B) and indices as u16 (memcpy for 2-byte input, else low
+  16 bits of each int), builds the BVH (sub_14172BBC0). No triangle check or drop.
+- MAX_V = 8000 per brick build: CODE MUD_VoxelProbe.c line 243 (check at line 4010). Mesh order indices-then-verts:
+  lines 4163-4176.
+
+New caveats for displaced ruts (INFERENCE, from the code above):
+- The T-junction mid vertex only gets normals from the split side; the unsplit neighbour's edge has no vertex there.
+  Shape stays closed if the mid vertex is NOT pulled, so the "+1 ring" must never pull a vertex on a border edge to an
+  unsplit triangle - pull only where the rut floor came from a rut sample, else leave y. Possible faint shading line
+  along the ring border; T-junction pixel sparkles possible but usually invisible on ground.
+- 2 x 2 split adds 3 verts per split triangle: budget the busiest rutted brick against MAX_V 8000 (and u16 65535 per
+  section), not the average.
+
 ## Sources
 - Koca, Gudukbay 2014, "A hybrid representation for modeling, interactive editing, and real-time visualization of
   terrains with volumetric features", IJGIS 28(9) 1821-1847 -
