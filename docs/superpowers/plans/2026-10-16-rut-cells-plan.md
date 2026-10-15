@@ -88,6 +88,26 @@ Paste to the local Claude:
 - Late join: disp hash lines match, the joiner's RUT cell count = the server's, join time.
 - Stress run once more on a DS + 1-2 clients.
 
+## Added after IDA answers 5b + 6-10 (2026-10-16, research/2026-10-15-ida-rut-questions.md)
+- **Grass in ruts (2-bis):** rut depth alone never removes grass - grass is planted at HEIGHTMAP height on the GPU,
+  and the clutter discontinuity mask only reads meshes with ClutterOccluder on (our runtime entities have none). So a
+  0.1-0.35 m rut can show grass standing at the old ground height. CHECK in Stage 5 (look along a rut at low angle).
+  Rut cells give a clean fix: spawn the rut layer entity from a PREFAB whose MeshObject component has ClutterOccluder
+  on (answer 2: INFERENCE the flag survives SetObject) -> grass cut only in RUT cells, not under whole bricks. Probe it
+  in Stage 3. Fallback: AffectFoliage flattening along recent tracks (answer 3).
+- **Mud friction in ruts (6, 9):** a trimesh has ONE material per geom (no per-triangle material), and the vehicle sim
+  never reads surface RollingResistance / RollingDrag. Friction, roughness and steering noise DO come from the hit
+  geom's surface. The rut layer is its own geom -> give it a "rut / mud" game material (lower tread friction, some
+  roughness): slipping in ruts for free, on every machine (server collider). Drag still needs script
+  (WheelSetRollingDrag, weak) - out of scope here.
+- **Partial updates (8):** AddGeom works on a live body but there is NO RemoveGeom / replace, so "one body, swap the
+  touched sub-geom" is impossible. Rebuilding a smaller piece = a separate body per piece. Per-patch rut layer (one
+  body) stays the default; per-cell bodies only if the Stage 5 split lines show the layer body rebuild dominates.
+- **Internal edges (7):** no internal-edge smoothing on our trimeshes. More, smaller triangles (0.125 m tiles) = more
+  edge bumps for vehicle bellies / debris (wheels use rays, not affected). Prefer 0.25 m unless 0.125 m clearly looks
+  better in Stage 1 / 5.
+- **16-bit indices (6 side note):** one script trimesh must stay under 65536 vertices - a rut layer is far below.
+
 ## Later
 - A2 (rut tiles independent of patches: the coarse skin skips RUT cells too) - fixes ruts for players on foot and the
   floor-patch memory without the patch-memory prompt's camera-range rule. Decide after Stage 6.

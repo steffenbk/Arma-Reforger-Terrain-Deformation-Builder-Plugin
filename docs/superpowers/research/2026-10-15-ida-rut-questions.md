@@ -281,7 +281,6 @@ Workbench TerrainToolDesc_* only.
 - List the script registrations of GenericTerrainEntity / terrain classes in the CURRENT exe. Anything new
   (height write, hole toggle, layer paint)? Five minutes - a yes would change the whole architecture.
 
-
 ---
 Answers 11-13 below: same exe (ArmaReforgerSteamDiag.exe 1.9.0.10, built from continuous_branches_stable_1.9.0),
 IDA base 0x140000000, read 2026-10-16. Labels as above (IDA / PROVEN / INFERENCE).
@@ -406,3 +405,98 @@ not the terrain.**
   - Strips are 0.25 m (script) or TrackWidth (native), so at most a thin sliver at the hole edge.
 - **Verdict:** vanilla tracks stop at our ground and do not draw on it. To get tracks on our ground we need
   World.CreateDecal on our entity (answer 1b) or ruts in our own mesh.
+
+---
+Answers 5b + 6-10 below: same exe (ArmaReforgerSteamDiag.exe 1.9.0.10), IDA base 0x140000000, read 2026-10-16.
+Script protos read from the pak of the install the enfusion MCP points at (Arma Reforger Experimental). Labels as above.
+
+## Answers 5b (2026-10-16)
+- **1-bis (pak + IDA): CreateTrackDecal is gone.** The 1.9 script protos have no CreateTrackDecal:
+  scripts/GameLib/generated/World/World.c has only CreateDecal, CreateDecal2, OutlineEntity(Group), ReloadSystems,
+  FindSystem, GetSystems; scripts/Core/generated/World/BaseWorld.c has RemoveDecal but no track decal method. The exe
+  has no such string either. The enfusion MCP api_search still lists `World.CreateTrackDecal` and a `TrackDecal`
+  class - that API dump is older than the pak. INFERENCE: removed before 1.9 (replaced by TrackDecalFactory), so the
+  spray-can mod would no longer compile on 1.9. Not compiled to confirm.
+- **1-ter (pak, INFERENCE for the DS):** CreateDecal is declared in scripts/GameLib/generated/World/World.c, a normal
+  game proto (not under WorkbenchAPI), so it is there for game scripts in the client. The proto comment says it
+  returns null when the decal "wasn't created for some reason (invalid material, NoDecal flag, ...)". On a dedicated
+  server (no renderer) INFERENCE: it compiles and returns null / does nothing. Not checked in the DS exe. Decals are
+  client-side anyway: each client must make its own.
+- **2-bis (IDA): no depth threshold to find, and it does not apply to our ground.**
+  - The discontinuity mask is drawn only from meshes with ClutterOccluder on (render flag 0x4000, answer 2). Our
+    runtime entities do not have it, so their depth never enters the mask.
+  - MatClutterMaskPostprocess (sub_140CA51A0 / sub_140CA5F70) registers no parameters in the exe. The threshold is
+    inside the compiled shader, not readable here. The only exe-side knobs are on the occluder:
+    ClutterOccluderClipPlane ("Distance of the clip plane from object pivot", -10..10) and ClutterOccluderEnlarge
+    ("Intensity of clutter mask discontinuity detection").
+  - Verdict: rut depth alone does not remove grass. Ruts of 0.1-0.35 m keep the grass (it is planted at heightmap
+    height). Ways to hide it stay: terrain holes, flattening (answer 3), or a ClutterOccluder prefab test (answer 2).
+
+## Answer 6 (IDA, 2026-10-16)
+**One material per collider piece. Script trimeshes have no per-triangle material.**
+- Script API: `PhysicsGeom.CreateTriMesh(vector vertices[], int indices[], int numVertices, int numIndices)` - no
+  material argument. The material comes only from PhysicsGeomDef.MaterialName (or AddGeom's material) per geom.
+- Native CreateTriMesh sub_140A52060 builds an enf::BulletTriangleMeshShape (sub_140A4E520): a vertex array
+  (12 bytes per vertex) and a 16-bit index array, then a btBvhTriangleMeshShape (sub_14172BBC0, quantized BVH). No
+  material array (no btTriangleIndexVertexMaterialArray-style data).
+- Side finding (INFERENCE): indices are stored as 16-bit, so one script trimesh should stay under 65536 vertices.
+- Wheel contact material: comes from the hit geom (answer 5, sub_1408FBD20 reads the surface of the hit). With one
+  material per trimesh geom, per-triangle lookup has nothing to read. Not opened further.
+- Verdict: friction that changes spot by spot needs separate geoms (or separate bodies) per material.
+
+## Answer 7 (IDA, INFERENCE, 2026-10-16)
+**No internal-edge smoothing found.**
+- Bullet's internal-edge tool (btGenerateInternalEdgeInfo / btAdjustInternalEdgeContacts) needs a btTriangleInfoMap.
+  That class has a vtable, so its RTTI name would be in the exe if it were used. It is not: the only triangle RTTI
+  names are btTriangleCallback, btTriangleShape, btTriangleMeshShape, btBvhTriangleMeshShape and the raycast /
+  convexcast callbacks. No "InternalEdge" / "TriangleInfo" strings.
+- So contacts at inside edges of our trimeshes are not corrected by Bullet's tool. An engine-own fix was not found
+  (not searched past strings / RTTI).
+- Effect: more, smaller triangles give more chances of edge bumps for bodies that slide on the ground (vehicle
+  bellies, debris). Wheels use rays, so they are not affected. Characters: their controller was not checked.
+
+## Answer 8 (IDA, 2026-10-16)
+**AddGeom works on a live body, but there is no RemoveGeom and no swap. A piece cannot be taken out again.**
+- Physics script methods (registration sub_140E67DF0): ... AddGeom, GetGeom, GetNumGeoms, UpdateGeometries,
+  GetGeom* transforms / bounds / surfaces / name, SetGeomInteractionLayer ... No RemoveGeom, no replace.
+- AddGeom (sub_140E63590 -> sub_140E63320 -> sub_140B0B100):
+  - Refuses bodies with merged physics ("Physics::AddGeom adding geometry to body that has merged physics / is
+    merged") and entities with no world.
+  - Turns the body's shape into a btCompoundShape if it is not one yet (sub_14171E640; it uses a dynamic AABB tree
+    of children when the count is over 20, or 50 for one body type), adds the new child (sub_14171E9A0), recomputes
+    the compound bounds (vtable +64, sub_14171FEF0), and sets the shape on the body (sub_1412F4880).
+  - Cost (INFERENCE): adding one child does not rebuild the other children's BVH, so it is cheap next to building a
+    new trimesh. The new trimesh's own BVH build (in CreateTriMesh) is the main cost either way.
+- UpdateGeometries (sub_140E69E50 -> sub_140B179C0) re-reads the geoms from the entity's MODEL (xob) and rebuilds
+  the body from it. It does not help with script geoms.
+- Verdict: "one body with 4 x 4 sub-geoms, rebuild only the touched one" is not possible - the old geom cannot be
+  removed. The way to rebuild only a 2 m piece is a separate body per piece (a child entity per piece, destroy +
+  CreateStaticEx on that one). Whether that beats one 8 m body depends on our per-body overhead; measure with the
+  'MUD band: mesh/collider split ms' lines.
+
+## Answer 9 (IDA, 2026-10-16)
+**No. The vehicle sim never reads RollingResistance or RollingDrag from the surface (.vhcsurf).**
+- ContactSurface attributes (sub_141320780): NoiseSteer, NoiseFrequency, Roughness, FrictionNonTread,
+  FrictionTread, RollingResistance, RollingDrag. Each one has an attribute index global (0x1423B8B90 ... 0x1423B8BA8).
+- The first five each have a NATIVE reader besides the script getter (sub_141320680, sub_141320630, sub_1413206D0,
+  sub_141320590, sub_1413205E0). RollingResistance (0x1423B8BA4) and RollingDrag (0x1423B8BA8) are touched only by
+  the attribute registration and the script getters GetRollingResistance (sub_141321160) / GetRollingDrag
+  (sub_141321090). So nothing native uses them.
+- The tyre .conf RollingResistance / RollingDrag say "NOT USED ATM!" (sub_140547D60), as known.
+- What a "mud" surface can change for free: friction (tread / non-tread), roughness, steering noise. That gives
+  slipping, not drag.
+- Two script levers that do exist:
+  - `WheelSetRollingDrag(wheelIdx, drag)` on VehicleWheeledSimulation and VehicleWheeledSimulation_SA_B (and the
+    tracked sim). Already rated weak in 2026-10-15-sinking-deep-dive.md.
+  - `VehicleBaseSimulation.SetSurfaceOverride(ResourceName surfaceMat)` (static, sub_140734580, doc says "Internal
+    use only! Overrides surface material of wheel/track casts"). INFERENCE: one global override for all wheel casts,
+    not per spot or per vehicle. Not tested.
+
+## Answer 10 (IDA, 2026-10-16)
+**Nothing new. Script still cannot edit terrain heights, holes or layers in the game.**
+- GenericTerrainEntity script methods (sub_141449370): AffectFoliageEllipse / Circle / Rect / Square,
+  GetTileTextureResName, GetTileNumber, WorldToTerrCoord, TerrToWorldCoord, TryGetHeightTC, GetTileSizeTC,
+  GetTerrainBoundBox, GetTileVerticesCount. All read-only except the foliage obstacles.
+- String search for Set/Modify/Paint/Edit/Toggle/Add/Remove + Terrain/Height/Hole/Surface found only
+  SetSurfaceOverride (vehicle, answer 9), UI SetHeightOverride / Min/MaxDesiredHeight, SetFogHeightDensityOverride,
+  and the Workbench-only SetTerrainSurfaceTile / Add/RemoveTerrainFlatterEntity (WorldEditorAPI, answer 12).
