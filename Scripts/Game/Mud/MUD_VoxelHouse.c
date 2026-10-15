@@ -26,7 +26,7 @@ class MUD_VoxelHouseSub
 
 class MUD_VoxelHouse
 {
-	static const bool ENABLED = true;
+	static const bool ENABLED = true;     // on for release (user 2026-10-15: tested, works)
 	static const bool USE_PANELS = true;    // false = all voxels (option 4)
 	static const string CONTEXT = "MUD_VoxelTunnelContext";
 	static const string ACTION = "MUD_VoxelHouse";

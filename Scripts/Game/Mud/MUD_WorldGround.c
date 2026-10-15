@@ -558,10 +558,6 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iCsColDrop;         // collider: DropBody
 	protected int m_iCsColStatic;       // collider: MakeStatic
 	protected int m_iCsColGeoms;        // collider: geoms made (count)
-	// shared band build (user 2026-10-15): a collider after the same patch's mesh, no other band build between, same inputs,
-	// reuses that mesh's m_Band surface (m_Vb / m_Ib / m_Slot are not changed by the mesh's groove pass)
-	protected int m_iShareKey = -1;     // patch whose band surface m_Band holds now (-1 = none)
-	protected int m_iBandShared;        // collider builds that reused it, 10 s
 	protected int m_iBandCells;           // sums / max per build
 	protected int m_iBandCellsMax;
 	protected int m_iBandTris;
@@ -6085,22 +6081,6 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Shared band build: m_Band.m_aSkin is what FillBandOn(p) would write now
-	protected bool SameBandOn(MUD_FinePatch p)
-	{
-		for (int c = 0; c < SKIN * SKIN; c++)
-		{
-			int cell = p.m_aCell[c];
-			int slot = -1;
-			if (cell >= 0 && (cell & VOX) == 0)
-				slot = cell & SLOT;
-			if (m_Band.m_aSkin[c] != slot)
-				return false;
-		}
-		return true;
-	}
-
-	//------------------------------------------------------------------------------------------------
 	//! Layered-SDF test: per-build counts of the mesher for the 'MUD band' stats line
 	protected void BandCount()
 	{
@@ -6167,7 +6147,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		FillBandOn(p);
 		m_iCsMeshIn += System.GetTickCount(csIn);
 		int tc = System.GetTickCount();
-		m_iShareKey = -1;
 		bool ok = m_Band.Build(m_fFine, m_fBandSkirt);
 		m_iBandCoreMs += System.GetTickCount(tc);
 		m_iCsMeshCore += System.GetTickCount(tc);
@@ -6178,7 +6157,6 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iBandFallback++;     // else: no on cell (all kept terrain) - the grid collapses it the same way
 			return false;
 		}
-		m_iShareKey = p.m_iKey;
 
 		int chunkPatches = MUD_CoarseSkinEntity.CELLS / SKIN;     // 8 patches per skin chunk side
 		int ux = (p.m_iPx - (p.m_iPx / chunkPatches) * chunkPatches) * PCELLS;
@@ -6198,7 +6176,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		for (int i = 0; i < nAll; i++)
 		{
 			vector q = m_Band.m_Vb.m_aV[i];
-			m_Band.m_Show.m_aV[i] = q;
 			float qx = q[0] * invFine;
 			float qz = q[2] * invFine;
 			int i2 = i * 2;
@@ -6216,7 +6193,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					if (t > 1)
 						t = 1;
-					m_Band.m_Show.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
+					m_Band.m_Vb.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
 				}
 			}
 			m_Band.m_Uv.m_aTop[i2] = (ux + qx) * invDiv;
@@ -6259,7 +6236,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		MeshObject mesh = res.GetResource().ToMeshObject();
 		// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 		mesh.UpdateIndices(0, m_Band.m_Ib.m_aI);
-		mesh.UpdateVerts(0, m_Band.m_Show.m_aV, m_Band.m_Uv.m_aTop);
+		mesh.UpdateVerts(0, m_Band.m_Vb.m_aV, m_Band.m_Uv.m_aTop);
 		if (m_bGroove)
 		{
 			mesh.UpdateIndices(1, m_Band.m_Ib.m_aI);       // its first ni: the surface without skirts
@@ -6299,9 +6276,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		bool hadBody = p.m_bColValid && p.m_Phys != null;
 		bool moved = false;
 		int held = 0;
-		// no same-frame rule: the frame budget puts the collider a frame after its mesh (log 23:21, shared 0); any
-		// other build clears m_iShareKey, and the inputs + slots are compared below
-		bool share = m_iShareKey == p.m_iKey;
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
@@ -6323,31 +6297,16 @@ class MUD_WorldGroundEntity : GenericEntity
 				}
 				if (hadBody && Math.AbsFloat(y - p.m_aColH[v]) > 0.001)
 					moved = true;
-				if (share && m_Band.m_aY[v] != y)
-					share = false;
 				m_Band.m_aY[v] = y;
-				m_Band.m_aD[v] = 0;     // the reveal input: no effect on the surface the collider takes
+				m_Band.m_aD[v] = 0;
 				m_Buf.m_aPlate[v] = Vector(vx * m_fFine, p.m_aBase[v] + p.m_aFloor[v] - m_fPlateGap, vz * m_fFine);
 			}
 		}
-		if (share)
-			share = SameBandOn(p);     // BreakHard (BeforeCollider) may have changed a cell's slot since the mesh
-		if (!share)
-			FillBandOn(p);
+		FillBandOn(p);
 		m_iCsColIn += System.GetTickCount(csIn);
 		int tc = System.GetTickCount();
-		bool ok = true;
-		if (share)
-		{
-			m_iBandShared++;     // the mesh's skirt verts / tris sit after m_iV / m_iI: the collider never reads them
-		}
-		else
-		{
-			m_iShareKey = -1;
-			ok = m_Band.Build(m_fFine, 0);
-			m_iBandCoreMs += System.GetTickCount(tc);
-		}
-		m_iShareKey = -1;
+		bool ok = m_Band.Build(m_fFine, 0);
+		m_iBandCoreMs += System.GetTickCount(tc);
 		m_iCsColCore += System.GetTickCount(tc);
 		if (!ok)
 		{
@@ -6498,9 +6457,9 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iBandCells / b, m_iBandCellsMax, m_iBandTris / b, m_iBandTrisMax, m_iBandVerts / b, m_iBandSkirtTris / Math.Max(m_iBandMeshN, 1.0), m_iBandDegen, m_iBandMissing, m_iBandFallback));
 			Print(string.Format("MUD band: mesh split ms - input %1, mesher %2, reveal + uv %3, mesh object %4, rest %5 (of %6)",
 				m_iCsMeshIn, m_iCsMeshCore, m_iCsMeshUv, m_iCsMeshRes, m_iBandMeshMs - m_iCsMeshIn - m_iCsMeshCore - m_iCsMeshUv - m_iCsMeshRes, m_iBandMeshMs));
-			Print(string.Format("MUD band: collider split ms - input %1, mesher %2, trimeshes %3 (%4 geoms), drop %5, static %6, rest %7 (of %8) | shared %9",
+			Print(string.Format("MUD band: collider split ms - input %1, mesher %2, trimeshes %3 (%4 geoms), drop %5, static %6, rest %7 (of %8)",
 				m_iCsColIn, m_iCsColCore, m_iCsColGeom, m_iCsColGeoms, m_iCsColDrop, m_iCsColStatic,
-				m_iBandColMs - m_iCsColIn - m_iCsColCore - m_iCsColGeom - m_iCsColDrop - m_iCsColStatic, m_iBandColMs, m_iBandShared));
+				m_iBandColMs - m_iCsColIn - m_iCsColCore - m_iCsColGeom - m_iCsColDrop - m_iCsColStatic, m_iBandColMs));
 			Print(string.Format("MUD band: grid path - mesh %1 builds, mean %2 ms, worst %3 | collider %4, mean %5 ms, worst %6 | band fast verts mean %7, fast quads mean %8",
 				m_iGridMeshN, gMeshMean, m_iGridMeshWorst, m_iGridColN, gColMean, m_iGridColWorst, m_iBandFastV / b, m_iBandFastQ / b));
 		}
@@ -6517,7 +6476,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_iCsColDrop = 0;
 		m_iCsColStatic = 0;
 		m_iCsColGeoms = 0;
-		m_iBandShared = 0;
 		m_iBandColN = 0;
 		m_iBandColMs = 0;
 		m_iBandColWorst = 0;

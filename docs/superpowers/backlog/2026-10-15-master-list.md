@@ -32,8 +32,8 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 | Ground debug off | NOT done: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0) |
 | Trench DEBUG_INSTANT | false in MUD_TrenchSite.c:19 (CODE) - user wants it kept as a test option |
 | JIP ask cap | in code: JIP_MAX_ASKS 10 (MUD_WorldGround.c) - check it still applies to voxel JIP |
-| Per-player trench-site cap | NOT done: MAX_SITES 20 is server-wide (MUD_TrenchSite.c:12) |
-| Voxel house | MUD_VoxelHouse ENABLED true (CODE) - untested wall panels live in play. Decide: switch off for release or test |
+| Per-player trench-site cap | DROPPED 2026-10-15 (user: no per-player limit). Only MAX_SITES 20 server-wide |
+| Voxel house | DONE 2026-10-15: MUD_VoxelHouse ENABLED true for release - user tested it earlier, works |
 | Mud sheet debug switches | FREEZE_TEST / OFF_TEST / DEBUG_SHOW / DEBUG_TELEPORT all false (CODE); PERF log line still prints |
 | F13 publish checks | packed mud_heights.c opens, no pak junk |
 | PvP scenario on MudArland | only the GM scenario exists |
@@ -42,12 +42,14 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - Client GPU hang (DEVICE_HUNG) seen twice - no repro yet.
 - GM-placed vehicle hangs in air.
 - MUD_Surface.Y has the same holed-heightmap flaw (GM camera etc.) - [SUGGESTION] from remember.md.
-- Old trench test 'unpack should refuse' FAILS.
+- Old trench test 'unpack should refuse' FAILED (stale case '1,9' after MAX_LAYERS went to 10) - case now '1,11' (user OK 2026-10-15), recheck after reload.
 - PINNED: fps swings 64-86 over voxel ruts in Workbench only (game client 100+ fps, USER) - recheck only if seen in game.
 - Crater items from the old list (M1 rim, size by charge, hit-entity check, lip slope): re-check against the voxel
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- Rut field cost (LOG 2026-10-15 23:16: ~20 ms per rut op, mesher run twice per patch = 53%): shared build tried
+  and reverted (6% hit, mud-gotchas). Next idea: schedule a patch's collider right after its mesh, then share.
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel
   mesh down - as sharp as 0.25 m voxels without the 3D cost, one mesh = look = feel. Plus cheap probes MatTerrainObject /
   GlobalLayer on voxel tops. docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md

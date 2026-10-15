@@ -555,7 +555,7 @@ modded class SCR_PlayerController
 
 		m_fMudLastPlace = now;
 		string why;
-		MUD_TrenchSiteComponent site = MUD_TrenchSiteComponent.Spawn(plan, GetPlayerId(), why);
+		MUD_TrenchSiteComponent site = MUD_TrenchSiteComponent.Spawn(plan, why);
 		if (!site)
 			Print("MUD trench site: refused, " + why, LogLevel.WARNING);
 		else if (instant || MUD_TrenchSiteComponent.DEBUG_INSTANT)

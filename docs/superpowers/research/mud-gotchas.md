@@ -451,3 +451,7 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   rim while the terrain stays: a see-through V gap. And brick soil measured only against the SEEDED ground leaves a rut
   over a raised crater rim grass next to soil patches; soil by pull depth (m_aDispY - y > 0.03) fixed it (soil walls
   0-82 -> up to 733 per batch).
+- PROVEN 2026-10-15 (WB log 23:21-23:24, shared band build test, reverted to v102): a patch's band mesh and collider
+  never rebuild in the same frame (frame budget; mesh interval 0.1 s, collider 0.2 s). Reusing the mesh's band build
+  for the collider when inputs match caught 14 of 217 collider builds (~6%): a new rut changes the inputs first.
+  Halving the mesher cost needs a schedule change (collider right after its mesh), not a cache.

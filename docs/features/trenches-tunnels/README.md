@@ -10,4 +10,4 @@ MUD_TrenchSite.c, MUD_TrenchPlanner.c, MUD_TrenchLayout.c, MUD_TrenchGhost.c, MU
 - [2026-10-09-mud-trench-plan-mode.md](../../superpowers/plans/2026-10-09-mud-trench-plan-mode.md)
 
 ## Open
-- Per-player trench-site cap not done (MAX_SITES 20 server-wide). Keys: Ctrl+F trench, F shovel, T tunnel.
+- No per-player trench-site cap (user 2026-10-15: dropped); only MAX_SITES 20 server-wide. Keys: Ctrl+F trench, F shovel, T tunnel.
