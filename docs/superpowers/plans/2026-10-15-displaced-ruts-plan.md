@@ -201,9 +201,9 @@ CODE line numbers are from master 34d1afe (2026-10-15); check them before editin
 - Per vertex v (world = m_vBOrg + m_Vb.m_aV[v]): f = FloorAt; pulled if f < y - DISP_EPS and y - f < DISP_GUARD.
 - Rutted brick = any vertex pulled, or any triangle edge midpoint pulled (the 6-split-point rule, MEASURED crack-
   free). Not rutted -> return (mesh unchanged).
-- Budget BEFORE splitting: m_iTop * 4 <= MAX_I, m_iDirt * 4 <= MAX_I, m_iV + (m_iTop + m_iDirt) <= MAX_V
-  (edges ~1.5 per tri; using 1 per index-triple x3/3 is a safe upper bound only with sharing - if unsure use
-  m_iV + (m_iTop + m_iDirt) / 3 * 3). Fails -> pull the coarse vertices only, no split, log
+- Budget BEFORE splitting (m_iTop / m_iDirt are INDEX counts, 3 per triangle): m_iTop * 4 <= MAX_I,
+  m_iDirt * 4 <= MAX_I, and m_iV + m_iTop + m_iDirt <= MAX_V (new vertices <= edges <= 3 per triangle = one per
+  index - a safe upper bound; with shared midpoints the real number is ~1.5 per triangle). Fails -> pull the coarse vertices only, no split, log
   `rut split overflow brick i j k` (rare: MEASURED busiest ~185 tris vs ~2000 needed). Neighbour midpoint rule for an
   overflowed brick (plan Step 2): NOT needed for the first build - log first, add it only if the log ever shows one.
 - Split: copy the old index lists to temp arrays, keep the old y per vertex (fold check), then for each triangle
