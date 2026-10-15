@@ -26,6 +26,9 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
 2. Material check: is a deep v035 rut clearly visible on MAT_TOP (default_MatTerrainObj1.emat) vs a plain
    material? mud-gotchas 2026-10-08: ruts on MatTerrainObject looked "subtle" (NormalBlend suspected, never A/B'd).
    If the material hides the shape, sharper geometry buys little -> fix / pick the material first.
+   GlobalLayer probe (deep dive option 4): the 3 shipped emats read GlobalLayerUVSrc "UV set 2"
+   (results/2026-10-14-material-search.md) - our mesh has one UV set. Use / copy an emat that reads UV set 1 or
+   world position (INFERENCE).
    PASS = user sees the rut shape on MAT_TOP.
 
 ## Step 1 - data (no mesh change yet)
@@ -56,6 +59,11 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
   - UV of a midpoint = average of its ends (same tile per quad, KindAB).
   - Pull: y = min(y, Floor(x, z)), Floor = bilinear over the 4 floor samples, missing corners = the vertex's y.
   - Guard: pull only vertices less than ~1 m above the floor (tunnel ceilings / overhang lips stay).
+  - Fold filter: after the pull, run each split triangle through Tri() (drops zero-area only - CODE) AND drop a
+    non-top triangle whose normal flipped vs before the pull. CreateTriMesh keeps folded / zero-area tris (IDA
+    sub_140A52060, no checks). Top triangles can't fold (the pull only moves y, so the facing of an upward
+    triangle is fixed by its x/z shape; MEASURED 0 folds). Walls can: MEASURED 1 fold in 145 pulled wall
+    triangles (rut_x_crater). Count drops in the batch log.
   - Decide grass vs soil on rut walls ON PURPOSE: today `top` is per coarse quad (n.y > 0.7). Keep it per coarse
     quad (rut walls stay grass) for step 2; a per-triangle pick is a later look test.
 - Budget (MEASURED 2026-10-15 on the prototype shapes, busiest brick): crater_big 185 tris / 117 verts -> split
