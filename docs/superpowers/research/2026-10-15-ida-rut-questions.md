@@ -281,12 +281,128 @@ Workbench TerrainToolDesc_* only.
 - List the script registrations of GenericTerrainEntity / terrain classes in the CURRENT exe. Anything new
   (height write, hole toggle, layer paint)? Five minutes - a yes would change the whole architecture.
 
-## 11-13 (added 2026-10-15 late, from research/2026-10-15-rut-options-round2.md)
-- 11. Runtime spline / road / river mesh: can a road / shape / spline entity (RoadEntity, ShapeEntity, generator
-  entities, RiverEntity) be spawned and given points at runtime and generate its mesh in the GAME (not Workbench)?
-  Which script API reaches it?
-- 12. String / class sweep for deformation features: "deform", "footprint", "snow", "mud", "displacement",
-  "tessellat", "track" (non-decal), "SetHeight", "HeightmapEdit", "PaintLayer", "TerrainModif". For each hit: what it
-  is, reachable from script?
-- 13. Vanilla track decals on our map: does SCR_VehicleTrackDecal's terrain path draw on hole cells (our ground over a
-  hole) or skip them? (terrain hole test in the decal clip, sub_140B20280 area)
+
+---
+Answers 11-13 below: same exe (ArmaReforgerSteamDiag.exe 1.9.0.10, built from continuous_branches_stable_1.9.0),
+IDA base 0x140000000, read 2026-10-16. Labels as above (IDA / PROVEN / INFERENCE).
+
+## 11. Runtime spline / road / river mesh
+Can a road / shape / spline entity (RoadEntity, ShapeEntity, generator entities, RiverEntity) be spawned and given
+points at runtime and generate its mesh in the GAME (not Workbench)? Which script API reaches it?
+
+### Answer 11 (IDA, 2026-10-16)
+**Short answer: a RoadEntity builds its mesh in the game, but only from its saved attributes. No script method sets
+points in the game. ShapeEntity point setters and all generators are Workbench-only.**
+
+- **RoadEntity** (class registration sub_14130DF60, attributes sub_14130EB50, vtable 0x141de38f0):
+  - Attributes: SplinePoints (ShapePoint objects), Points (old vector array, "obsolete" - ignored when SplinePoints is
+    set), IsClosedSpline, Type, Width (default 10, 0 = "Invalid width ... Skipping the road creation"), Lanes,
+    Left/RightLaneOffset, Material (MatPBRRoad, default system/materials/roadDefault.emat), VScale,
+    MarkingMaterial, BeginningPiece / EndPiece, RandomSeed, ForceFullLength, MidPieceSequence, CustomSequence,
+    RoadSort, MatSortBias.
+  - The build is sub_14130F6A0. It reads those attributes from the entity SOURCE, builds the spline
+    (sub_140C9CB10), then the mesh (sub_140C9CFA0), then registers with the road manager (sub_140FB7790).
+  - It is called from the load-from-source slot (vtable +80, sub_14130EAE0). That is the normal spawn path, so a
+    RoadEntity spawned in the game from a prefab does build its mesh. The mesh part runs only when the entity has
+    EntityFlags.VISIBLE (flags at entity+88, bit 1).
+  - Rebuilds: on a transform change (sub_141311380, only while registered, +632) and from WB_EnableAutoReinits
+    (sub_141311070). Both re-read the source. INFERENCE: in the game, moving the road re-runs the same build with the
+    same points.
+  - Script API on RoadEntity: only WB_EnableAutoReinits / WB_DisableAutoReinits. Nothing to set points.
+- **Only route to custom road points in the game (INFERENCE, untested):** load the road prefab's BaseContainer,
+  change "Points" or "SplinePoints" with BaseContainer.Set / SetObjectArray, then spawn the prefab.
+  - BaseContainer.Set (sub_140E459F0) and SetObjectArray (sub_140E45DB0) have no editor check; they just write the
+    variable.
+  - Catches: it edits the shared cached prefab container (every later spawn gets the new points); each MP machine
+    must do the same edit; Y values come from the points (I saw no terrain projection in the game-side build); I did
+    not check whether the road mesh gets a collider.
+  - Verdict: not better than our own MeshObject.Create path. Not worth a probe for ruts.
+- **ShapeEntity / PolylineShapeEntity / SplineShapeEntity** (sub_1414D7F70, sub_1414D8250):
+  - Script methods: GetPointContainerOfType, SetPoints, GenerateTesselatedShape, GetAllInfluenceBBoxes,
+    GetInfluenceBBoxesInSegments, GetPointCount, IsClosed, GetPointsPositions, AddPointData; Spline adds
+    HasPointExplicitTangents, SetPointsSpline, GetTangents.
+  - SetPoints (sub_1414E2A40) calls vtable +760. For Polyline that is sub_1414DFFC0 and for Spline sub_1414E0300.
+    They write the points through the WORLD EDITOR API: BeginEntityAction, CreateObjectArrayVariableMember
+    "ShapePoint", SetVariableValue "%.4f %.4f %.4f", EndEntityAction.
+  - The editor API comes from sub_1413D2AC0 (world+32600), which only exists in Workbench. The +760 code uses it
+    with no null check, so INFERENCE: SetPoints in the game would crash. Treat it as Workbench-only.
+- **Generators** (RoadGeneratorEntity, LakeGeneratorEntity, SplineTerrainGeneratorEntityBase, forest/wall/powerline
+  generators): they create their child entities through the world editor API (e.g. sub_1414E1710 returns early when
+  there is no editor API). Workbench-only.
+- **RiverEntity** (sub_14149C6C0): script methods are read-only (GetExistingInstances, GetCentralPolyline,
+  GetOutlinePoints).
+  - Its mesh IS built at runtime with the same native call as script MeshObject.Create (sub_140AA7870, then
+    sub_140AA5D80), in sub_1414A1E50. It is driven by vtable slot 544 (sub_1414A3540), which reads the parent shape's
+    points.
+  - With no script way to set the shape's points in the game, this gives us nothing new.
+- **Side note for 1-ter (INFERENCE):** BaseContainer's script methods register under the same script-module flag
+  0x10 as World.CreateDecal (sub_140E411D0). Game scripts use BaseContainer.Get, so flag 0x10 is probably not a
+  Workbench-only flag. Not checked on a dedicated server.
+
+## 12. String / class sweep for deformation features
+"deform", "footprint", "snow", "mud", "displacement", "tessellat", "track" (non-decal), "SetHeight",
+"HeightmapEdit", "PaintLayer", "TerrainModif". For each hit: what it is, reachable from script?
+
+### Answer 12 (IDA, 2026-10-16)
+**No hidden ground-deformation feature. Nothing found that changes terrain or mesh shape at runtime.** Hits:
+
+| Search | Hit | What it is | Script, in game? |
+|---|---|---|---|
+| deform | DeformFunc (enf::MaterialSource::DeformFunc, sub_14102D550) | material-source class name (material compile side) | no |
+| footprint | none | - | - |
+| snow | SnowEffect, MatSnow, SnowData, postprocess/ps_Snow, SnowTexGen, snow_BCR/NMO textures | falling-snow weather particles + postprocess | no ground effect |
+| mud | WheelsMud / WheelsMudEffect, GetMuddiness (ParticleEffectInfo, sub_140187EA0) | surface muddiness value used for wheel particles | read only |
+| mud | Get/SetWheelMud, Get/SetBodyMud, Get/SetWheelDust ... (VehicleWheelEffectComponent, sub_1407083D0) | vehicle dirt look (MudAccumulationRange/Factor) | yes, vehicle look only |
+| mud | MudOpacity, MudColor, MudBCRMap, MudMaskMap ... | mud layer params of a vehicle/prop material (VFX map G channel) | material params |
+| displacement | TraceDisplacement / AsynchTraceDisplacement (World, sub_140B80650) | sweep-trace API | yes, not deformation |
+| displacement | GetOceanHeightAndDisplace, "Debug displacement" (Shore) | ocean wave surface | read only |
+| tessellat | ENF_TEST_TESSELLATION | shader define of MatWaterPool (sub_140D02B60), with WATER_ERASE, THERMAL | no |
+| tessellat | HullShader / DomainShader classes | renderer has the shader stages; no ground material uses them that I found | no |
+| tessellat | TessellateEllipse/Circle/RoundedRectangle, TessellateBezierSpline/HermiteSpline, GenerateTesselatedShape | math helpers (2D shapes, splines) | yes, math only |
+| track (non-decal) | VehicleWheelEffectComponent attributes TrackWidth, TrackOpacity, SlidingTrackMaterial, StaticTrackMaterial ("Tyre track when moving without sliding on surfaces with dustiness or muddiness > 0.25", sub_140709E90) | NATIVE tyre-track decals; they feed the same TrackDecal code as the script factory (sub_14070D0B0 -> sub_140B1C020) | prefab data only |
+| track (non-decal) | Tracked / TrackWheel / VehicleTrackedSimulation, TrackIR, CinematicTrack, persistence tracking, music tracks | unrelated | - |
+| SetHeight | SetHeightOverride | UI widget layout (sub_140E9E890) | unrelated |
+| HeightmapEdit / PaintLayer / TerrainModif | none | - | - |
+| (related) | WorldEditorAPI: SetTerrainSurfaceTile, BeginTerrainAction / EndTerrainAction, AddTerrainFlatterEntity, RegenerateFlowMaps (sub_141460840) | terrain editing | Workbench only (editor API) |
+
+- **Possibly useful, data-side (INFERENCE, not tested):**
+  - **Parallax mapping:** ParallaxScale / ParallaxMidlePlane / ParallaxShadowScale are params of MatPBRBasic
+    (sub_140BE2120), MatPBRDecal and MatPBR2Layers (ParallaxScale2). An emat on our ground mesh with a height map and
+    ParallaxScale > 0 might give ruts fake visual depth with no extra triangles. Needs a height texture that matches
+    the rut, so it suits a generic "rutted mud" texture, not exact per-rut depth.
+  - **Native tyre tracks:** the StaticTrackMaterial path draws tracks without sliding on surfaces with
+    muddiness/dustiness > 0.25. It is the same terrain-only decal code as item 1a, so it never draws on our meshes.
+    See item 13.
+
+## 13. Vanilla track decals over our hole cells
+Does SCR_VehicleTrackDecal's terrain path draw on hole cells (our ground over a hole) or skip them? (terrain hole
+test in the decal clip, sub_140B20280 area)
+
+### Answer 13 (IDA, 2026-10-16)
+**The clip has no hole test. In practice no decal starts over our ground, because the wheel is touching our entity,
+not the terrain.**
+
+- **The clip:** sub_140B20280 walks the heightmap cells under the segment and makes 2 triangles per cell.
+  - Heights come from the u16 height array (terrain+48, row stride terrain+68, as (h+1)*scale+offset).
+  - Each triangle is clipped against the segment's 4 planes (sub_140B1A740 -> sub_140B1E170), then vertices are
+    deduped (sub_140B223F0).
+  - Its callees are only math and array helpers. Nothing reads the hole mask (TerrainHoleBlock / "LoadHoles",
+    sub_141021180 / sub_141074430 are elsewhere). So on hole cells the strip is built at the ORIGINAL heightmap
+    height.
+- **Which entity is passed:** SCR_VehicleTrackDecal (scripts/Game/Vehicle/SCR_VehicleTrackDecalComponent.c, read
+  from the pak 2026-10-16) calls `AddPoint(WheelGetContactEntity(i), WheelGetContactPosition(i), ...)`.
+  - It only adds points when lateral or longitudinal slip >= 0.5 (skids), with width 0.25 and lifetime 10.
+  - Its editor category is "GameScripted/Test".
+- **Start check:** a decal starts only when that entity IS the world's terrain entity (sub_140B1ED70: `a2 !=
+  terrain` returns 0).
+  - Over our ground the wheel ray hits our MUD_ entity, so no decal starts there.
+  - A decal already running ends when the contact entity changes (sub_140B1C020, see answer 1a).
+  - The native VehicleWheelEffectComponent path (sub_14070D0B0) uses the same sub_140B1C020. INFERENCE: it passes
+    the contact entity the same way (sub_140750290); not opened.
+- **Leftover edge case (INFERENCE):** a wheel still on real terrain right next to a hole region builds a strip as
+  wide as the track. Any part of that strip that crosses hole cells is drawn at the old heightmap height.
+  - Under our ground it is hidden when our surface is above the heightmap (our normal case, the 1 mm rule).
+  - Over a dug crater it would float in the air at the old ground height.
+  - Strips are 0.25 m (script) or TrackWidth (native), so at most a thin sliver at the hole edge.
+- **Verdict:** vanilla tracks stop at our ground and do not draw on it. To get tracks on our ground we need
+  World.CreateDecal on our entity (answer 1b) or ruts in our own mesh.

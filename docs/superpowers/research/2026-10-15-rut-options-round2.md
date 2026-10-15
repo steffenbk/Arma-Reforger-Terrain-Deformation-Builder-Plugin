@@ -75,6 +75,28 @@ rut out of geometry into texture / engine systems.
 ## H. Already listed, still valid
 Grass flattening (cheap look, whole map), wheel sink (feel), World.CreateDecal on ground that stopped changing.
 
+## IDA results 11-13 (2026-10-16, exe 1.9.0.10 Diag - research/2026-10-15-ida-rut-questions.md)
+- **D (runtime road / spline mesh): dead.** RoadEntity builds its mesh in the game only from saved prefab attributes;
+  ShapeEntity.SetPoints and all generators go through the Workbench-only world editor API (INFERENCE: SetPoints in the
+  game would crash). Editing a road prefab's BaseContainer before spawning is possible but no better than our own
+  MeshObject.Create path.
+- **E (hidden deformation): none.** No footprints / deformable snow / heightmap edit in the game. Two side finds:
+  - **Parallax mapping** on MatPBRBasic / MatPBR2Layers / MatPBRDecal (ParallaxScale, ParallaxMidlePlane,
+    ParallaxShadowScale). Joins option B: the groove soil section with track-aligned UVs AND a tread height map with
+    parallax = tread relief and fake depth on the real groove, no extra triangles. Probe: a mod emat (MatPBRBasic) with
+    a height map on the rut soil section.
+  - **Vehicle mud look from script:** VehicleWheelEffectComponent Set/GetWheelMud, Set/GetBodyMud (+ dust). Cheap
+    "mud on the vehicle" after driving through ruts / soft ground (old parked idea) - client-side look only.
+- **C (vanilla tracks where we don't dig): dead on our ground.** Track decals start only when the wheel's contact
+  entity IS the terrain; over our ground the wheel hits our MUD_ entity, so nothing starts. They do still work on real
+  (kept) terrain - roads, where they already run natively (StaticTrackMaterial on muddiness / dustiness > 0.25).
+  Edge case: a strip from a wheel on kept terrain can float over a crater at the old height (a thin sliver).
+
+### Updated ranking after IDA
+G (soft ground only) and B (tread texture, now + parallax) stay first. Step 0 of the rut-cells deep dive (grid mesher)
+is the cost fix to try before A. C / D / E are closed; tracks on our ground = our own mesh, or World.CreateDecal on
+ground that stopped changing (answer 1b).
+
 ## Ranking (INFERENCE)
 | | Option | Look | Feel | Cost | Effort |
 |---|---|---|---|---|---|
