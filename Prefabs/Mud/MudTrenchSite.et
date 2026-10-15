@@ -1,0 +1,9 @@
+GenericEntity {
+ ID "4D55445452454E31"
+ components {
+  MUD_TrenchSiteComponent "{4D55445452454E32}" {
+  }
+  RplComponent "{4D55445452454E33}" {
+  }
+ }
+}

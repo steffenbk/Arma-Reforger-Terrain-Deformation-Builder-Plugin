@@ -1,0 +1,352 @@
+[EntityEditorProps(category: "Mud", description: "Mud plan 2: in play, writes the keep mask of the whole terrain (cells that stay real terrain: roads, water, MUD_CutBoxEntity boxes) to $logs:<file> for Tools/mud_holes.py. Place it ON A ROAD (control sample). Run only on the map without our holes.", color: "0 255 128 255")]
+class MUD_HoleMaskEntityClass : GenericEntityClass
+{
+}
+
+//! Keep mask scan (mud plan 2, task 2). Samples every heightmap vertex and every cell centre:
+//! road = a WORLD trace (roads are WORLD geometry, not ENTS) whose hit is a RoadEntity (vanilla
+//! SCR_PreviewEntityEditorUIComponent tells roads apart by TraceEnt.Type() == RoadEntity);
+//! water = the point m_fWaterLift above the terrain is under water (TryGetWaterSurfaceSimple).
+//! A cell is kept when any of its 4 corners or its centre is road or water, or its centre is inside
+//! a MUD_CutBoxEntity footprint. Lines in $logs:<m_sFile> (= the session's log folder):
+//!   MUD mask 1
+//!   MUD mask control x <x> z <z> road <0|1> water <0|1>
+//!   MUD mask box <x0> <z0> cells <nx> <nz> cell <size>
+//!   MUD mask keep z <cz> x <cx0> <cx1>        (inclusive, cells from the terrain box corner)
+//!   MUD mask done keep <n> runs <r> road <a> water <b> box <c> ms <t>
+//! No done line = scan failed or stopped early; Tools/mud_holes.py refuses such a file.
+class MUD_HoleMaskEntity : GenericEntity
+{
+	static const int ROAD = 1;
+	static const int WATER = 2;
+	static const int BOX = 4;
+
+	[Attribute("5", UIWidgets.EditBox, "Seconds after start before the scan runs")]
+	protected float m_fDelay;
+
+	[Attribute("2", UIWidgets.EditBox, "Heightmap cell size (m)")]
+	protected float m_fCell;
+
+	[Attribute("30", UIWidgets.EditBox, "Scan work per frame (ms), at least one cell row")]
+	protected int m_iBudgetMs;
+
+	[Attribute("0.05", UIWidgets.EditBox, "Water test point height above the terrain (m)")]
+	protected float m_fWaterLift;
+
+	[Attribute("mud_hole_mask.txt", UIWidgets.EditBox, "Output file in the session's log folder ($logs:)")]
+	protected string m_sFile;
+
+	[Attribute("mud_pins.txt", UIWidgets.EditBox, "Pin list (cells under RELATIVE_Y roots) in $logs:, for mud_holes.py --pins. Empty = none")]
+	protected string m_sPinsFile;
+
+	protected float m_fTime;
+	protected int m_iState;             // 0 waiting, 1 scanning, 2 done or failed
+	protected int m_iRow;
+	protected int m_iNX;
+	protected int m_iNZ;
+	protected float m_fX0;
+	protected float m_fZ0;
+	protected float m_fXMax;
+	protected float m_fZMax;
+	protected float m_fTop;
+	protected float m_fBottom;
+	protected ref array<int> m_aPrev = {};     // flags of vertex row m_iRow
+	protected ref array<int> m_aNext = {};     // flags of vertex row m_iRow + 1
+	protected ref array<MUD_CutBoxEntity> m_aBoxes = {};
+	protected ref TraceParam m_Trace;
+	protected ref FileHandle m_File;     // ref: FileHandle is Managed, a plain member is weak and the handle dies after Begin()
+	protected int m_iKeep;
+	protected int m_iRuns;
+	protected int m_iRoad;
+	protected int m_iWater;
+	protected int m_iBox;
+	protected int m_iWorkMs;
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_HoleMaskEntity(IEntitySource src, IEntity parent)
+	{
+		SetEventMask(EntityEvent.FRAME);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	void ~MUD_HoleMaskEntity()
+	{
+		if (m_File)
+			m_File.Close();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnFrame(IEntity owner, float timeSlice)
+	{
+		m_fTime += timeSlice;
+		if (m_iState == 0)
+		{
+			if (m_fTime >= m_fDelay)
+				Begin();
+			return;
+		}
+
+		if (m_iState != 1)
+			return;
+
+		int t0 = System.GetTickCount();
+		while (m_iRow < m_iNZ)
+		{
+			if (!ScanRow(m_iRow))
+			{
+				Fail(string.Format("terrain hole near cell row %1 - scan the map WITHOUT our holes (vanilla tiles)", m_iRow));
+				return;
+			}
+			m_iRow++;
+			if (m_iRow % 256 == 0)
+				Print(string.Format("MUD mask: row %1 / %2, keep %3", m_iRow, m_iNZ, m_iKeep));
+			if (System.GetTickCount(t0) >= m_iBudgetMs)
+				break;
+		}
+		m_iWorkMs += System.GetTickCount(t0);
+
+		if (m_iRow < m_iNZ)
+			return;
+
+		m_iState = 2;
+		string done = string.Format("MUD mask done keep %1 runs %2 road %3 water %4 box %5 ms %6", m_iKeep, m_iRuns, m_iRoad, m_iWater, m_iBox, m_iWorkMs);
+		m_File.WriteLine(done);
+		m_File.Close();
+		m_File = null;
+		Print(done);
+		if (m_iRoad == 0)
+			Print("MUD mask: NO road cells - the RoadEntity trace found nothing (plan 2 task 2 gate fails)", LogLevel.WARNING);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Begin()
+	{
+		m_iState = 2;
+		vector pos = GetOrigin();
+		GenericTerrainEntity terrain;
+		GenericWorldEntity worldEnt = GetGame().GetWorldEntity();
+		if (worldEnt)
+			terrain = worldEnt.GetTerrain(pos[0], pos[2]);
+		if (!terrain)
+		{
+			Print("MUD mask: no terrain under the mask entity", LogLevel.WARNING);
+			return;
+		}
+
+		vector mins, maxs;
+		terrain.GetTerrainBoundBox(mins, maxs);
+		m_fX0 = mins[0];
+		m_fZ0 = mins[2];
+		// samples stay 1 cm inside the far edges (a WORLD trace exactly on x = 4096 missed, 2026-10-08)
+		m_fXMax = maxs[0] - 0.01;
+		m_fZMax = maxs[2] - 0.01;
+		m_fTop = maxs[1] + 50;
+		m_fBottom = mins[1] - 10;
+		m_iNX = Math.Round((maxs[0] - mins[0]) / m_fCell);
+		m_iNZ = Math.Round((maxs[2] - mins[2]) / m_fCell);
+		m_Trace = new TraceParam();
+
+		// keep boxes: the callback keeps only our boxes (a whole-map query passes every tree through it)
+		GetWorld().QueryEntitiesByAABB(mins - Vector(0, 50, 0), maxs + Vector(0, 50, 0), AddBox);
+
+		m_File = FileIO.OpenFile("$logs:" + m_sFile, FileMode.WRITE);
+		if (!m_File)
+		{
+			Print("MUD mask: cannot open $logs:" + m_sFile, LogLevel.ERROR);
+			return;
+		}
+
+		// control: this entity is placed on a road, so road must be 1 here
+		int ctl = Sample(pos[0], pos[2]);
+		int ctlRoad = 0;
+		int ctlWater = 0;
+		if (ctl > 0 && (ctl & ROAD))
+			ctlRoad = 1;
+		if (ctl > 0 && (ctl & WATER))
+			ctlWater = 1;
+		string control = string.Format("MUD mask control x %1 z %2 road %3 water %4", pos[0], pos[2], ctlRoad, ctlWater);
+		string box = string.Format("MUD mask box %1 %2 cells %3 %4 cell %5", m_fX0, m_fZ0, m_iNX, m_iNZ, m_fCell);
+		m_File.WriteLine("MUD mask 1");
+		m_File.WriteLine(control);
+		m_File.WriteLine(box);
+		Print(control);
+		Print(box);
+		Print(string.Format("MUD mask: %1 keep boxes, writing $logs:%2", m_aBoxes.Count(), m_sFile));
+		// cells under RELATIVE_Y roots stay terrain (Tools/mud_holes.py --pins, see MUD_RelYPins.c)
+		if (!m_sPinsFile.IsEmpty())
+		{
+			MUD_RelYPins pins = new MUD_RelYPins();
+			pins.Write(GetWorld(), mins, maxs, m_fCell, "$logs:" + m_sPinsFile);
+		}
+
+		m_aPrev.Clear();
+		m_aNext.Clear();
+		for (int i = 0; i <= m_iNX; i++)
+		{
+			m_aPrev.Insert(0);
+			m_aNext.Insert(0);
+		}
+		if (!SampleVertexRow(0, m_aPrev))
+		{
+			Fail("terrain hole in vertex row 0 - scan the map WITHOUT our holes (vanilla tiles)");
+			return;
+		}
+		m_iState = 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool AddBox(IEntity e)
+	{
+		MUD_CutBoxEntity b = MUD_CutBoxEntity.Cast(e);
+		if (b)
+			m_aBoxes.Insert(b);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool RoadOnly(notnull IEntity e)
+	{
+		return e.Type() == RoadEntity;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! ROAD | WATER flags at a world XZ; -1 if the terrain already has a hole there
+	protected int Sample(float x, float z)
+	{
+		x = Math.Min(x, m_fXMax);
+		z = Math.Min(z, m_fZMax);
+		BaseWorld world = GetWorld();
+		float h = world.GetSurfaceY(x, z);
+		if (h < -255)
+			return -1;
+
+		int f = 0;
+		if (ChimeraWorldUtils.TryGetWaterSurfaceSimple(world, Vector(x, h + m_fWaterLift, z)))
+			f |= WATER;
+
+		m_Trace.Start = Vector(x, m_fTop, z);
+		m_Trace.End = Vector(x, m_fBottom, z);
+		// roads are WORLD geometry: an ENTS trace never hits them, a WORLD trace returns TraceEnt RoadEntity
+		// (probe 2026-10-08 23:48, Exp 192624). RoadOnly may or may not skip the terrain, so the hit is
+		// checked again: only a RoadEntity hit counts.
+		m_Trace.Flags = TraceFlags.WORLD;
+		m_Trace.LayerMask = EPhysicsLayerPresets.Projectile;
+		m_Trace.TraceEnt = null;
+		if (world.TraceMove(m_Trace, RoadOnly) < 1 && m_Trace.TraceEnt && m_Trace.TraceEnt.Type() == RoadEntity)
+			f |= ROAD;
+		return f;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool SampleVertexRow(int vz, array<int> flags)
+	{
+		float z = m_fZ0 + vz * m_fCell;
+		for (int vx = 0; vx <= m_iNX; vx++)
+		{
+			int f = Sample(m_fX0 + vx * m_fCell, z);
+			if (f < 0)
+				return false;
+			flags[vx] = f;
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool InBox(float x, float z)
+	{
+		foreach (MUD_CutBoxEntity b : m_aBoxes)
+		{
+			if (!b)
+				continue;
+			vector mins, maxs;
+			b.GetBox(mins, maxs);
+			vector l = b.CoordToLocal(Vector(x, b.GetOrigin()[1], z));
+			if (l[0] >= mins[0] && l[0] <= maxs[0] && l[2] >= mins[2] && l[2] <= maxs[2])
+				return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! One cell row: needs vertex rows cz (m_aPrev) and cz + 1 (sampled here into m_aNext)
+	protected bool ScanRow(int cz)
+	{
+		if (!SampleVertexRow(cz + 1, m_aNext))
+			return false;
+
+		float zc = m_fZ0 + (cz + 0.5) * m_fCell;
+		int start = -1;
+		for (int cx = 0; cx < m_iNX; cx++)
+		{
+			float xc = m_fX0 + (cx + 0.5) * m_fCell;
+			int c = Sample(xc, zc);
+			if (c < 0)
+				return false;
+
+			int f = c | m_aPrev[cx] | m_aPrev[cx + 1] | m_aNext[cx] | m_aNext[cx + 1];
+			if (!m_aBoxes.IsEmpty() && InBox(xc, zc))
+				f |= BOX;
+
+			if (f != 0)
+			{
+				m_iKeep++;
+				if (f & ROAD)
+					m_iRoad++;
+				if (f & WATER)
+					m_iWater++;
+				if (f & BOX)
+					m_iBox++;
+				if (start < 0)
+					start = cx;
+				continue;
+			}
+
+			if (start >= 0)
+			{
+				EmitRun(cz, start, cx - 1);
+				start = -1;
+			}
+		}
+
+		if (start >= 0)
+			EmitRun(cz, start, m_iNX - 1);
+
+		// this row's top vertex row is the next row's bottom one
+		m_aPrev.Copy(m_aNext);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void EmitRun(int cz, int cx0, int cx1)
+	{
+		m_iRuns++;
+		m_File.WriteLine(string.Format("MUD mask keep z %1 x %2 %3", cz, cx0, cx1));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Fail(string why)
+	{
+		m_iState = 2;
+		Print("MUD mask: FAILED, " + why, LogLevel.ERROR);
+		if (m_File)
+		{
+			m_File.Close();     // no done line: Tools/mud_holes.py refuses the file
+			m_File = null;
+		}
+	}
+
+#ifdef WORKBENCH
+	//------------------------------------------------------------------------------------------------
+	override int _WB_GetAfterWorldUpdateSpecs(IEntitySource src)
+	{
+		return EEntityFrameUpdateSpecs.CALL_WHEN_ENTITY_VISIBLE;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void _WB_AfterWorldUpdate(float timeSlice)
+	{
+		Shape.CreateSphere(ARGB(255, 0, 255, 128), ShapeFlags.WIREFRAME | ShapeFlags.ONCE, GetOrigin(), 2);
+		super._WB_AfterWorldUpdate(timeSlice);
+	}
+#endif
+}

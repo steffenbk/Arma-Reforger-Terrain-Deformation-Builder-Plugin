@@ -1,0 +1,8 @@
+MUD_GroundEntity : "{00605A3AF910747A}Prefabs/Mud/MudGround.et" {
+ ID "1CB5439C7CF2188E"
+ m_Material "{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat"
+ m_bAutoGameMaterial 1
+ m_fEdgeSink 0.1
+ m_fPitWidth 15
+ m_bCutHoles 0
+}

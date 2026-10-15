@@ -1,0 +1,28 @@
+PATCH COUNTS (dual band mesher vs grid)
+ruts (3 passes)        cells  1261  active  1261  verts  1261 (+272 skirt)  tris  2384 (+272 skirt)  degen   0  missing 0  overflow False  | grid: 1089 verts, 2048 tris
+mortar crater          cells  1366  active  1366  verts  1366 (+268 skirt)  tris  2596 (+268 skirt)  degen   0  missing 0  overflow False  | grid: 1089 verts, 2048 tris
+trench 1.6 m           cells  1378  active  1378  verts  1378 (+268 skirt)  tris  2620 (+268 skirt)  degen   0  missing 0  overflow False  | grid: 1089 verts, 2048 tris
+crater + kept cells    cells  1172  active  1172  verts  1172 (+276 skirt)  tris  2204 (+276 skirt)  degen   0  missing 0  overflow False  | grid: 1089 verts, 1664 tris
+
+HOLES (edges used once that are not rim edges, or used 3+ times)
+ruts (3 passes)        open non-rim edges 0, edges on 3+ tris 0, rim edges 136
+mortar crater          open non-rim edges 0, edges on 3+ tris 0, rim edges 134
+trench 1.6 m           open non-rim edges 0, edges on 3+ tris 0, rim edges 134
+crater + kept cells    open non-rim edges 0, edges on 3+ tris 0, rim edges 138
+
+SEAMS (patch pairs from the same world field)
+ruts (3 passes)    x seam: rim verts A 36 B 36, not shared 0, identical True, open edges on the line 0
+ruts (3 passes)    z seam: rim verts A 34 B 34, not shared 0, identical True, open edges on the line 0
+mortar crater      x seam: rim verts A 34 B 34, not shared 0, identical True, open edges on the line 0
+mortar crater      z seam: rim verts A 34 B 34, not shared 0, identical True, open edges on the line 0
+trench 1.6 m       x seam: rim verts A 34 B 34, not shared 0, identical True, open edges on the line 0
+trench 1.6 m       z seam: rim verts A 34 B 34, not shared 0, identical True, open edges on the line 0
+corner crater+trench x seam: rim verts A 39 B 39, not shared 0, identical True, open edges on the line 0
+corner crater+trench z seam: rim verts A 39 B 39, not shared 0, identical True, open edges on the line 0
+
+2 x 2 PATCH UNION (open edges inside the 16 m square = cracks)
+ruts (3 passes)        0
+mortar crater          0
+trench 1.6 m           0
+corner crater+trench   0
+renders in docs/superpowers/results/sdf_phase1

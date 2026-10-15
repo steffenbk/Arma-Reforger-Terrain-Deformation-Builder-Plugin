@@ -1,0 +1,158 @@
+//! TEMP server timing log (2026-10-11) for the driver stutter: quiet and noisy sessions look the same on the
+//! client, so log what the SERVER does while a player drives. Server only, any vehicle with a pilot.
+//! Console, once per second per driven vehicle ('MUD srv' line, wall-clock stamped like the client's
+//! 'MUD corr' lines): frames, physics steps (EOnSimulate calls), real ms between frames min/max,
+//! frames with 0 steps, most steps in one frame, speed, the sim's throttle/brake/steer/gear.
+//! CSV, one row per server frame, one file per pilot session: $profile:MUD_srvlog_<n>_<tick>.csv.
+//! Whether EOnSimulate fires once per physics step is INFERENCE - the steps/s column will show it (expect ~60).
+//! Delete this file to remove.
+modded class Vehicle
+{
+	protected bool m_bMudSrv;
+	protected int m_iMudSteps;        // EOnSimulate calls since the last frame
+	protected float m_fMudStepSec;    // their summed timeSlice
+	protected ref FileHandle m_MudFile;
+	protected int m_iMudRow;
+	protected int m_iMudLastTick;
+	// 1 s window
+	protected float m_fMudWinSec;
+	protected int m_iMudWinFrames;
+	protected int m_iMudWinSteps;
+	protected int m_iMudWinZero;
+	protected int m_iMudWinMaxSteps;
+	protected int m_iMudWinMinMs;
+	protected int m_iMudWinMaxMs;
+	protected float m_fMudWinSpeed;
+	protected int m_iMudWinCount;     // 1 s windows since pilot in (nearby list every 10)
+	protected static int s_iMudSession;
+	static const bool MUD_SERVER_LOG_ON = false;    // off for the voxel server test (user 2026-10-13: debugging off)
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnInit(IEntity owner)
+	{
+		super.EOnInit(owner);
+		if (!MUD_SERVER_LOG_ON || !GetGame() || !GetGame().InPlayMode() || !Replication.IsServer())
+			return;
+		m_bMudSrv = true;
+		SetEventMask(EntityEvent.SIMULATE | EntityEvent.FRAME);
+		Print(string.Format("MUD srv: armed %1", GetID()));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnSimulate(IEntity owner, float timeSlice)
+	{
+		super.EOnSimulate(owner, timeSlice);
+		if (!m_bMudSrv)
+			return;
+		m_iMudSteps++;
+		m_fMudStepSec += timeSlice;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void MudClose()
+	{
+		if (!m_MudFile)
+			return;
+		m_MudFile.Close();
+		m_MudFile = null;
+		Print(string.Format("MUD srv: %1 pilot left, csv closed, %2 rows", GetID(), m_iMudRow));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void MudWinReset()
+	{
+		m_fMudWinSec = 0;
+		m_iMudWinFrames = 0;
+		m_iMudWinSteps = 0;
+		m_iMudWinZero = 0;
+		m_iMudWinMaxSteps = 0;
+		m_iMudWinMinMs = 1000000;
+		m_iMudWinMaxMs = 0;
+		m_fMudWinSpeed = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnFrame(IEntity owner, float timeSlice)
+	{
+		super.EOnFrame(owner, timeSlice);
+		if (!m_bMudSrv)
+			return;
+		int steps = m_iMudSteps;
+		float stepSec = m_fMudStepSec;
+		m_iMudSteps = 0;
+		m_fMudStepSec = 0;
+		int tick = System.GetTickCount();
+		int realMs = tick - m_iMudLastTick;
+		m_iMudLastTick = tick;
+
+		if (!GetPilot())
+		{
+			MudClose();
+			return;
+		}
+		Physics ph = GetPhysics();
+		VehicleWheeledSimulation sim = VehicleWheeledSimulation.Cast(FindComponent(VehicleWheeledSimulation));
+		if (!ph || !sim || !sim.IsValid())
+			return;
+		float speed = ph.GetVelocity().Length();
+
+		if (!m_MudFile)
+		{
+			s_iMudSession++;
+			string path = string.Format("$profile:MUD_srvlog_%1_%2.csv", s_iMudSession, tick);
+			m_MudFile = FileIO.OpenFile(path, FileMode.WRITE);
+			m_iMudRow = 0;
+			m_iMudWinCount = 0;
+			MudWinReset();
+			Print(string.Format("MUD srv: %1 pilot in, csv %2 open %3, tick %4", GetID(), path, m_MudFile != null, tick));
+			if (m_MudFile)
+			{
+				string head = "row,tick_ms,real_ms,dt,steps,step_sec,speed,x,y,z,yaw,throttle,brake,steer,gear";
+				for (int w = 0; w < sim.WheelCount(); w++)
+				{
+					head += string.Format(",w%1_contact,w%1_lat,w%1_long,w%1_rpm", w);
+				}
+				m_MudFile.WriteLine(head);
+			}
+			return;    // first frame: realMs is from before the pilot got in
+		}
+
+		vector m[4];
+		ph.GetDirectWorldTransform(m);
+		float yaw = Math3D.MatrixToAngles(m)[0];
+		string row = string.Format("%1,%2,%3,%4,%5,%6,%7", m_iMudRow, tick, realMs, timeSlice.ToString(-1, 5), steps, stepSec.ToString(-1, 5), speed.ToString(-1, 3));
+		row += string.Format(",%1,%2,%3,%4", m[3][0].ToString(-1, 3), m[3][1].ToString(-1, 3), m[3][2].ToString(-1, 3), yaw.ToString(-1, 2));
+		row += string.Format(",%1,%2,%3,%4", sim.GetThrottle().ToString(-1, 2), sim.GetBrake().ToString(-1, 2), sim.GetSteering().ToString(-1, 2), sim.GetGear());
+		for (int i = 0; i < sim.WheelCount(); i++)
+		{
+			row += string.Format(",%1,%2,%3,%4", sim.WheelHasContact(i), sim.WheelGetLateralSlip(i).ToString(-1, 3),
+				sim.WheelGetLongitudinalSlip(i).ToString(-1, 3), sim.WheelGetRPM(i).ToString(-1, 1));
+		}
+		if (m_MudFile)
+			m_MudFile.WriteLine(row);
+		m_iMudRow++;
+
+		m_fMudWinSec += timeSlice;
+		m_iMudWinFrames++;
+		m_iMudWinSteps += steps;
+		if (steps == 0)
+			m_iMudWinZero++;
+		if (steps > m_iMudWinMaxSteps)
+			m_iMudWinMaxSteps = steps;
+		if (realMs < m_iMudWinMinMs)
+			m_iMudWinMinMs = realMs;
+		if (realMs > m_iMudWinMaxMs)
+			m_iMudWinMaxMs = realMs;
+		m_fMudWinSpeed += speed;
+		if (m_fMudWinSec < 1)
+			return;
+		Print(string.Format("MUD srv: %1 1s frames %2 steps %3 | frame ms %4-%5 | 0-step frames %6, max steps/frame %7 | speed %8 | thr %9",
+			GetID(), m_iMudWinFrames, m_iMudWinSteps, m_iMudWinMinMs, m_iMudWinMaxMs, m_iMudWinZero, m_iMudWinMaxSteps,
+			(m_fMudWinSpeed / m_iMudWinFrames).ToString(-1, 2),
+			string.Format("%1 brk %2 steer %3 gear %4", sim.GetThrottle().ToString(-1, 2), sim.GetBrake().ToString(-1, 2), sim.GetSteering().ToString(-1, 2), sim.GetGear())));
+		MudWinReset();
+		if (m_iMudWinCount % 10 == 0)
+			Print(string.Format("MUD srv: %1 nearby at %2: %3", GetID(), GetOrigin(), MUD_StutterRobot.Nearby(this, 30)));
+		m_iMudWinCount++;
+	}
+}

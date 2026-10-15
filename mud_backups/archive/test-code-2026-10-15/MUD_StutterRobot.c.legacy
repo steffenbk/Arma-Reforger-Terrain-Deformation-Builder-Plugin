@@ -1,0 +1,376 @@
+//! TEMP robot driver (2026-10-11) for the driver-only stutter: the same move every run, so a run on our
+//! ground and one on plain terrain compare. Delete with its two calls in MUD_JoltProbe.Tick.
+//! Input pattern from TESTEX SCR_ScriptedDriveTest_BK (proven there in SP 2026-09-25..10-02): car actions set
+//! in the driver's OnPrepareControls before super; holding the brake at a stop makes the automatic box
+//! select reverse.
+//! Start: driver seat, stopped, hold handbrake (Space) 3 s -> reverse circle (full brake + full steer) 20 s.
+//! Stop early: press Space again. (A diag menu item was tried first: script ids must be < 512 and id 500
+//! started runs but the truck never moved, 10:07 run - possibly an engine diag on that id, unproven.)
+//! Log: 'MUD robot START' / 'input' / 'STOP' lines; STOP has the corrections MUD_JoltProbe saw in the run.
+class MUD_StutterRobot
+{
+	static const bool ON = true;     // back on for the band mesher MP test (2026-10-13)
+	protected static const float RUN_SEC = 20;
+	protected static const float ARM_SEC = 3;
+	protected static const float HEARTBEAT_MS = 500;
+
+	static float s_fSteer;
+	static float s_fThrottle;
+	static float s_fBrake;
+	protected static float s_fHoldMs = -1000000;
+	protected static bool s_bRun;
+	protected static float s_fT;
+	protected static int s_iRun;
+	protected static bool s_bInputLogged;
+	protected static bool s_bSimLogged;
+	// handbrake key as the player pressed it (OnPrepareControls, before the robot overwrites it)
+	protected static float s_fHbHeld;           // s held while stopped in the driver seat
+	protected static bool s_bHbDown;
+	protected static bool s_bHbReleased;        // released since the run started (then a press stops it)
+	// this run, from MUD_JoltProbe (driver machine only)
+	protected static int s_iCorr;
+	protected static float s_fOurs;
+	protected static float s_fRoad;
+	// wheel-frames per contact surface this run (16:05: snaps depend on where the truck is - which surface?)
+	protected static ref map<string, int> s_mSurf = new map<string, int>();
+
+	//------------------------------------------------------------------------------------------------
+	protected static float NowMs()
+	{
+		BaseWorld world = GetGame().GetWorld();
+		if (!world)
+			return 0;
+		return world.GetWorldTime();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static bool IsLive()
+	{
+		float now = NowMs();
+		return s_bRun && now >= s_fHoldMs && now - s_fHoldMs <= HEARTBEAT_MS;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD_FrameLog: a run is live on this machine (local driver)
+	static bool IsRunning()
+	{
+		return s_bRun;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static int GetRun()
+	{
+		return s_iRun;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! OnPrepareControls, local player, before the robot's values go in
+	static void ReadKeys(ActionManager am)
+	{
+		s_bHbDown = am.GetActionValue("CarHandBrake") > 0.5;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! OnPrepareControls, after SetActionValue: once per run, proves the values went in
+	static void LogInput()
+	{
+		if (s_bInputLogged)
+			return;
+		s_bInputLogged = true;
+		Print(string.Format("MUD robot input: run %1 steer %2 thrust %3 brake %4 set in OnPrepareControls", s_iRun, s_fSteer, s_fThrottle, s_fBrake));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! NoiseSteer / Roughness as loaded: proves the TEMP Common/Materials/Vehicles overrides are live
+	protected static string SurfNoise()
+	{
+		string s = "allowance test " + MUD_AllowanceTest.ON.ToString() + " | surf noise/rough:";
+		array<string> surfs = {"{1D6687EBA7717C09}Common/Materials/Vehicles/dirt.vhcsurf", "{3FE0D00BC351EA1A}Common/Materials/Vehicles/grass.vhcsurf"};
+		foreach (string path : surfs)
+		{
+			Resource res = Resource.Load(path);
+			if (!res || !res.IsValid())
+			{
+				s += " " + path + " no load";
+				continue;
+			}
+			BaseContainer bc = res.GetResource().ToBaseContainer();
+			float noise;
+			float rough;
+			bc.Get("NoiseSteer", noise);
+			bc.Get("Roughness", rough);
+			float grip;
+			bc.Get("FrictionTread", grip);
+			s += string.Format(" %1 %2/%3 grip %4", FilePath.StripPath(path), noise, rough, grip);
+		}
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! 16:15 test: entities with physics within r m of the truck, by prefab (or class), most common first.
+	//! Same call on client (robot START) and server (MUD_ServerLog, pilot in) -> compare the two machines.
+	static string Nearby(IEntity self, float r)
+	{
+		MUD_NearQuery q = new MUD_NearQuery();
+		q.m_Self = self;
+		GetGame().GetWorld().QueryEntitiesBySphere(self.GetOrigin(), r, q.Add, null, EQueryEntitiesFlags.ALL);
+		int total;
+		string s;
+		foreach (string key, int n : q.m_mCount)
+		{
+			total += n;
+			s += " " + key + " " + n.ToString() + ";";
+		}
+		return string.Format("%1 physics entities within %2 m:", total, r) + s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Per wheel in contact: surface file + its FrictionTread, and the contact entity's class
+	protected static void CountSurfaces(Vehicle mine)
+	{
+		VehicleWheeledSimulation sim = VehicleWheeledSimulation.Cast(mine.FindComponent(VehicleWheeledSimulation));
+		if (!sim || !sim.IsValid())
+			return;
+		for (int w = 0; w < sim.WheelCount(); w++)
+		{
+			if (!sim.WheelHasContact(w))
+				continue;
+			string key = "nomat";
+			GameMaterial mat = sim.WheelGetContactMaterial(w);
+			if (mat)
+			{
+				ContactSurface cs = mat.GetVehicleInfo();
+				if (cs)
+					key = FilePath.StripPath(cs.GetResourceName()) + " grip " + cs.GetFrictionTread().ToString(-1, 2);
+				else
+					key = "novhc";
+			}
+			IEntity ent = sim.WheelGetContactEntity(w);
+			if (ent)
+				key += " on " + ent.ClassName();
+			s_mSurf.Set(key, s_mSurf.Get(key) + 1);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected static void Stop(Vehicle mine, string why)
+	{
+		vector at;
+		if (mine)
+			at = mine.GetOrigin();
+		Print(string.Format("MUD robot STOP run %1 reverse circle (%2) after %3 s | corrections %4 | driving on ours %5 s, road %6 s | at %7",
+			s_iRun, why, s_fT, s_iCorr, s_fOurs, s_fRoad, at));
+		string surf = "MUD robot surfaces run " + s_iRun.ToString() + " (wheel-frames):";
+		foreach (string key, int n : s_mSurf)
+		{
+			surf += " " + key + " " + n.ToString() + ";";
+		}
+		Print(surf);
+		s_bRun = false;
+		s_fSteer = 0;
+		s_fThrottle = 0;
+		s_fBrake = 0;
+		s_fHbHeld = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Every frame, every machine (MUD_JoltProbe.Tick). Acts only where the local player drives.
+	static void Tick(float dt, Vehicle mine, IEntity me)
+	{
+		bool driver;
+		if (mine && me)
+		{
+			CompartmentAccessComponent cac = CompartmentAccessComponent.Cast(me.FindComponent(CompartmentAccessComponent));
+			if (cac && PilotCompartmentSlot.Cast(cac.GetCompartment()))
+				driver = true;
+		}
+
+		if (!s_bRun)
+		{
+			float speed;
+			if (driver && mine.GetPhysics())
+				speed = mine.GetPhysics().GetVelocity().Length();
+			if (!driver || !s_bHbDown || speed > 0.5)
+			{
+				s_fHbHeld = 0;
+				return;
+			}
+			s_fHbHeld += dt;
+			if (s_fHbHeld < ARM_SEC)
+				return;
+			s_bRun = true;
+			s_bHbReleased = false;
+			s_bInputLogged = false;
+			s_bSimLogged = false;
+			s_iRun++;
+			s_fT = 0;
+			s_iCorr = 0;
+			s_fOurs = 0;
+			s_fRoad = 0;
+			s_mSurf.Clear();
+			Print(string.Format("MUD robot START run %1 reverse circle | %2 at %3 | %4", s_iRun, mine.GetID(), mine.GetOrigin(), SurfNoise()));
+			Print("MUD robot nearby run " + s_iRun.ToString() + ": " + Nearby(mine, 30));
+		}
+
+		if (!driver)
+		{
+			Stop(mine, "left the driver seat");
+			return;
+		}
+		if (!s_bHbDown)
+			s_bHbReleased = true;
+		else if (s_bHbReleased)
+		{
+			Stop(mine, "Space pressed");
+			return;
+		}
+
+		s_fT += dt;
+		CountSurfaces(mine);
+		if (s_fT >= RUN_SEC)
+		{
+			Stop(mine, "done");
+			return;
+		}
+
+		if (!s_bSimLogged && s_fT >= 3)
+		{
+			s_bSimLogged = true;
+			VehicleWheeledSimulation sim = VehicleWheeledSimulation.Cast(mine.FindComponent(VehicleWheeledSimulation));
+			if (sim)
+				Print(string.Format("MUD robot sim at 3 s: run %1 throttle %2 brake %3 hb %4 gear %5 steer %6 speed %7 m/s",
+					s_iRun, sim.GetThrottle(), sim.GetBrake(), sim.IsHandbrakeOn(), sim.GetGear(), sim.GetSteering(), mine.GetPhysics().GetVelocity().Length()));
+		}
+
+		s_fSteer = 1;
+		s_fThrottle = 0;
+		s_fBrake = 1;
+		s_fHoldMs = NowMs();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD_JoltProbe, per vehicle per frame
+	static void Count(bool mine, bool driving, bool onRoad, bool corrected, float dt)
+	{
+		if (!s_bRun || !mine)
+			return;
+		if (corrected)
+			s_iCorr++;
+		if (!driving)
+			return;
+		if (onRoad)
+			s_fRoad += dt;
+		else
+			s_fOurs += dt;
+	}
+}
+
+//------------------------------------------------------------------------------------------------
+//! TEMP (MUD_StutterRobot.Nearby): query callback object
+class MUD_NearQuery
+{
+	IEntity m_Self;
+	ref map<string, int> m_mCount = new map<string, int>();
+
+	//------------------------------------------------------------------------------------------------
+	bool Add(IEntity e)
+	{
+		if (!e || e == m_Self || e.GetRootParent() == m_Self || !e.GetPhysics())
+			return true;
+		string key = e.ClassName();
+		EntityPrefabData pd = e.GetPrefabData();
+		if (pd && pd.GetPrefabName() != "")
+			key = FilePath.StripPath(pd.GetPrefabName());
+		if (e.GetPhysics().IsDynamic())
+			key += "(dyn)";
+		m_mCount.Set(key, m_mCount.Get(key) + 1);
+		return true;
+	}
+}
+
+//------------------------------------------------------------------------------------------------
+//! TEMP (MUD_StutterRobot): while a robot run is live the local driver's car actions are the robot's
+modded class SCR_CharacterControllerComponent
+{
+	//------------------------------------------------------------------------------------------------
+	override void OnPrepareControls(IEntity owner, ActionManager am, float dt, bool player)
+	{
+		if (player && MUD_StutterRobot.ON)
+		{
+			// world without the mud ground (vanilla terrain control): probe + robot tick from here
+			if (!MUD_WorldGroundEntity.GetInstance())
+				MUD_JoltProbe.Tick(dt, true, null);
+			MUD_StutterRobot.ReadKeys(am);
+			if (MUD_StutterRobot.IsLive())
+			{
+				am.SetActionValue("CarSteering", MUD_StutterRobot.s_fSteer);
+				am.SetActionValue("CarThrust", MUD_StutterRobot.s_fThrottle);
+				am.SetActionValue("CarBrake", MUD_StutterRobot.s_fBrake);
+				am.SetActionValue("CarHandBrake", 0);
+				MUD_StutterRobot.LogInput();
+			}
+		}
+
+		super.OnPrepareControls(owner, am, dt, player);
+	}
+}
+
+//------------------------------------------------------------------------------------------------
+//! TEMP (stutter test 2026-10-11): looser server snap limits. Engine defaults (IDA Exp game exe, ctor
+//! sub_14083A3E0): speed scaled, divisor 300 (gap allowed = speed / 300 m), angle 0.003 rad, lin 0.3, ang 0.25.
+//! SetAllowance(speedScaled, distance, ...) with speedScaled: distance is the divisor. Set false to test vanilla.
+class MUD_AllowanceTest
+{
+	static const bool ON = false;           // 14:35 off: DS OFF half (14:32 DS ON half: true; 11:23 run: true, 11:50-13:48 off)
+	static const bool SCALED = false;       // fixed gap: speed-scaled is ~0 near a stop (11:12 run: true)
+	static const float DIVISOR = 1;         // SCALED false: fixed 1 m gap (11:12 run: divisor 30)
+	static const float ANGLE = 3.2;         // > pi: never trips (11:12 run 0.0175)
+	static const float LIN = 100;           // m/s (default 0.3, 11:12 run 0.6)
+	static const float ANG = 100;           // rad/s (default 0.25, 11:12 run 0.5)
+}
+
+//! TEMP (16:25 test): prediction off for the driver - truck follows the server, no client guess, no snaps (?).
+//! Applied on BOTH machines (which one the engine reads is not known). Set false to test vanilla.
+class MUD_PredictionTest
+{
+	static const bool OFF = false;   // 16:23 test: true -> still 3 snaps / run at the north spot, no effect
+}
+
+modded class Vehicle
+{
+	//------------------------------------------------------------------------------------------------
+	override void EOnInit(IEntity owner)
+	{
+		super.EOnInit(owner);
+		if (MUD_PredictionTest.OFF && GetGame() && GetGame().InPlayMode())
+			GetGame().GetCallqueue().CallLater(MUD_ApplyPrediction, 2000);
+		if (!MUD_AllowanceTest.ON || !GetGame())
+			return;
+		// 13:56 run: only ONE vehicle got it on the WB host (server still failed the 3.2 rad angle test), so
+		// InPlayMode() was false at EOnInit for world-placed vehicles (inference). Apply a bit later instead.
+		Print(string.Format("MUD allowance: %1 EOnInit, play mode %2 - applying in 2 s", GetID(), GetGame().InPlayMode()));
+		GetGame().GetCallqueue().CallLater(MUD_ApplyAllowance, 2000);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void MUD_ApplyPrediction()
+	{
+		NwkCarMovementComponent nwk = NwkCarMovementComponent.Cast(FindComponent(NwkCarMovementComponent));
+		if (!nwk)
+			return;
+		nwk.SetPrediction(false);
+		Print(string.Format("MUD prediction: %1 set OFF (server %2)", GetID(), Replication.IsServer()));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void MUD_ApplyAllowance()
+	{
+		if (!GetGame().InPlayMode())
+			return;
+		NwkCarMovementComponent nwk = NwkCarMovementComponent.Cast(FindComponent(NwkCarMovementComponent));
+		if (!nwk)
+			return;
+		nwk.SetAllowance(MUD_AllowanceTest.SCALED, MUD_AllowanceTest.DIVISOR, MUD_AllowanceTest.ANGLE, MUD_AllowanceTest.LIN, MUD_AllowanceTest.ANG);
+		Print(string.Format("MUD allowance: %1 set divisor %2 angle %3 lin %4 ang %5", GetID(), MUD_AllowanceTest.DIVISOR, MUD_AllowanceTest.ANGLE, MUD_AllowanceTest.LIN, MUD_AllowanceTest.ANG));
+	}
+}

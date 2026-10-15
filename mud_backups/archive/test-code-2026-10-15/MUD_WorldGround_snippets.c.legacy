@@ -1,0 +1,49 @@
+// Cut from Scripts/Game/Mud/MUD_WorldGround.c on 2026-10-15 (archive of test code).
+// 1) In MUD_WorldGroundEntity.EOnFrame, right after GroundRescue():
+		MUD_JoltProbe.Tick(timeSlice, IsProxy(), this);    // TEMP probe 2026-10-11, back on for the band mesher MP test (2026-10-13)
+// 2) Right after MUD_VoxelProbe.Tick(m_fTime):
+		MUD_EngineProbes.Tick(m_fTime);    // TEMP probe 2026-10-14 (Step G)
+// 3) Member function of MUD_WorldGroundEntity (only caller was MUD_JoltProbe):
+	//------------------------------------------------------------------------------------------------
+	//! TEMP probe 2026-10-11 (MUD_JoltProbe). False = not our ground (kept terrain: road, water edge).
+	//! Within 0.5 m of wp: pend = how far (m) the newest heights differ from the live collider (held
+	//! under a wheel, or not rebuilt yet), age = seconds since a rebuild last moved that collider (1000 =
+	//! never), dirty = a patch there waits for smoothing or a rebuild.
+	bool ProbeGround(vector wp, out float pend, out float age, out bool dirty)
+	{
+		pend = 0;
+		age = 1000;
+		dirty = false;
+		float fx;
+		float fz;
+		if (!m_bReady || !m_Skin || !ToFine(wp, fx, fz))
+			return false;
+		int cx = Math.Floor(fx / FINE);
+		int cz = Math.Floor(fz / FINE);
+		if (!m_Skin.IsHoleCell(cx, cz))
+			return false;
+		int gmax = m_iNPX * PCELLS;
+		int gzmax = m_iNPZ * PCELLS;
+		int gx0 = Math.ClampInt(Math.Round(fx) - 2, 0, gmax);
+		int gx1 = Math.ClampInt(Math.Round(fx) + 2, 0, gmax);
+		int gz0 = Math.ClampInt(Math.Round(fz) - 2, 0, gzmax);
+		int gz1 = Math.ClampInt(Math.Round(fz) + 2, 0, gzmax);
+		for (int gz = gz0; gz <= gz1; gz++)
+		{
+			for (int gx = gx0; gx <= gx1; gx++)
+			{
+				int v;
+				MUD_FinePatch p = At(gx, gz, v);
+				if (!p)
+					continue;
+				if (p.m_bColDirty || p.m_iSx0 >= 0)
+					dirty = true;
+				if (!p.m_bColValid)
+					continue;
+				pend = Math.Max(pend, Math.AbsFloat(p.m_aBase[v] + p.m_aSmooth[v] - p.m_aColH[v]));
+				age = Math.Min(age, m_fTime - p.m_fColChangeAt);
+			}
+		}
+		return true;
+	}
+

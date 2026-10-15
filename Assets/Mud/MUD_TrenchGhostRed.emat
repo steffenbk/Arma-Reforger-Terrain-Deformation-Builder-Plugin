@@ -1,0 +1,17 @@
+MatCommon {
+ Color 1 0.2 0.15 1
+ Cull none
+ Sort overall
+ SortBias 4
+ CastShadow 0
+ ReceiveShadow 0
+ OccludeRain 0
+ OccludeWetness 0
+ Specular 1 1 1 1
+ SpecularMul 0.2
+ AlphaTest 0.003
+ AlphaMul 0.5
+ BlendMode Additive
+ DisableVertexColor 1
+ DisablePrexposure 1
+}

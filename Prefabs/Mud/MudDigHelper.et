@@ -1,0 +1,30 @@
+GenericEntity {
+ ID "B69AA6239907FD6C"
+ components {
+  ActionsManagerComponent "{B519C91735EE8449}" {
+   ActionContexts {
+    UserActionContext "{71F24FB6C1858EB6}" {
+     ContextName "dig"
+     Position PointInfo "{D44BA1CA4DF820BC}" {
+      Offset 0 0.3 0
+     }
+     Radius 3
+    }
+   }
+   additionalActions {
+    MUD_DigAction "{30F31935E7CAC7A9}" {
+     ParentContextList {
+      "dig"
+     }
+     UIInfo SCR_ActionUIInfo "{01EE55B2D1E71521}" {
+      Name "Dig"
+      m_sIconName "building"
+     }
+     Duration -1.5
+     PerformPerFrame 1
+     m_bLowerWeaponOnUse 1
+    }
+   }
+  }
+ }
+}

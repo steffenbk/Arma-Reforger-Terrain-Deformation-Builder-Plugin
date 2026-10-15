@@ -1,0 +1,8 @@
+MatTerrainObject {
+ DisableInteriorProbes 1
+ NormalBlendMaxDistance 0
+ NormalBlendDistanceCoef 0.01
+ NormalBlendMinAngle 0
+ NormalBlendMaxAngle 0
+ NormalBlendAngleCoef 0.01
+}

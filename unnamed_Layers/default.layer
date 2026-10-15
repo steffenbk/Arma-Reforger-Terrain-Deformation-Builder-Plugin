@@ -1,0 +1,6 @@
+MUD_GroundEntity : "{00605A3AF910747A}Prefabs/Mud/MudGround.et" {
+ coords 126.283 1.012 127.039
+}
+Vehicle M923A1_arsenal_MERDC1 : "{EA4819E0745DFAEA}Prefabs/Vehicles/Wheeled/M923A1/M923A1_arsenal_MERDC.et" {
+ coords 116.602 1 104.679
+}

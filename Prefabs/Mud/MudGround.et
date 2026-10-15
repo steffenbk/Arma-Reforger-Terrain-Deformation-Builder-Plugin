@@ -1,0 +1,8 @@
+MUD_GroundEntity {
+ ID "1CB5439C7CF2188E"
+ components {
+  RplComponent "{6D3A91C47E20B5F1}" {
+   Streamable Disabled
+  }
+ }
+}

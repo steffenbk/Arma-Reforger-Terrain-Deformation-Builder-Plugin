@@ -1,0 +1,66 @@
+//! Pin list for Tools/mud_holes.py --pins (mud plan 2, 2026-10-09): the heightmap cell under every root
+//! entity with EntityFlags.RELATIVE_Y. The engine adds the terrain height at the origin XZ to such an
+//! entity's y when the world loads and skips it when that one cell is a hole, so the entity stays at its
+//! raw stored offset (IDA Exp 192624: sub_140A1CC20 -> sub_140A016D0 -> sub_140A30820; in play 57409 of
+//! 58802 relY roots on hole cells were buried, CowShed_E_01_long at y 0.269 over ground 51.66).
+//! X and Z do not depend on the holes, so the list can be taken on the holed map too. Lines:
+//!   MUD pins box <x0> <z0> cells <nx> <nz> cell <size>
+//!   MUD pin z <cz> x <cx>            (one per cell, cells from the terrain box corner)
+//!   MUD pins done pins <n> roots <r>
+//! No done line = write failed; Tools/mud_holes.py refuses such a file.
+class MUD_RelYPins
+{
+	protected ref array<IEntity> m_aFound = {};
+
+	//------------------------------------------------------------------------------------------------
+	protected bool AddRelYRoot(IEntity e)
+	{
+		if (!e.GetParent() && (e.GetFlags() & EntityFlags.RELATIVE_Y))
+			m_aFound.Insert(e);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Write the pin list of the terrain box mins..maxs to path. Returns the pin count, -1 on failure.
+	int Write(notnull BaseWorld world, vector mins, vector maxs, float cell, string path)
+	{
+		int t0 = System.GetTickCount();
+		m_aFound.Clear();
+		world.QueryEntitiesByAABB(mins - Vector(0, 300, 0), maxs + Vector(0, 300, 0), AddRelYRoot);
+
+		int nx = Math.Round((maxs[0] - mins[0]) / cell);
+		int nz = Math.Round((maxs[2] - mins[2]) / cell);
+		FileHandle f = FileIO.OpenFile(path, FileMode.WRITE);
+		if (!f)
+		{
+			Print("MUD pins: cannot open " + path, LogLevel.ERROR);
+			return -1;
+		}
+
+		f.WriteLine(string.Format("MUD pins box %1 %2 cells %3 %4 cell %5", mins[0], mins[2], nx, nz, cell));
+		set<int> seen = new set<int>();
+		int outside;
+		foreach (IEntity e : m_aFound)
+		{
+			vector o = e.GetOrigin();
+			// same cell as the engine's lookup: (int)((x - origin) / cell)
+			int cx = Math.Floor((o[0] - mins[0]) / cell);
+			int cz = Math.Floor((o[2] - mins[2]) / cell);
+			if (cx < 0 || cz < 0 || cx >= nx || cz >= nz)
+			{
+				outside++;
+				continue;
+			}
+			int idx = cz * nx + cx;
+			if (seen.Contains(idx))
+				continue;
+			seen.Insert(idx);
+			f.WriteLine(string.Format("MUD pin z %1 x %2", cz, cx));
+		}
+		string done = string.Format("MUD pins done pins %1 roots %2", seen.Count(), m_aFound.Count());
+		f.WriteLine(done);
+		f.Close();
+		Print(string.Format("%1 outside %2 ms %3 -> %4", done, outside, System.GetTickCount(t0), path));
+		return seen.Count();
+	}
+}

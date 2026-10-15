@@ -1,0 +1,1032 @@
+---------------------------------------------
+Log C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\logs\logs_2026-10-08_22-53-43\console.log started at 2026-10-08 22:53:43 (2026-10-08 20:53:43 UTC)
+
+22:53:43.471   ENGINE       : FileSystem: Adding relative directory 'C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\logs\logs_2026-10-08_22-53-43' to filesystem under name logs
+22:53:43.471   ENGINE       : FileSystem: Adding relative directory 'C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\profile' to filesystem under name profile
+22:53:43.471   ENGINE       : FileSystem: Current working directory: 'G:\SteamLibrary\steamapps\common\Arma Reforger Experimental Tools\Workbench\'
+22:53:43.473  PROFILING    : Workbench Create Engine took: 10.687300 ms
+22:53:45.470   INIT         : INIT         : Workbench Init Engine
+22:53:45.470   ENGINE       : Initializing engine, version 192624
+22:53:45.503   ENGINE       : Addon dirs:
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Testing plan vech msh/'
+22:53:45.503    ENGINE       : dir: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons'
+22:53:45.503    ENGINE       : dir: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental Tools/Workbench/addons'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/CSK/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion ProjectTESTEX/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/G7100/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New opel blitz/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NO ENFUSION MCP TEST/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Zil30 truck/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NewTRUCKAI TEST/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/1ExplosiveCraterSystem_66674B40175D63DB/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Arsenal timer and voice auto k/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Arsenal timer with baconeditor/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Assistand mg reload/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Autokick/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Backpacks auto trunked/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/BaconLoadoutEditor_606B100247F5C709/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Better_deathsatet/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Bks modpack/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Bombcrater testing/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Butter finger hands/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/C-130JSuperHercules_69389797227E64A8/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Camera angle change/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/check/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Chopper crash debri spawner/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictEscalation_651F6696EA91070C/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictPersistentRank_6467360649B45BBC/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictPVERemixedVanilla2.0_61B514B96692C049/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Crossbow/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Death screams/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Depencies copy framwork/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/dObSpawnRHIBBoats_66F8EADF063C2A9F/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Drone limiter/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Drone TV/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Dust and reaction forces/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Dynamic group joining/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Euphoria ragdoll/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Fire system/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/fmtesets/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/GliderTest/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Glider_New/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Head tracking with webcam/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Headshot/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Hold on tight/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LCVP-test/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LCVP_657A27B181DC62DA/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LIght mod/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LinearConflictPVE_628729E87E79DA7F/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M2 FlameThrower Addon/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M2Flamethrower_684E3EE527C3F0AB/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/m50_test/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M58mineclearingline_69D8BA8B9C554C43/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M777 Crater/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/m777 follow cam/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M777HowitzerArtillery_686AC479236F235D/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MFDFramework_64EE818E08AFCF94/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MilitaryBoats_62593E440F3FF363/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MODELXOBTEST/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/More standing on vehicles/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Mortar craters/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MortarcamSH/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Project/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Projectminetest/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Projectsdadasdsad/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NoMorePlankingState/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/OperationsBriefingSystem_68E13DB914127404/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/OSWSFirstPersonPeriscopes_66D95E4B6F89326F/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Projectile following camera/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ProntosParachutes_68996556700D5CA1/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Propellerflightcore_69A8A34027DA65C5/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Real swimming and drowning/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Realistic helicopter flight/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RealisticCombatDrones_65AD60E204191D37/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/REAPER_NH-90HQ_68746C2DCDABB93D/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHIB_5994614FB5AD35C2/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-ContentPack01_1337C0DE5DABBEEF/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-ContentPack02_BADC0DEDABBEDA5E/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-StatusQuo_595F2BF2F44836FB/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RideReady/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RoadForger/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RPG storage matters/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SeizeAMPSecure-Base_612543B7F95C22A5/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SeizeAMPSecure-Scenarios_61272D93C012AA65/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SH-AutoKick_66E82BEE9173E4BC/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SH-MortarCam_66EC2958B95168CB/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SHSFly_Drive-by-Dev_698B2BDEB6268D21/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SpaceCore_5E389BB9F58B79A6/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Spray tagging can/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SprayPatternSelector_69EEEE48B26653ED/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Squad clone/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Squad point system and arsenal/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Storage matters/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Supension fix mod/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Tactest/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-Core_DEADC0DE00000000/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-HMMWV_DEADC0DE00000005/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-TIGR_DEADC0DE00000003/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TakyonsWaveDefend-main/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TESTING CLAUD/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TheConflictIsles_62451E10CD2CE382/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ThermalPostProcessAssets_69623A037A721B91/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Tws Boats/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TWS-Arsenal_69BD2BD40D67EDF2/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TWSWaveSpawnDeathCamera_69A41A4EFB8E4A46/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Vehicle debri/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Vehicle spawner MP/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/WCS_Armaments_629B2BA37EFFD577/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/WW2 Vehicles/'
+22:53:45.503    ENGINE       : dir: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Zone artillyer/'
+22:53:45.503    ENGINE       : dir: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/data/'
+22:53:45.503   ENGINE       : Available addons:
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Testing plan vech msh/addon.gproj' guid: '6A8F47B45144E6D6'
+22:53:45.503    ENGINE       : gproj: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/core/core.gproj' guid: '5614BBCCBB55ED1C' (packed)
+22:53:45.503    ENGINE       : gproj: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/data/ArmaReforger.gproj' guid: '58D0FB3206B6F859' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/CSK/addon.gproj' guid: '6A871711527E7A84'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion ProjectTESTEX/addon.gproj' guid: '6A6D16015AF64F0B'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/G7100/addon.gproj' guid: '6A8566505053966B'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New opel blitz/addon.gproj' guid: '6A84A69151511FB5'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NO ENFUSION MCP TEST/addon.gproj' guid: '6A84E631501C7468'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Zil30 truck/addon.gproj' guid: '6A8363EE57041E81'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NewTRUCKAI TEST/addon.gproj' guid: '6A74C87B526B1B5B'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/1ExplosiveCraterSystem_66674B40175D63DB/addon.gproj' guid: '66674B40175D63DB' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Arsenal timer and voice auto k/addon.gproj' guid: '69DB7981587CD4DA'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Arsenal timer with baconeditor/addon.gproj' guid: '69DC7866447E646B'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Assistand mg reload/addon.gproj' guid: '69D885B45C257C14'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Autokick/addon.gproj' guid: '69FD12A032731429'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Backpacks auto trunked/addon.gproj' guid: '69DE8614529449A8'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/BaconLoadoutEditor_606B100247F5C709/addon.gproj' guid: '606B100247F5C709' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Better_deathsatet/addon.gproj' guid: '68FEC022DFE198E5'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Bks modpack/addon.gproj' guid: '69E0CA5C76331091'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Bombcrater testing/addon.gproj' guid: '69D084717C5767AF'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Butter finger hands/addon.gproj' guid: '69F4B0735ECD2797'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/C-130JSuperHercules_69389797227E64A8/addon.gproj' guid: '69389797227E64A8' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Camera angle change/addon.gproj' guid: '6A04C25E5E663EE9'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/check/addon.gproj' guid: '69EB4AB152FAA5EC'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Chopper crash debri spawner/addon.gproj' guid: '68E96BFB5BCADE37'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictEscalation_651F6696EA91070C/addon.gproj' guid: '651F6696EA91070C' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictPersistentRank_6467360649B45BBC/addon.gproj' guid: '6467360649B45BBC' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ConflictPVERemixedVanilla2.0_61B514B96692C049/addon.gproj' guid: '61B514B96692C049' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Crossbow/addon.gproj' guid: '68ED7B1F5160F675'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Death screams/addon.gproj' guid: '69D4B8A05C764676'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Depencies copy framwork/addon.gproj' guid: '68E537D41823650A'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/dObSpawnRHIBBoats_66F8EADF063C2A9F/addon.gproj' guid: '66F8EADF063C2A9F' (packed)
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Drone limiter/addon.gproj' guid: '6A0D788E5766F03E'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Drone TV/addon.gproj' guid: '69FF3BAB5CC20685'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Dust and reaction forces/addon.gproj' guid: '69D6A71651E1E972'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Dynamic group joining/addon.gproj' guid: '69DB696E5FDE6D58'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Euphoria ragdoll/addon.gproj' guid: '69030A4822927DF2'
+22:53:45.503    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Fire system/addon.gproj' guid: '68C21C3B57E58DFB'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/fmtesets/addon.gproj' guid: '687F58D85A17C422'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/GliderTest/addon.gproj' guid: '661ACB871721738A'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Glider_New/addon.gproj' guid: '69E8673750C5D28A'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Head tracking with webcam/addon.gproj' guid: '6926A0C85C83BC12'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Headshot/addon.gproj' guid: '68EE329C57CFE45B'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Hold on tight/addon.gproj' guid: '6A1295C942A6537A'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LCVP-test/addon.gproj' guid: '6A12F94E511FEC25'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LCVP_657A27B181DC62DA/addon.gproj' guid: '657A27B181DC62DA' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LIght mod/addon.gproj' guid: '64CD29251DC39859'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/LinearConflictPVE_628729E87E79DA7F/addon.gproj' guid: '628729E87E79DA7F' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M2 FlameThrower Addon/addon.gproj' guid: '68B502F04F4AEAE4'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M2Flamethrower_684E3EE527C3F0AB/addon.gproj' guid: '684E3EE527C3F0AB' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/m50_test/addon.gproj' guid: '65D55BB4F22D855A'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M58mineclearingline_69D8BA8B9C554C43/addon.gproj' guid: '69D8BA8B9C554C43' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M777 Crater/addon.gproj' guid: '69EED9B832960478'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/m777 follow cam/addon.gproj' guid: '68DB0CE959DFE22B'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/M777HowitzerArtillery_686AC479236F235D/addon.gproj' guid: '686AC479236F235D' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MFDFramework_64EE818E08AFCF94/addon.gproj' guid: '64EE818E08AFCF94' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MilitaryBoats_62593E440F3FF363/addon.gproj' guid: '62593E440F3FF363' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MODELXOBTEST/addon.gproj' guid: '6A0E9B0D53CF1607'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/More standing on vehicles/addon.gproj' guid: '66D74E13527A5280'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/MortarcamSH/addon.gproj' guid: '66F002575C6C4848'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Project/addon.gproj' guid: '6942B0FB5693DEE9'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Projectminetest/addon.gproj' guid: '69E8A6CE5281466C'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/New Enfusion Projectsdadasdsad/addon.gproj' guid: '69FB272E41F65A58'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/NoMorePlankingState/addon.gproj' guid: '68EE552553DA2DAA'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/OperationsBriefingSystem_68E13DB914127404/addon.gproj' guid: '68E13DB914127404' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/OSWSFirstPersonPeriscopes_66D95E4B6F89326F/addon.gproj' guid: '66D95E4B6F89326F' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Projectile following camera/addon.gproj' guid: '66E3106458051205'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ProntosParachutes_68996556700D5CA1/addon.gproj' guid: '68996556700D5CA1' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Propellerflightcore_69A8A34027DA65C5/addon.gproj' guid: '69A8A34027DA65C5' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Real swimming and drowning/addon.gproj' guid: '69E07B9470513767'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Realistic helicopter flight/addon.gproj' guid: '6A10C3835CB5F3E0'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RealisticCombatDrones_65AD60E204191D37/addon.gproj' guid: '65AD60E204191D37' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/REAPER_NH-90HQ_68746C2DCDABB93D/addon.gproj' guid: '68746C2DCDABB93D' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHIB_5994614FB5AD35C2/addon.gproj' guid: '5994614FB5AD35C2' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-ContentPack01_1337C0DE5DABBEEF/addon.gproj' guid: '1337C0DE5DABBEEF' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-ContentPack02_BADC0DEDABBEDA5E/addon.gproj' guid: 'BADC0DEDABBEDA5E' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RHS-StatusQuo_595F2BF2F44836FB/addon.gproj' guid: '595F2BF2F44836FB' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RideReady/addon.gproj' guid: '69DF68E05172C455'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RoadForger/addon.gproj' guid: '668AD0DF0171A2B7'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/RPG storage matters/addon.gproj' guid: '69DC8AF65C89F925'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SeizeAMPSecure-Base_612543B7F95C22A5/addon.gproj' guid: '612543B7F95C22A5' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SeizeAMPSecure-Scenarios_61272D93C012AA65/addon.gproj' guid: '61272D93C012AA65' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SH-AutoKick_66E82BEE9173E4BC/addon.gproj' guid: '66E82BEE9173E4BC' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SH-MortarCam_66EC2958B95168CB/addon.gproj' guid: '66EC2958B95168CB' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SHSFly_Drive-by-Dev_698B2BDEB6268D21/addon.gproj' guid: '698B2BDEB6268D21' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SpaceCore_5E389BB9F58B79A6/addon.gproj' guid: '5E389BB9F58B79A6' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Spray tagging can/addon.gproj' guid: '68F7066F09218313'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/SprayPatternSelector_69EEEE48B26653ED/addon.gproj' guid: '69EEEE48B26653ED' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Squad clone/addon.gproj' guid: '69D96C085332C887'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Squad point system and arsenal/addon.gproj' guid: '69E32B3A5A923CF6'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Storage matters/addon.gproj' guid: '6908D90550880E01'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Supension fix mod/addon.gproj' guid: '687D6738526BE1AA'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Tactest/addon.gproj' guid: '66DE0EEF5E0A55EC'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-Core_DEADC0DE00000000/addon.gproj' guid: 'DEADC0DE00000000' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-HMMWV_DEADC0DE00000005/addon.gproj' guid: 'DEADC0DE00000005' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TacticalFlava-TIGR_DEADC0DE00000003/addon.gproj' guid: 'DEADC0DE00000003' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TakyonsWaveDefend-main/addon.gproj' guid: '6173737689AC6980'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TESTING CLAUD/addon.gproj' guid: '68B559EF7DF031A1'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TheConflictIsles_62451E10CD2CE382/addon.gproj' guid: '62451E10CD2CE382' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/ThermalPostProcessAssets_69623A037A721B91/addon.gproj' guid: '69623A037A721B91' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Tws Boats/addon.gproj' guid: '69E0DA8D57E57120'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TWS-Arsenal_69BD2BD40D67EDF2/addon.gproj' guid: '69BD2BD40D67EDF2' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/TWSWaveSpawnDeathCamera_69A41A4EFB8E4A46/addon.gproj' guid: '69A41A4EFB8E4A46' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Vehicle debri/addon.gproj' guid: '68EA26DA50138728'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Vehicle spawner MP/addon.gproj' guid: '69E4D5936B6A4F3B'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/WCS_Armaments_629B2BA37EFFD577/addon.gproj' guid: '629B2BA37EFFD577' (packed)
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/WW2 Vehicles/addon.gproj' guid: '688E0BDA53B7D2E3'
+22:53:45.504    ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Zone artillyer/addon.gproj' guid: '69EA669851FAB804'
+22:53:45.504   ENGINE       : FileSystem: Adding relative directory 'C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\addons\Testing plan vech msh' to filesystem under name Testingplanvechmsh
+22:53:45.583   ENGINE       : FileSystem: Adding package 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/data/' (pak count: 15) to filesystem under name ArmaReforger
+22:53:45.588   ENGINE       : FileSystem: Adding package 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/core/' (pak count: 3) to filesystem under name core
+22:53:45.588   ENGINE       : CPU vendor         : GenuineIntel
+22:53:45.588   ENGINE       : CPU type           : 1
+22:53:45.588   ENGINE       : CPU name           : 12th Gen Intel(R) Core(TM) i7-12700K
+22:53:45.588   ENGINE       : CPU cache info     : L1 [Inst 32KB, Data 48KB], L2 [Unif 1280KB], L3 [Unif 25600KB]
+22:53:45.588   ENGINE       : CPU count logical  : 20
+22:53:45.588   ENGINE       : CPU count physical : 12
+22:53:45.588   ENGINE       : CPU features       : mmx sse sse2 sse3 ssse3 sse4_1 sse4_2 popcnt aesni pclmulqdq osxsave avx sha avx2
+22:53:45.588   RESOURCES    : ResourceDB: loading cache (id=0 name=Testingplanvechmsh path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\addons\Testing plan vech msh/resourceDatabase.rdb)
+22:53:45.588   RESOURCES    : ResourceDB: loading cache (id=1 name=ArmaReforger path=G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/data/resourceDatabase.rdb)
+22:53:45.670   RESOURCES    : ResourceDB: loading cache (id=2 name=core path=G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/core/resourceDatabase.rdb)
+22:53:45.671   RESOURCES    : ResourceDB: loading cache (id=3 name=profile path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\profile/resourceDatabase.rdb)
+22:53:45.672   RESOURCES    : ResourceDB: loading cache (id=4 name=logs path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\logs\logs_2026-10-08_22-53-43/resourceDatabase.rdb)
+22:53:45.772    RESOURCES    : RESOURCES    : ResourceDB: full scan
+22:53:45.776     RESOURCES    : RESOURCES    : scanning...
+22:53:45.776      RESOURCES    : RESOURCES    : scanning @"Testingplanvechmsh"
+22:53:45.777      RESOURCES    : RESOURCES    : scanning @"ArmaReforger"
+22:53:45.867      RESOURCES    : RESOURCES    : scanning @"core"
+22:53:45.869      RESOURCES    : RESOURCES    : scanning @"profile"
+22:53:45.874      RESOURCES    : RESOURCES    : scanning @"logs"
+22:53:45.874     RESOURCES    : RESOURCES    : processing meta-files...
+22:53:45.913     RESOURCES    : 99999 meta-files cached, 0 loaded again
+22:53:45.913     RESOURCES    : RESOURCES    : processing files...
+22:53:45.913 INIT         : Workbench startup
+22:53:45.913  INIT         : Workbench Init Engine
+22:53:45.913   RESOURCES    : ResourceDB: full scan
+22:53:45.913    RESOURCES    : processing files...
+22:53:45.913     RESOURCES (W): resource not registered: @"$Testingplanvechmsh:Assets/Mud/MudTile.fbx.export.json". Setting null GUID
+22:53:45.913     RESOURCES (W): resource not registered: @"$Testingplanvechmsh:Assets/Mud/MudTile.pipeline.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:ATL_ArsenalTimer.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:Autokick/config/Autokick.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:Autokick.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:DroneLimiter.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:headtracker_settings.json". Setting null GUID
+22:53:45.917     RESOURCES (W): resource not registered: @"$profile:SHS_DriveBy/configs/shs_driveby.json". Setting null GUID
+22:53:45.917     RESOURCES    : RESOURCES    : processing folders...
+22:53:45.921     RESOURCES    : RESOURCES    : creating GUID-item mapping...
+22:53:45.930     RESOURCES    : RESOURCES    : building tree...
+22:53:45.962   PROFILING    : ResourceDB: full scan took: 190.404300 ms
+22:53:45.963   RESOURCES    : ResourceDB: saving cache (id=0 name=Testingplanvechmsh path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\addons\Testing plan vech msh/resourceDatabase.rdb)
+22:53:45.965   RESOURCES    : ResourceDB: written 5522/5522 bytes
+22:53:45.965   RESOURCES    : ResourceDB: cache successfully saved
+22:53:45.965   RESOURCES    : ResourceDB: saving cache (id=3 name=profile path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\profile/resourceDatabase.rdb)
+22:53:45.967   RESOURCES    : ResourceDB: written 92565/92565 bytes
+22:53:45.967   RESOURCES    : ResourceDB: cache successfully saved
+22:53:45.967   RESOURCES    : ResourceDB: saving cache (id=4 name=logs path=C:\Users\Steffen\Documents\My Games\ArmaReforgerWorkbench\logs\logs_2026-10-08_22-53-43/resourceDatabase.rdb)
+22:53:45.969   RESOURCES    : ResourceDB: written 81/81 bytes
+22:53:45.969   RESOURCES    : ResourceDB: cache successfully saved
+22:53:45.969   ENGINE       : GameProject load
+22:53:45.969    ENGINE       : Loaded addons:
+22:53:45.969     ENGINE       : gproj: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/core/core.gproj' guid: '5614BBCCBB55ED1C'
+22:53:45.969     ENGINE       : gproj: 'G:/SteamLibrary/steamapps/common/Arma Reforger Experimental/addons/data/ArmaReforger.gproj' guid: '58D0FB3206B6F859'
+22:53:45.969     ENGINE       : gproj: 'C:/Users/Steffen/Documents/My Games/ArmaReforgerWorkbench/addons/Testing plan vech msh/addon.gproj' guid: '6A8F47B45144E6D6'
+22:53:45.971   ENGINE       : Loading custom engine user config '$profile:.save/app1890880_user76561198032348675/settings/ReforgerEngineSettings.conf'
+22:53:45.971   INIT         : GameProject engine user settings load @"$profile:.save/app1890880_user76561198032348675/settings/ReforgerEngineSettings.conf"
+22:53:45.971    ENGINE       : Engine user settings config loaded
+22:53:45.971   PROFILING    : Settings changed took: 0.008000 ms
+22:53:46.058   RENDER       : (OK) Adapter 'NVIDIA GeForce RTX 3080 Ti' supports feature level 12_0
+22:53:46.067   RENDER       : Basic screen setup:
+22:53:46.067   RENDER       :   Back buffer format	       : TEXFMT_R8G8B8A8_SRGB (29)
+22:53:46.067   RENDER       :   MSAA                      : none
+22:53:46.073   RENDER       : Driver for NVIDIA GeForce RTX 3080 Ti is from 30.12.2025 (9 months, 10 days old)
+22:53:46.073   RENDER       : GPU_NVIDIA (0x10DE) (NVIDIA GeForce RTX 3080 Ti) with 1 GPU detected, VRAM 12084MB (fast 0MB), shared 16254MB, driver version 591.74
+22:53:46.073   RENDER       : Detected output devices:
+22:53:46.073   RENDER       :  * 2 device/s connected to NVIDIA GeForce RTX 3080 Ti:
+22:53:46.073   RENDER       :    Generic PnP Monitor (\\.\DISPLAY1), 3840x2160 (offset 0x0), 144Hz
+22:53:46.073   RENDER       :    Generic PnP Monitor (\\.\DISPLAY2), 3840x2160 (offset 3840x0), 60Hz
+22:53:46.073   RENDER       :   Concurrent frames limit 2
+22:53:46.687   RENDER       : Graphics device features
+22:53:46.687   RENDER       :  Needed:
+22:53:46.687   RENDER       :  * Highest supported shader model: 6.5 (6.0 needed)
+22:53:46.687   RENDER       :  Optional:
+22:53:46.687   RENDER       :  * Allow tearing (VSYNC) : 1
+22:53:46.687   RENDER       :  * 16 bits : 1
+22:53:46.687   RENDER       :  * Resource heap tier : 3
+22:53:46.687   RENDER       :  * Persistent heaps (DRED) : 1
+22:53:46.687   RENDER       :  * DRED 1.2 is supported by compiler
+22:53:46.741   RENDER       : Main RT format setup.
+22:53:46.741   RENDER       :   Main RT format for quality 0	: TEXFMT_R11G11B10_FLOAT (26)
+22:53:46.741   RENDER       :   Main RT format for quality 1	: TEXFMT_R16G16B16A16_FLOAT (10)
+22:53:46.746   ENGINE       : Job system settings: coreCount=20, shortJobContextCount=16, shortJobThreadCount=15, longJobThreadCount=20
+22:53:46.761   PROFILING    : Settings changed took: 0.013200 ms
+22:53:46.775 AUDIO        : Endpoint: Speakers (ASUS Xonar Essence STX Audio Device)
+22:53:46.775 AUDIO        :  Format: Channels: 2, Sample rate: 48kHz, Avg. bytes: 384kB, Sample bits: 32, Block align: 8B
+22:53:46.775 AUDIO        : Audio client:
+22:53:46.775 AUDIO        :  Format: Channels: 2, Sample rate: 48kHz, Buffer size: 1536B, Frame: 512
+22:53:46.777    RENDER       : RENDER       : Reload shaders
+22:53:46.777    RENDER       : Enfusion shader version 10
+22:53:46.777     INIT         : INIT         : ShaderListReload
+22:53:46.777    PROFILING    : ShaderListReload took: 0.001000 ms
+22:53:46.946    RENDER       : Loaded 4592 newer shader binaries
+22:53:46.946   PROFILING    : Reload shaders took: 168.870900 ms
+22:53:46.946   ENGINE       : Initializing inputs.
+22:53:46.952   RENDER       : Super resolution method available: AMD FSR 1
+22:53:46.952   NETWORK      : Initializing networking.
+22:53:46.952   NETWORK      : Using new GameRplScheduler.
+22:53:46.953    SCRIPT       : SCRIPT       : Initializing scripts
+22:53:46.953     SCRIPT       : SCRIPT       : ScriptProjectManager init
+22:53:47.195    PROFILING    : ScriptProjectManager init took: 242.607000 ms
+22:53:47.211   PROFILING    : Initializing scripts took: 258.570900 ms
+22:53:47.222   ENGINE       : Enfusion engine successfully created.
+22:53:47.222  PROFILING    : Workbench Init Engine took: 1752.123300 ms
+22:53:47.222   INIT         : INIT         : Workbench Create Game
+22:53:47.250   GUI          : Using default language (en_us)
+22:53:47.250   GUI          : Loading 'en_us' localization file.
+22:53:47.250    INIT         : INIT         : Loading StringTable
+22:53:47.266   PROFILING    : Loading StringTable took: 15.898000 ms
+22:53:47.266    SCRIPT       : SCRIPT       : Compiling GameLib scripts
+22:53:47.297    SCRIPT       : Module: Workbench; loaded 18x files; 36x classes; used 125K of static memory; defines: "ENF_WB,WORKBENCH,PLATFORM_WINDOWS,ENABLE_DIAG,ENF_ENABLE_RPLCOMPONENT_IN_GAMECODE"; CRC32: 90ce0460
+22:53:47.297    SCRIPT       : Module: GameLib; loaded 512x files; 704x classes; used 887K of static memory; defines: "ENF_WB,WORKBENCH,PLATFORM_WINDOWS,ENABLE_DIAG,ENF_ENABLE_RPLCOMPONENT_IN_GAMECODE"; CRC32: a2fafa86
+22:53:47.298   PROFILING    : Compiling GameLib scripts took: 32.668500 ms
+22:53:47.298    SCRIPT       : SCRIPT       : Compiling Game scripts
+22:53:47.681  INIT         : Workbench Create Game
+22:53:47.681   SCRIPT       : Compiling Game scripts
+22:53:47.681    SCRIPT    (W): @"Scripts/Game/Mud/MUD_GroundEntity.c,60": Pointer type 'Physics' can only be used with local variables
+22:53:47.916    SCRIPT    (W): @"Scripts/Game/Editor/Components/EditableEntity/SCR_EditableEntityComponent.c,787": 'GetPlayerPlatformKind' is obsolete
+22:53:47.916    SCRIPT    (W): @"Scripts/Game/Editor/Components/EditableEntity/SCR_EditableEntityComponent.c,788": 'GetPlayerPlatformId' is obsolete
+22:53:48.079    SCRIPT    (W): @"Scripts/Game/Workshop/SCR_AddonManager.c,876": 'GetRefCount' is obsolete: Will be removed
+22:53:48.098    SCRIPT    (W): @"Scripts/Game/Campaign/SCR_PlayerProfileManagerComponent.c,142": 'PlayerData' is obsolete
+22:53:48.152    SCRIPT    (W): @"Scripts/Game/Components/Magazines/SCR_MagazineComponent.c,144": Variable 'prefabPath' is not used
+22:53:48.162    SCRIPT    (W): @"Scripts/Game/UI/Backend/CareerBackend.c,159": 'GetDSSession' is obsolete
+22:53:48.162    SCRIPT    (W): @"Scripts/Game/UI/Backend/CareerBackend.c,162": 'RoomID' is obsolete
+22:53:48.162    SCRIPT    (W): @"Scripts/Game/UI/Backend/CareerBackend.c,197": 'GetDSSession' is obsolete
+22:53:48.162    SCRIPT    (W): @"Scripts/Game/UI/Backend/CareerBackend.c,201": 'RoomID' is obsolete
+22:53:48.219    SCRIPT    (W): @"Scripts/Game/DataCollection/SCR_DataCollectorComponent.c,481": 'GetStorage' is obsolete
+22:53:48.219    SCRIPT    (W): @"Scripts/Game/DataCollection/SCR_DataCollectorComponent.c,483": 'GetOnlineWritePrivilege' is obsolete
+22:53:48.220    SCRIPT    (W): @"Scripts/Game/Utilities/SCR_PlayerIdentityUtils.c,20": 'GetPlayerIdentityId' is obsolete
+22:53:48.247    SCRIPT    (W): @"Scripts/Game/UI/Menu/MainMenuUI.c,643": 'GetNotifyCount' is obsolete: Will be substitued by Notification Api.
+22:53:48.247    SCRIPT    (W): @"Scripts/Game/UI/Menu/MainMenuUI.c,645": 'GetNotifyItem' is obsolete: Will be substitued by Notification Api.
+22:53:48.282    SCRIPT    (W): @"Scripts/Game/DataCollection/PlayerData/SCR_PlayerData.c,210": 'PlayerData' is obsolete
+22:53:48.449    SCRIPT       : Module: WorkbenchGame; loaded 192x files; 722x classes; used 2648K of static memory; defines: "ENF_WB,WORKBENCH,PLATFORM_WINDOWS,ENABLE_DIAG,ENF_ENABLE_RPLCOMPONENT_IN_GAMECODE"; CRC32: a9b10e56
+22:53:48.454    SCRIPT       : Module: Game; loaded 5720x files; 11194x classes; used 32617K of static memory; defines: "ENF_WB,WORKBENCH,PLATFORM_WINDOWS,ENABLE_DIAG,ENF_ENABLE_RPLCOMPONENT_IN_GAMECODE,ENABLE_BASE_DESTRUCTION,BUDGET_OPTIMIZATION_CHECKS,SHOW_DISCLAIMER,DEBUG,RESPAWN_TIMER_COMPONENT_DEBUG,GAME_MODE_DEBUG,DEBUG_CONFIGURABLE_DIALOGS,DISABLE_WEAPON_SWITCHING,SCRIPTED_AIM_MODIFIER_DEBUG"; CRC32: d20d9aae
+22:53:48.491   PROFILING    : Compiling Game scripts took: 1192.691300 ms
+22:53:48.495   INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+22:53:48.555   ENGINE       : Game successfully created.
+22:53:48.556  PROFILING    : Workbench Create Game took: 1333.881500 ms
+22:53:48.566  DEFAULT      : Using thumbnail cache directory: C:/Users/Steffen/AppData/Local/Temp/Arma Reforger Workbench Experimental/Projects/Testingplanvechmsh/thumbnails
+22:53:49.173 AUDIO        : Endpoint: Speakers (ASUS Xonar Essence STX Audio Device)
+22:53:49.173 AUDIO        :  Format: Channels: 2, Sample rate: 48kHz, Avg. bytes: 384kB, Sample bits: 32, Block align: 8B
+22:53:49.173 AUDIO        : Audio client:
+22:53:49.173 AUDIO        :  Format: Channels: 2, Sample rate: 48kHz, Buffer size: 1536B, Frame: 512
+22:53:49.286  PLATFORM  (E): Steamworks: RequestCurrentStats failed
+22:53:49.329  DEFAULT      : Using autosave directory: C:/Users/Steffen/AppData/Local/Temp/Arma Reforger Workbench Experimental/Projects/Testingplanvechmsh/autosaves
+22:53:49.330 PROFILING    : Workbench startup took: 5974.238100 ms
+22:53:51.831  INIT         : INIT         : Workbench Reload Game
+22:53:51.931  ENGINE       : Game destroyed.
+22:53:51.936  GUI          : Using default language (en_us)
+22:53:51.936  GUI          : Loading 'en_us' localization file.
+22:53:51.936   INIT         : INIT         : Loading StringTable
+22:53:51.943  PROFILING    : Loading StringTable took: 7.483700 ms
+22:53:51.943  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+22:53:51.948  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+22:53:51.948  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+22:53:51.948  ENGINE       : Game successfully created.
+22:53:51.948  ENGINE       : Game successfully initialized.
+22:53:51.948 PROFILING    : Workbench Reload Game took: 117.054500 ms
+22:53:52.315 DEFAULT      : Checking pending workshop invites...
+22:53:52.404  WORLD        : WORLD        : CreateEntities
+22:53:52.404   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:53:52.404  PROFILING    : NotifyBeforeEntitiesCreated took: 0.003800 ms
+22:53:52.404   WORLD        : WORLD        : Wait for preloading data
+22:53:52.404  PROFILING    : Wait for preloading data took: 0.000300 ms
+22:53:52.404   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:53:52.405  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.002500 ms
+22:53:52.405   WORLD        : WORLD        : NotifyEntitiesInitialized
+22:53:52.405  PROFILING    : NotifyEntitiesInitialized took: 0.009100 ms
+22:53:52.405  WORLD        : World statistics:
+22:53:52.405  WORLD        : Leafs 1024
+22:53:52.405  WORLD        : Leafs with entities 0
+22:53:52.405  WORLD        : Leafs with items 0
+22:53:52.405  WORLD        : Leaf items 0 (ss 0 occ 0 li 0)
+22:53:52.405  WORLD        : Max items/Leaf 0
+22:53:52.405  WORLD        : Total entities 1
+22:53:52.405  WORLD        : Static entities 0
+22:53:52.405  WORLD        : Dynamic entities 0
+22:53:52.405  WORLD        : Features entities 0
+22:53:52.405  WORLD        : NoLink entities 1
+22:53:52.405  WORLD        : Max ents/leaf 0
+22:53:52.405  WORLD        : Max static ents/leaf 0
+22:53:52.405  WORLD        : Max dynamic ents/leaf 0
+22:53:52.405 PROFILING    : CreateEntities took: 1.514800 ms
+22:53:52.695 DEFAULT      : Pending workshop invites request done (1)
+22:53:54.689  WORLD        : WORLD        : Entities load '$Testingplanvechmsh:Arlnd.ent'
+22:53:54.854 PROFILING    : Entities load took: 164.369800 ms
+22:53:54.855  WORLD        : WORLD        : CreateEntities
+22:53:54.862   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:53:54.862  PROFILING    : NotifyBeforeEntitiesCreated took: 0.002700 ms
+22:53:54.862   WORLD        : WORLD        : Wait for preloading data
+22:53:54.862  PROFILING    : Wait for preloading data took: 0.001600 ms
+22:53:54.918  ENTITY       : Create entity @"ENTITY:3" ('Terrain', GenericTerrainEntity) at <0.000000 0.000000 0.000000> @"{80F042D21CC0BBCA}Prefabs/World/Game/Arland/GenericTerrain_Arland.et"
+22:53:54.918    PROFILING    : PROFILING    : Terrain load
+22:53:55.053   PROFILING    : Terrain load took: 134.791900 ms
+22:53:57.382 WORLD        : CreateEntities
+22:53:57.382  ENTITY       : Create entity @"ENTITY:4611686018427388028" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"
+22:53:57.382   ENTITY       : CreateComponent 'BaseRadioComponent'
+22:53:57.383    DEFAULT   (W): BaseRadioComponent does not have any transceiver. (Entity: @"ENTITY:4611686018427388028" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"). Only printing this message once. There're possibly more nodes with this requirement.
+22:53:57.449   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:53:57.449  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.005000 ms
+22:53:57.582   WORLD        : WORLD        : NotifyEntitiesInitialized
+22:53:57.582    TERRAIN      : TERRAIN      : Initializing road networks...
+22:53:57.583   PROFILING    : Initializing road networks... took: 0.266000 ms
+22:53:57.583  PROFILING    : NotifyEntitiesInitialized took: 0.486900 ms
+22:53:57.583  WORLD        : World statistics:
+22:53:57.583  WORLD        : Leafs 1137
+22:53:57.583  WORLD        : Leafs with entities 694
+22:53:57.583  WORLD        : Avg ents/leaf 301
+22:53:57.583  WORLD        : Leafs with items 192
+22:53:57.584  WORLD        : Leaf items 895 (ss 320 occ 167 li 408)
+22:53:57.584  WORLD        : Max items/Leaf 20
+22:53:57.584  WORLD        : Avg items/leaf 4
+22:53:57.584  WORLD        : Total entities 209371
+22:53:57.584  WORLD        : Static entities 205278
+22:53:57.584  WORLD        : Dynamic entities 4029
+22:53:57.584  WORLD        : Features entities 37
+22:53:57.584  WORLD        : NoLink entities 27
+22:53:57.584  WORLD        : Max ents/leaf 651
+22:53:57.584  WORLD        : Max static ents/leaf 613
+22:53:57.584  WORLD        : Max dynamic ents/leaf 87
+22:53:57.584 PROFILING    : CreateEntities took: 2728.685100 ms
+22:53:57.745 PROFILING    : * WorldEditor: LoadWorld: 3055.862700 ms
+22:53:57.996 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+22:53:57.996 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+22:53:57.996 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+22:53:57.996 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+22:53:58.131  RENDER       : RENDER       : ObjectsHeightMap::Build
+22:53:58.131   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+22:53:58.142  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 10.641600 ms
+22:53:58.152 PROFILING    : ObjectsHeightMap::Build took: 21.213900 ms
+22:55:51.739  WORLD        : WORLD        : Entities load '$Testingplanvechmsh:New test .ent'
+22:55:51.740 PROFILING    : Entities load took: 0.466900 ms
+22:55:51.740  WORLD        : WORLD        : CreateEntities
+22:55:51.747   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:55:51.747  PROFILING    : NotifyBeforeEntitiesCreated took: 0.003000 ms
+22:55:51.747   WORLD        : WORLD        : Wait for preloading data
+22:55:51.747  PROFILING    : Wait for preloading data took: 0.002300 ms
+22:55:51.755   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:55:51.756  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.003100 ms
+22:55:51.756   WORLD        : WORLD        : NotifyEntitiesInitialized
+22:55:51.756  PROFILING    : NotifyEntitiesInitialized took: 0.005800 ms
+22:55:51.756  WORLD        : World statistics:
+22:55:51.756  WORLD        : Leafs 256
+22:55:51.756  WORLD        : Leafs with entities 0
+22:55:51.756  WORLD        : Leafs with items 0
+22:55:51.756  WORLD        : Leaf items 0 (ss 0 occ 0 li 0)
+22:55:51.756  WORLD        : Max items/Leaf 0
+22:55:51.756  WORLD        : Total entities 1
+22:55:51.756  WORLD        : Static entities 0
+22:55:51.756  WORLD        : Dynamic entities 0
+22:55:51.756  WORLD        : Features entities 0
+22:55:51.756  WORLD        : NoLink entities 1
+22:55:51.756  WORLD        : Max ents/leaf 0
+22:55:51.756  WORLD        : Max static ents/leaf 0
+22:55:51.756  WORLD        : Max dynamic ents/leaf 0
+22:55:51.756 PROFILING    : CreateEntities took: 16.626300 ms
+22:55:51.756 PROFILING    : * WorldEditor: LoadWorld: 18.266900 ms
+22:56:10.197  WORLD        : WORLD        : Entities load '$Testingplanvechmsh:Arlnd.ent'
+22:56:10.354 PROFILING    : Entities load took: 155.360800 ms
+22:56:10.355  WORLD        : WORLD        : CreateEntities
+22:56:10.361   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:56:10.361  PROFILING    : NotifyBeforeEntitiesCreated took: 0.003100 ms
+22:56:10.361   WORLD        : WORLD        : Wait for preloading data
+22:56:10.361  PROFILING    : Wait for preloading data took: 0.001500 ms
+22:56:10.413  ENTITY       : Create entity @"ENTITY:3" ('Terrain', GenericTerrainEntity) at <0.000000 0.000000 0.000000> @"{80F042D21CC0BBCA}Prefabs/World/Game/Arland/GenericTerrain_Arland.et"
+22:56:10.413    PROFILING    : PROFILING    : Terrain load
+22:56:10.539   PROFILING    : Terrain load took: 125.101100 ms
+22:56:12.693 WORLD        : CreateEntities
+22:56:12.693  ENTITY       : Create entity @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"
+22:56:12.693   ENTITY       : CreateComponent 'BaseRadioComponent'
+22:56:12.693    DEFAULT   (W): BaseRadioComponent does not have any transceiver. (Entity: @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"). Only printing this message once. There're possibly more nodes with this requirement.
+22:56:12.758   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:56:12.758  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.005000 ms
+22:56:12.896   WORLD        : WORLD        : NotifyEntitiesInitialized
+22:56:12.896    TERRAIN      : TERRAIN      : Initializing road networks...
+22:56:12.896   PROFILING    : Initializing road networks... took: 0.307600 ms
+22:56:12.896  PROFILING    : NotifyEntitiesInitialized took: 0.513300 ms
+22:56:12.897  WORLD        : World statistics:
+22:56:12.897  WORLD        : Leafs 1137
+22:56:12.897  WORLD        : Leafs with entities 694
+22:56:12.897  WORLD        : Avg ents/leaf 301
+22:56:12.897  WORLD        : Leafs with items 192
+22:56:12.897  WORLD        : Leaf items 898 (ss 321 occ 168 li 409)
+22:56:12.897  WORLD        : Max items/Leaf 20
+22:56:12.897  WORLD        : Avg items/leaf 4
+22:56:12.897  WORLD        : Total entities 209377
+22:56:12.897  WORLD        : Static entities 205285
+22:56:12.897  WORLD        : Dynamic entities 4028
+22:56:12.897  WORLD        : Features entities 37
+22:56:12.897  WORLD        : NoLink entities 27
+22:56:12.898  WORLD        : Max ents/leaf 651
+22:56:12.898  WORLD        : Max static ents/leaf 613
+22:56:12.898  WORLD        : Max dynamic ents/leaf 87
+22:56:12.898 PROFILING    : CreateEntities took: 2543.295000 ms
+22:56:13.071 PROFILING    : * WorldEditor: LoadWorld: 2873.455200 ms
+22:56:13.298 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+22:56:13.298 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+22:56:13.298 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+22:56:13.298 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+22:56:13.351  RENDER       : RENDER       : ObjectsHeightMap::Build
+22:56:13.352   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+22:56:13.362  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 10.630500 ms
+22:56:13.369 PROFILING    : ObjectsHeightMap::Build took: 16.449400 ms
+22:56:13.966  INIT         : INIT         : Workbench Reload Game
+22:56:13.967  ENGINE       : Game destroyed.
+22:56:13.974  GUI          : Using default language (en_us)
+22:56:13.974  GUI          : Loading 'en_us' localization file.
+22:56:13.974   INIT         : INIT         : Loading StringTable
+22:56:13.990  PROFILING    : Loading StringTable took: 16.061900 ms
+22:56:13.991  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+22:56:13.998  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+22:56:13.998  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+22:56:13.998  ENGINE       : Game successfully created.
+22:56:13.998  ENGINE       : Game successfully initialized.
+22:56:13.998 PROFILING    : Workbench Reload Game took: 31.274500 ms
+22:56:14.002 DEFAULT   (W): LogiLED: Cannot initialize! (service not running or no compatible device detected)
+22:56:14.021 PLATFORM     : Save data from container 'settings' have been loaded
+22:56:14.126 PLATFORM     : Save data from container 'sessions' have been loaded
+22:56:14.127 PLATFORM     : GameProject user settings load from profile @"ReforgerGameSettings.conf"
+22:56:14.127  ENGINE       : Game user settings config loaded
+22:56:14.224 DEFAULT      : [SaveGameManager] Starting new playthrough nr.0 '' for mission '{1A77AC0DA2168BAA}Arlnd.ent'.
+22:56:14.229  WORLD        : WORLD        : Game::LoadEntities
+22:56:14.229   WORLD        : WORLD        : Initializing world systems @"{1C60D2EDA2B468B8}Configs/Systems/BaseGameModeSystems.conf"
+22:56:14.230   NETWORK      : Enabled lag compensation, 29 frames with 100 FPS and 280 ms rewind limits.
+22:56:14.230   WORLD        : WORLD        : CreateEntities
+22:56:14.230    WORLD        : WORLD        : CreateEntities
+22:56:14.230     WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:56:14.232     RESOURCES    : Loaded mission headers from 108 addon(s)!
+22:56:14.232    PROFILING    : NotifyBeforeEntitiesCreated took: 1.482700 ms
+22:56:14.232     WORLD        : WORLD        : Wait for preloading data
+22:56:14.232    PROFILING    : Wait for preloading data took: 0.000300 ms
+22:56:15.952 WORLD        : Game::LoadEntities
+22:56:15.952  WORLD        : CreateEntities
+22:56:15.952   WORLD        : CreateEntities
+22:56:15.952    ENTITY       : Create entity @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"
+22:56:15.952     ENTITY       : CreateComponent 'BaseRadioComponent'
+22:56:15.952      DEFAULT   (W): BaseRadioComponent does not have any transceiver. (Entity: @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"). Only printing this message once. There're possibly more nodes with this requirement.
+22:56:15.992     WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:56:15.992    PROFILING    : NotifyBeforeEntitiesInitialized took: 0.019900 ms
+22:56:16.155     WORLD        : WORLD        : NotifyEntitiesInitialized
+22:56:16.155      TERRAIN      : TERRAIN      : Initializing road networks...
+22:56:16.155     PROFILING    : Initializing road networks... took: 0.257600 ms
+22:56:16.155      DEFAULT      : DEFAULT      : WorldVolumesCollection
+22:56:16.160     PROFILING    : WorldVolumesCollection took: 4.415300 ms
+22:56:16.160      INIT         : INIT         : SoundWorldInit
+22:56:16.162     PROFILING    : SoundWorldInit took: 2.442500 ms
+22:56:16.162    PROFILING    : NotifyEntitiesInitialized took: 7.238700 ms
+22:56:16.163    WORLD        : World statistics:
+22:56:16.163    WORLD        : Leafs 1137
+22:56:16.163    WORLD        : Leafs with entities 694
+22:56:16.163    WORLD        : Avg ents/leaf 298
+22:56:16.163    WORLD        : Leafs with items 192
+22:56:16.163    WORLD        : Leaf items 902 (ss 321 occ 168 li 413)
+22:56:16.163    WORLD        : Max items/Leaf 20
+22:56:16.163    WORLD        : Avg items/leaf 4
+22:56:16.163    WORLD        : Total entities 208019
+22:56:16.163    WORLD        : Static entities 204822
+22:56:16.163    WORLD        : Dynamic entities 2330
+22:56:16.163    WORLD        : Features entities 2
+22:56:16.163    WORLD        : NoLink entities 865
+22:56:16.163    WORLD        : Max ents/leaf 633
+22:56:16.163    WORLD        : Max static ents/leaf 612
+22:56:16.163    WORLD        : Max dynamic ents/leaf 50
+22:56:16.163   PROFILING    : CreateEntities took: 1933.309700 ms
+22:56:16.163  PROFILING    : CreateEntities took: 1933.319800 ms
+22:56:16.163   WORLD        : WORLD        : Wait for preloading data around camera
+22:56:16.163  PROFILING    : Wait for preloading data around camera took: 0.000700 ms
+22:56:16.163   WORLD        : WORLD        : EOnActivate
+22:56:16.165  PROFILING    : EOnActivate took: 2.138800 ms
+22:56:16.165 PROFILING    : Game::LoadEntities took: 1936.803700 ms
+22:56:16.252 DEFAULT      : Entered offline game state.
+22:56:16.333 NETWORK      : Player connected: connectionID=2147483646
+22:56:16.333 NETWORK      : ### Connecting player: connectionID=2147483646, Name=
+22:56:16.333 NETWORK      : ### Creating player: PlayerId=1, Name=steffenbk1
+22:56:16.336 ENTITY       : SpawnEntityPrefab @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+22:56:16.336  ENTITY       : Create entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000>
+22:56:16.336   ENTITY       : EntityPrefabUse @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+22:56:16.336    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_PUNISHMENT_KILLING_SET'. There should only be one of each key!
+22:56:16.336    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_TYPE_DISABLED'. There should only be one of each key!
+22:57:30.213   SCRIPT    (W): Can't open config file ""
+22:57:30.252  WORLD        : InitEntities 'world'
+22:57:30.252   ENTITY       : Init entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000> @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+22:57:30.254    GUI          : WidgetManager: CrateWidgets @"{3C9DCDD76AB83157}UI/layouts/HUD/HUDLayouts/HUDManager_Root.layout"
+22:57:30.254     SCRIPT    (W): Slot_WeaponInfo Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_Chat Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_VON Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_AvailableActions Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_Vehicle Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_GameVersion Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_Notifications Has no Content!
+22:57:30.254     SCRIPT    (W): Slot_Hints Has no Content!
+22:57:30.265 NETWORK      : ### Updating player: PlayerId=1, Name=steffenbk1, rplIdentity=0xFFFFFFFE, IdentityId=85a95586-0ced-469e-9ac1-b0422b1dca9d
+22:57:30.266 SCRIPT    (W): Maybe a problem: DataProgression is not ready but the analytics event was requested
+22:57:30.266 NETWORK      : Players connecting: 0
+22:57:30.266 NETWORK      : Players connected: 1 / 1
+22:57:30.266 SCRIPT       : 2026-10-08 20:57:30 voteEnd: SCR_VotingResultData{flag_vote_success=1}
+22:57:30.367 WORLD        : Frame start
+22:57:30.367  SCRIPT       : ScenarioFramework: Available tasks are empty, no new tasks will be generated.
+22:57:30.370 WORLD        : UpdateEntities
+22:57:30.370  WORLD        : Frame
+22:57:30.370   SCRIPT       : SCR_BaseGameMode::OnGameStateChanged = GAME
+22:57:30.453 WORLD        : UpdateEntities
+22:57:30.453  WORLD        : PostFrame
+22:57:30.453   GUI          : WidgetManager: CrateWidgets @"{D89BBA18F99053D6}UI/layouts/HUD/Chat/ChatHud.layout"
+22:57:30.453    SCRIPT    (W): EditBoxFilterComponent used on invalid widget type.
+22:57:30.490   RESOURCES    : GetResourceObject @"{20A6917D2114E29A}UI/layouts/HUD/Hint/HintInfoDisplay.layout"
+22:57:30.490    GUI          : Layout load @"{20A6917D2114E29A}UI/layouts/HUD/Hint/HintInfoDisplay.layout"
+22:57:30.490     GUI          : Widget prefab @"{EA1CC57D868E94F9}UI/layouts/HUD/Hint/Hint.layout"
+22:57:30.490      GUI       (W): Overridden prefab member (GUID: '{661AB14E0F471C66}' type: ButtonWidgetClass) no longer exists in prefab
+22:57:30.514  RENDER       : RENDER       : ObjectsHeightMap::Build
+22:57:30.515   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+22:57:30.525  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 9.368900 ms
+22:57:30.530 PROFILING    : ObjectsHeightMap::Build took: 14.626400 ms
+22:57:57.223  INIT         : INIT         : Workbench Reload Game
+22:57:57.396  ENGINE       : Game destroyed.
+22:57:57.403  GUI          : Using default language (en_us)
+22:57:57.403  GUI          : Loading 'en_us' localization file.
+22:57:57.403   INIT         : INIT         : Loading StringTable
+22:57:57.410  PROFILING    : Loading StringTable took: 7.202500 ms
+22:57:57.410  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+22:57:57.415  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+22:57:57.415  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+22:57:57.415  ENGINE       : Game successfully created.
+22:57:57.415  ENGINE       : Game successfully initialized.
+22:57:57.415 PROFILING    : Workbench Reload Game took: 193.014200 ms
+22:57:57.426  WORLD        : WORLD        : CreateEntities 'world'
+22:57:57.434   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+22:57:57.434  PROFILING    : NotifyBeforeEntitiesCreated took: 0.004500 ms
+22:57:57.434   WORLD        : WORLD        : Wait for preloading data
+22:57:57.434  PROFILING    : Wait for preloading data took: 0.001900 ms
+22:57:58.968   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+22:57:58.968  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.005800 ms
+22:57:59.092   WORLD        : WORLD        : NotifyEntitiesInitialized
+22:57:59.092    TERRAIN      : TERRAIN      : Initializing road networks...
+22:57:59.092   PROFILING    : Initializing road networks... took: 0.243700 ms
+22:57:59.092  PROFILING    : NotifyEntitiesInitialized took: 0.396900 ms
+22:57:59.093  WORLD        : World statistics:
+22:57:59.093  WORLD        : Leafs 1137
+22:57:59.093  WORLD        : Leafs with entities 694
+22:57:59.093  WORLD        : Avg ents/leaf 301
+22:57:59.093  WORLD        : Leafs with items 192
+22:57:59.093  WORLD        : Leaf items 898 (ss 321 occ 168 li 409)
+22:57:59.093  WORLD        : Max items/Leaf 20
+22:57:59.093  WORLD        : Avg items/leaf 4
+22:57:59.093  WORLD        : Total entities 209377
+22:57:59.093  WORLD        : Static entities 205285
+22:57:59.093  WORLD        : Dynamic entities 4028
+22:57:59.093  WORLD        : Features entities 37
+22:57:59.093  WORLD        : NoLink entities 27
+22:57:59.093  WORLD        : Max ents/leaf 651
+22:57:59.093  WORLD        : Max static ents/leaf 613
+22:57:59.093  WORLD        : Max dynamic ents/leaf 87
+22:57:59.093 PROFILING    : CreateEntities took: 1666.295900 ms
+22:57:59.297 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+22:57:59.297 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+22:57:59.298 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+22:57:59.298 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+22:57:59.419 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+22:57:59.419 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+22:57:59.419 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+22:57:59.419 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+22:57:59.419 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+22:57:59.420 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+22:57:59.420 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+22:57:59.420 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+22:57:59.428  RENDER       : RENDER       : ObjectsHeightMap::Build
+22:57:59.428   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+22:57:59.439  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 9.961600 ms
+22:57:59.443 PROFILING    : ObjectsHeightMap::Build took: 15.364800 ms
+23:01:01.133  INIT         : INIT         : Workbench Reload Game
+23:01:01.134  ENGINE       : Game destroyed.
+23:01:01.140  GUI          : Using default language (en_us)
+23:01:01.140  GUI          : Loading 'en_us' localization file.
+23:01:01.140   INIT         : INIT         : Loading StringTable
+23:01:01.147  PROFILING    : Loading StringTable took: 7.568800 ms
+23:01:01.147  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+23:01:01.153  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+23:01:01.153  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+23:01:01.153  ENGINE       : Game successfully created.
+23:01:01.153  ENGINE       : Game successfully initialized.
+23:01:01.153 PROFILING    : Workbench Reload Game took: 21.061900 ms
+23:01:01.156 DEFAULT   (W): LogiLED: Cannot initialize! (service not running or no compatible device detected)
+23:01:01.173 PLATFORM     : Save data from container 'settings' have been loaded
+23:01:01.284 PLATFORM     : Save data from container 'sessions' have been loaded
+23:01:01.284 PLATFORM     : GameProject user settings load from profile @"ReforgerGameSettings.conf"
+23:01:01.284  ENGINE       : Game user settings config loaded
+23:01:01.376 DEFAULT      : [SaveGameManager] Starting new playthrough nr.0 '' for mission '{1A77AC0DA2168BAA}Arlnd.ent'.
+23:01:01.378  WORLD        : WORLD        : Game::LoadEntities
+23:01:01.378   WORLD        : WORLD        : Initializing world systems @"{1C60D2EDA2B468B8}Configs/Systems/BaseGameModeSystems.conf"
+23:01:01.379   NETWORK      : Enabled lag compensation, 29 frames with 100 FPS and 280 ms rewind limits.
+23:01:01.379   WORLD        : WORLD        : CreateEntities
+23:01:01.379    WORLD        : WORLD        : CreateEntities
+23:01:01.379     WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+23:01:01.380     RESOURCES    : Loaded mission headers from 108 addon(s)!
+23:01:01.380    PROFILING    : NotifyBeforeEntitiesCreated took: 0.852000 ms
+23:01:01.380     WORLD        : WORLD        : Wait for preloading data
+23:01:01.380    PROFILING    : Wait for preloading data took: 0.000400 ms
+23:01:02.496 WORLD        : Game::LoadEntities
+23:01:02.497  WORLD        : CreateEntities
+23:01:02.497   WORLD        : CreateEntities
+23:01:02.497    ENTITY       : Create entity @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"
+23:01:02.497     ENTITY       : CreateComponent 'BaseRadioComponent'
+23:01:02.497      DEFAULT   (W): BaseRadioComponent does not have any transceiver. (Entity: @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"). Only printing this message once. There're possibly more nodes with this requirement.
+23:01:02.524     WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+23:01:02.524    PROFILING    : NotifyBeforeEntitiesInitialized took: 0.019000 ms
+23:01:02.656     WORLD        : WORLD        : NotifyEntitiesInitialized
+23:01:02.656      TERRAIN      : TERRAIN      : Initializing road networks...
+23:01:02.657     PROFILING    : Initializing road networks... took: 0.248400 ms
+23:01:02.657      DEFAULT      : DEFAULT      : WorldVolumesCollection
+23:01:02.661     PROFILING    : WorldVolumesCollection took: 3.979700 ms
+23:01:02.661      INIT         : INIT         : SoundWorldInit
+23:01:02.661     PROFILING    : SoundWorldInit took: 0.103500 ms
+23:01:02.661    PROFILING    : NotifyEntitiesInitialized took: 4.443000 ms
+23:01:02.661    WORLD        : World statistics:
+23:01:02.661    WORLD        : Leafs 1137
+23:01:02.661    WORLD        : Leafs with entities 694
+23:01:02.661    WORLD        : Avg ents/leaf 298
+23:01:02.661    WORLD        : Leafs with items 192
+23:01:02.661    WORLD        : Leaf items 902 (ss 321 occ 168 li 413)
+23:01:02.661    WORLD        : Max items/Leaf 20
+23:01:02.661    WORLD        : Avg items/leaf 4
+23:01:02.661    WORLD        : Total entities 208020
+23:01:02.661    WORLD        : Static entities 204822
+23:01:02.661    WORLD        : Dynamic entities 2331
+23:01:02.661    WORLD        : Features entities 2
+23:01:02.661    WORLD        : NoLink entities 865
+23:01:02.661    WORLD        : Max ents/leaf 633
+23:01:02.661    WORLD        : Max static ents/leaf 612
+23:01:02.661    WORLD        : Max dynamic ents/leaf 50
+23:01:02.661   PROFILING    : CreateEntities took: 1282.338400 ms
+23:01:02.661  PROFILING    : CreateEntities took: 1282.349900 ms
+23:01:02.661   WORLD        : WORLD        : Wait for preloading data around camera
+23:01:02.661  PROFILING    : Wait for preloading data around camera took: 0.000900 ms
+23:01:02.661   WORLD        : WORLD        : EOnActivate
+23:01:02.663  PROFILING    : EOnActivate took: 1.977700 ms
+23:01:02.663 PROFILING    : Game::LoadEntities took: 1285.583400 ms
+23:01:02.697 DEFAULT      : Entered offline game state.
+23:01:02.773 NETWORK      : Player connected: connectionID=2147483646
+23:01:02.773 NETWORK      : ### Connecting player: connectionID=2147483646, Name=
+23:01:02.773 NETWORK      : ### Creating player: PlayerId=1, Name=steffenbk1
+23:01:02.774 ENTITY       : SpawnEntityPrefab @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:02.774  ENTITY       : Create entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000>
+23:01:02.774   ENTITY       : EntityPrefabUse @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:02.774    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_PUNISHMENT_KILLING_SET'. There should only be one of each key!
+23:01:02.774    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_TYPE_DISABLED'. There should only be one of each key!
+23:01:02.775   SCRIPT    (W): Can't open config file ""
+23:01:02.776  WORLD        : InitEntities 'world'
+23:01:02.776   ENTITY       : Init entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000> @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:02.776    GUI          : WidgetManager: CrateWidgets @"{3C9DCDD76AB83157}UI/layouts/HUD/HUDLayouts/HUDManager_Root.layout"
+23:01:02.776     SCRIPT    (W): Slot_WeaponInfo Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_Chat Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_VON Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_AvailableActions Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_Vehicle Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_GameVersion Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_Notifications Has no Content!
+23:01:02.776     SCRIPT    (W): Slot_Hints Has no Content!
+23:01:02.780 NETWORK      : ### Updating player: PlayerId=1, Name=steffenbk1, rplIdentity=0xFFFFFFFE, IdentityId=85a95586-0ced-469e-9ac1-b0422b1dca9d
+23:01:02.780 SCRIPT    (W): Maybe a problem: DataProgression is not ready but the analytics event was requested
+23:01:02.780 NETWORK      : Players connecting: 0
+23:01:02.780 NETWORK      : Players connected: 1 / 1
+23:01:02.780 SCRIPT       : 2026-10-08 21:01:02 voteEnd: SCR_VotingResultData{flag_vote_success=1}
+23:01:02.810  RENDER       : RENDER       : ObjectsHeightMap::Build
+23:01:02.811   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+23:01:02.821  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 9.448900 ms
+23:01:02.826 PROFILING    : ObjectsHeightMap::Build took: 14.739400 ms
+23:01:02.934 WORLD        : Frame start
+23:01:02.935  SCRIPT       : ScenarioFramework: Available tasks are empty, no new tasks will be generated.
+23:01:02.935 WORLD        : UpdateEntities
+23:01:02.935  WORLD        : Frame
+23:01:02.935   SCRIPT       : SCR_BaseGameMode::OnGameStateChanged = GAME
+23:01:02.953 WORLD        : UpdateEntities
+23:01:02.953  WORLD        : PostFrame
+23:01:02.953   GUI          : WidgetManager: CrateWidgets @"{D89BBA18F99053D6}UI/layouts/HUD/Chat/ChatHud.layout"
+23:01:02.954    SCRIPT    (W): EditBoxFilterComponent used on invalid widget type.
+23:01:07.862 WORLD        : UpdateEntities
+23:01:07.862  WORLD        : Frame
+23:01:07.862   SCRIPT       : MUD census box <0,-163,0> .. <4096,148.375,4096> cells 2048 x 2048 cell 2
+23:01:07.879 WORLD        : UpdateEntities
+23:01:07.879  WORLD        : Frame
+23:01:07.879   SCRIPT       : MUD census run z 10 x 70 71
+23:01:07.879   SCRIPT       : MUD census run z 11 x 70 71
+23:01:07.879   SCRIPT       : MUD census run z 12 x 70 71
+23:01:07.879   SCRIPT       : MUD census run z 13 x 70 71
+23:01:07.919 WORLD        : UpdateEntities
+23:01:07.919  WORLD        : Frame
+23:01:07.919   SCRIPT       : MUD census run z 64 x 32 35
+23:01:07.920   SCRIPT       : MUD census run z 65 x 32 35
+23:01:07.940 WORLD        : UpdateEntities
+23:01:07.940  WORLD        : Frame
+23:01:07.940   SCRIPT       : MUD census run z 100 x 100 102
+23:01:07.941   SCRIPT       : MUD census run z 101 x 100 102
+23:01:07.941   SCRIPT       : MUD census run z 102 x 100 102
+23:01:08.571 WORLD        : UpdateEntities
+23:01:08.571  WORLD        : Frame
+23:01:08.571   SCRIPT       : MUD census run z 1100 x 640 643
+23:01:08.571   SCRIPT       : MUD census run z 1101 x 640 643
+23:01:08.571   SCRIPT       : MUD census run z 1102 x 640 643
+23:01:08.571   SCRIPT       : MUD census run z 1103 x 640 643
+23:01:09.206 WORLD        : UpdateEntities
+23:01:09.206  WORLD        : Frame
+23:01:09.206   SCRIPT       : MUD census done holes 41 runs 13 ms 399 truncated 0
+23:01:11.786 GUI          : Creating menu 'Inventory20Menu'
+23:01:11.786  GUI          : WidgetManager: CrateWidgets @"{981ACF4F45EAECAE}UI/layouts/Menus/Inventory/InventoryMain.layout"
+23:01:11.786   SCRIPT    (W): Slot_VON Has no Content!
+23:01:11.786   SCRIPT    (W): Slot_GameVersion Has no Content!
+23:01:11.887 GUI       (E): OverlayWidget Frame0 has invalid slot GridWidgetSlot for slot manipulation function used, expected: LayoutSlot
+23:01:11.887 GUI       (E): OverlayWidget Frame0 has invalid slot GridWidgetSlot for slot manipulation function used, expected: LayoutSlot
+23:01:17.543  INIT         : INIT         : Workbench Reload Game
+23:01:17.745  ENGINE       : Game destroyed.
+23:01:17.751  GUI          : Using default language (en_us)
+23:01:17.751  GUI          : Loading 'en_us' localization file.
+23:01:17.751   INIT         : INIT         : Loading StringTable
+23:01:17.759  PROFILING    : Loading StringTable took: 7.404900 ms
+23:01:17.759  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+23:01:17.765  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+23:01:17.765  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+23:01:17.765  ENGINE       : Game successfully created.
+23:01:17.765  ENGINE       : Game successfully initialized.
+23:01:17.765 PROFILING    : Workbench Reload Game took: 222.542300 ms
+23:01:17.777  WORLD        : WORLD        : CreateEntities 'world'
+23:01:17.784   WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+23:01:17.784  PROFILING    : NotifyBeforeEntitiesCreated took: 0.004100 ms
+23:01:17.785   WORLD        : WORLD        : Wait for preloading data
+23:01:17.785  PROFILING    : Wait for preloading data took: 0.001900 ms
+23:01:19.200   WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+23:01:19.200  PROFILING    : NotifyBeforeEntitiesInitialized took: 0.004500 ms
+23:01:19.326   WORLD        : WORLD        : NotifyEntitiesInitialized
+23:01:19.326    TERRAIN      : TERRAIN      : Initializing road networks...
+23:01:19.327   PROFILING    : Initializing road networks... took: 0.252600 ms
+23:01:19.327  PROFILING    : NotifyEntitiesInitialized took: 0.407100 ms
+23:01:19.327  WORLD        : World statistics:
+23:01:19.327  WORLD        : Leafs 1137
+23:01:19.327  WORLD        : Leafs with entities 694
+23:01:19.327  WORLD        : Avg ents/leaf 301
+23:01:19.327  WORLD        : Leafs with items 192
+23:01:19.327  WORLD        : Leaf items 898 (ss 321 occ 168 li 409)
+23:01:19.327  WORLD        : Max items/Leaf 20
+23:01:19.327  WORLD        : Avg items/leaf 4
+23:01:19.328  WORLD        : Total entities 209378
+23:01:19.328  WORLD        : Static entities 205285
+23:01:19.328  WORLD        : Dynamic entities 4029
+23:01:19.328  WORLD        : Features entities 37
+23:01:19.328  WORLD        : NoLink entities 27
+23:01:19.328  WORLD        : Max ents/leaf 651
+23:01:19.328  WORLD        : Max static ents/leaf 613
+23:01:19.328  WORLD        : Max dynamic ents/leaf 87
+23:01:19.328 PROFILING    : CreateEntities took: 1550.765300 ms
+23:01:19.534 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+23:01:19.534 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+23:01:19.534 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+23:01:19.534 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+23:01:19.655 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+23:01:19.655 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+23:01:19.655 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+23:01:19.655 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+23:01:19.656 TERRAIN      : Loading tile map config (worlds/Arland/Terrain/tileMap.conf)
+23:01:19.656 TERRAIN      : Loading minimap config (worlds/Arland/Terrain/miniMap.conf)
+23:01:19.656 TERRAIN      : The default minimap texture ('worlds/Arland/ArlandRasterized.edds') not found. Trying 'worlds/Arland/Arland.edds'...
+23:01:19.656 TERRAIN      : The default minimap texture ('worlds/Arland/Arland.edds') not found. Skipping...
+23:01:19.664  RENDER       : RENDER       : ObjectsHeightMap::Build
+23:01:19.664   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+23:01:19.674  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 10.179000 ms
+23:01:19.679 PROFILING    : ObjectsHeightMap::Build took: 15.125600 ms
+23:01:24.786  INIT         : INIT         : Workbench Reload Game
+23:01:24.787  ENGINE       : Game destroyed.
+23:01:24.793  GUI          : Using default language (en_us)
+23:01:24.793  GUI          : Loading 'en_us' localization file.
+23:01:24.793   INIT         : INIT         : Loading StringTable
+23:01:24.800  PROFILING    : Loading StringTable took: 7.243500 ms
+23:01:24.801  INIT         : Creating game instance(ArmaReforgerScripted), version 1.9.0.10 built 2026-09-20 16:28:15 UTC.
+23:01:24.806  SCRIPT       : Unable to register a script command due keyword duplicity: ban
+23:01:24.806  SCRIPT       : Unable to register a script command due keyword duplicity: kick
+23:01:24.806  ENGINE       : Game successfully created.
+23:01:24.806  ENGINE       : Game successfully initialized.
+23:01:24.806 PROFILING    : Workbench Reload Game took: 20.090900 ms
+23:01:24.810 DEFAULT   (W): LogiLED: Cannot initialize! (service not running or no compatible device detected)
+23:01:24.827 PLATFORM     : Save data from container 'settings' have been loaded
+23:01:24.933 PLATFORM     : Save data from container 'sessions' have been loaded
+23:01:24.933 PLATFORM     : GameProject user settings load from profile @"ReforgerGameSettings.conf"
+23:01:24.933  ENGINE       : Game user settings config loaded
+23:01:25.025 DEFAULT      : [SaveGameManager] Starting new playthrough nr.0 '' for mission '{1A77AC0DA2168BAA}Arlnd.ent'.
+23:01:25.028  WORLD        : WORLD        : Game::LoadEntities
+23:01:25.028   WORLD        : WORLD        : Initializing world systems @"{1C60D2EDA2B468B8}Configs/Systems/BaseGameModeSystems.conf"
+23:01:25.028   NETWORK      : Enabled lag compensation, 29 frames with 100 FPS and 280 ms rewind limits.
+23:01:25.028   WORLD        : WORLD        : CreateEntities
+23:01:25.028    WORLD        : WORLD        : CreateEntities
+23:01:25.028     WORLD        : WORLD        : NotifyBeforeEntitiesCreated
+23:01:25.029     RESOURCES    : Loaded mission headers from 108 addon(s)!
+23:01:25.029    PROFILING    : NotifyBeforeEntitiesCreated took: 0.873300 ms
+23:01:25.029     WORLD        : WORLD        : Wait for preloading data
+23:01:25.029    PROFILING    : Wait for preloading data took: 0.000300 ms
+23:01:26.140 WORLD        : Game::LoadEntities
+23:01:26.140  WORLD        : CreateEntities
+23:01:26.140   WORLD        : CreateEntities
+23:01:26.140    ENTITY       : Create entity @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"
+23:01:26.140     ENTITY       : CreateComponent 'BaseRadioComponent'
+23:01:26.140      DEFAULT   (W): BaseRadioComponent does not have any transceiver. (Entity: @"ENTITY:4611686018427388027" ('M923A1_ammo_MERDC1', Vehicle) at <1246.053955 39.000000 2175.408936> @"{EC657C9B3C73E192}Prefabs/Vehicles/Wheeled/M923A1/M923A1_ammo_MERDC.et"). Only printing this message once. There're possibly more nodes with this requirement.
+23:01:26.166     WORLD        : WORLD        : NotifyBeforeEntitiesInitialized
+23:01:26.166    PROFILING    : NotifyBeforeEntitiesInitialized took: 0.016900 ms
+23:01:26.301     WORLD        : WORLD        : NotifyEntitiesInitialized
+23:01:26.301      TERRAIN      : TERRAIN      : Initializing road networks...
+23:01:26.301     PROFILING    : Initializing road networks... took: 0.259800 ms
+23:01:26.301      DEFAULT      : DEFAULT      : WorldVolumesCollection
+23:01:26.305     PROFILING    : WorldVolumesCollection took: 3.841500 ms
+23:01:26.305      INIT         : INIT         : SoundWorldInit
+23:01:26.305     PROFILING    : SoundWorldInit took: 0.105100 ms
+23:01:26.305    PROFILING    : NotifyEntitiesInitialized took: 4.301100 ms
+23:01:26.306    WORLD        : World statistics:
+23:01:26.306    WORLD        : Leafs 1137
+23:01:26.306    WORLD        : Leafs with entities 694
+23:01:26.306    WORLD        : Avg ents/leaf 298
+23:01:26.306    WORLD        : Leafs with items 192
+23:01:26.306    WORLD        : Leaf items 902 (ss 321 occ 168 li 413)
+23:01:26.306    WORLD        : Max items/Leaf 20
+23:01:26.306    WORLD        : Avg items/leaf 4
+23:01:26.306    WORLD        : Total entities 208020
+23:01:26.306    WORLD        : Static entities 204822
+23:01:26.306    WORLD        : Dynamic entities 2331
+23:01:26.306    WORLD        : Features entities 2
+23:01:26.306    WORLD        : NoLink entities 865
+23:01:26.306    WORLD        : Max ents/leaf 633
+23:01:26.306    WORLD        : Max static ents/leaf 612
+23:01:26.306    WORLD        : Max dynamic ents/leaf 50
+23:01:26.306   PROFILING    : CreateEntities took: 1277.814900 ms
+23:01:26.306  PROFILING    : CreateEntities took: 1277.837900 ms
+23:01:26.306   WORLD        : WORLD        : Wait for preloading data around camera
+23:01:26.306  PROFILING    : Wait for preloading data around camera took: 0.000700 ms
+23:01:26.306   WORLD        : WORLD        : EOnActivate
+23:01:26.308  PROFILING    : EOnActivate took: 2.069200 ms
+23:01:26.308 PROFILING    : Game::LoadEntities took: 1281.163600 ms
+23:01:26.351 DEFAULT      : Entered offline game state.
+23:01:26.424 NETWORK      : Player connected: connectionID=2147483646
+23:01:26.424 NETWORK      : ### Connecting player: connectionID=2147483646, Name=
+23:01:26.425 NETWORK      : ### Creating player: PlayerId=1, Name=steffenbk1
+23:01:26.426 ENTITY       : SpawnEntityPrefab @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:26.426  ENTITY       : Create entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000>
+23:01:26.426   ENTITY       : EntityPrefabUse @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:26.426    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_PUNISHMENT_KILLING_SET'. There should only be one of each key!
+23:01:26.427    SCRIPT    (W): Notification data in 'SCR_NotificationsLogDisplay' has duplicate notification info key: 'EDITOR_PERCEIVED_FACTION_TYPE_DISABLED'. There should only be one of each key!
+23:01:26.428   SCRIPT    (W): Can't open config file ""
+23:01:26.428  WORLD        : InitEntities 'world'
+23:01:26.428   ENTITY       : Init entity @"ENTITY:6917529027641081958" ('SCR_PlayerController') at <0.000000 0.000000 0.000000> @"{A1AE127F16DD352E}Prefabs/Characters/Core/DefaultPlayerControllerMP_Factions.et"
+23:01:26.428    GUI          : WidgetManager: CrateWidgets @"{3C9DCDD76AB83157}UI/layouts/HUD/HUDLayouts/HUDManager_Root.layout"
+23:01:26.428     SCRIPT    (W): Slot_WeaponInfo Has no Content!
+23:01:26.428     SCRIPT    (W): Slot_Chat Has no Content!
+23:01:26.428     SCRIPT    (W): Slot_VON Has no Content!
+23:01:26.428     SCRIPT    (W): Slot_AvailableActions Has no Content!
+23:01:26.428     SCRIPT    (W): Slot_Vehicle Has no Content!
+23:01:26.428     SCRIPT    (W): Slot_GameVersion Has no Content!
+23:01:26.429     SCRIPT    (W): Slot_Notifications Has no Content!
+23:01:26.429     SCRIPT    (W): Slot_Hints Has no Content!
+23:01:26.432 NETWORK      : ### Updating player: PlayerId=1, Name=steffenbk1, rplIdentity=0xFFFFFFFE, IdentityId=85a95586-0ced-469e-9ac1-b0422b1dca9d
+23:01:26.432 SCRIPT    (W): Maybe a problem: DataProgression is not ready but the analytics event was requested
+23:01:26.433 NETWORK      : Players connecting: 0
+23:01:26.433 NETWORK      : Players connected: 1 / 1
+23:01:26.433 SCRIPT       : 2026-10-08 21:01:26 voteEnd: SCR_VotingResultData{flag_vote_success=1}
+23:01:26.464  RENDER       : RENDER       : ObjectsHeightMap::Build
+23:01:26.464   RENDER       : RENDER       : MeshOccupancyGridManager::GenerateAllForWorld
+23:01:26.475  PROFILING    : MeshOccupancyGridManager::GenerateAllForWorld took: 10.538800 ms
+23:01:26.480 PROFILING    : ObjectsHeightMap::Build took: 16.000300 ms
+23:01:26.583 WORLD        : Frame start
+23:01:26.583  SCRIPT       : ScenarioFramework: Available tasks are empty, no new tasks will be generated.
+23:01:26.584 WORLD        : UpdateEntities
+23:01:26.584  WORLD        : Frame
+23:01:26.584   SCRIPT       : SCR_BaseGameMode::OnGameStateChanged = GAME
+23:01:26.604 WORLD        : UpdateEntities
+23:01:26.604  WORLD        : PostFrame
+23:01:26.604   GUI          : WidgetManager: CrateWidgets @"{D89BBA18F99053D6}UI/layouts/HUD/Chat/ChatHud.layout"
+23:01:26.604    SCRIPT    (W): EditBoxFilterComponent used on invalid widget type.
+23:01:31.500 WORLD        : UpdateEntities
+23:01:31.500  WORLD        : Frame
+23:01:31.500   SCRIPT       : MUD census box <0,-163,0> .. <4096,148.375,4096> cells 2048 x 2048 cell 2
+23:01:31.516 WORLD        : UpdateEntities
+23:01:31.516  WORLD        : Frame
+23:01:31.516   SCRIPT       : MUD census run z 10 x 70 71
+23:01:31.516   SCRIPT       : MUD census run z 11 x 70 71
+23:01:31.516   SCRIPT       : MUD census run z 12 x 70 71
+23:01:31.517   SCRIPT       : MUD census run z 13 x 70 71
+23:01:31.553 WORLD        : UpdateEntities
+23:01:31.553  WORLD        : Frame
+23:01:31.553   SCRIPT       : MUD census run z 64 x 32 35
+23:01:31.554   SCRIPT       : MUD census run z 65 x 32 35
+23:01:31.574 WORLD        : UpdateEntities
+23:01:31.574  WORLD        : Frame
+23:01:31.574   SCRIPT       : MUD census run z 100 x 100 102
+23:01:31.575   SCRIPT       : MUD census run z 101 x 100 102
+23:01:31.575   SCRIPT       : MUD census run z 102 x 100 102
+23:01:32.192 WORLD        : UpdateEntities
+23:01:32.192  WORLD        : Frame
+23:01:32.192   SCRIPT       : MUD census run z 1100 x 640 643
+23:01:32.192   SCRIPT       : MUD census run z 1101 x 640 643
+23:01:32.192   SCRIPT       : MUD census run z 1102 x 640 643
+23:01:32.193   SCRIPT       : MUD census run z 1103 x 640 643
+23:01:32.762 WORLD        : UpdateEntities
+23:01:32.762  WORLD        : Frame
+23:01:32.762   SCRIPT       : MUD census done holes 41 runs 13 ms 400 truncated 0
+23:01:37.364 GUI          : Creating menu 'Inventory20Menu'
+23:01:37.364  GUI          : WidgetManager: CrateWidgets @"{981ACF4F45EAECAE}UI/layouts/Menus/Inventory/InventoryMain.layout"
+23:01:37.364   SCRIPT    (W): Slot_VON Has no Content!
+23:01:37.364   SCRIPT    (W): Slot_GameVersion Has no Content!
+23:01:37.448 GUI       (E): OverlayWidget Frame0 has invalid slot GridWidgetSlot for slot manipulation function used, expected: LayoutSlot
+23:01:37.448 GUI       (E): OverlayWidget Frame0 has invalid slot GridWidgetSlot for slot manipulation function used, expected: LayoutSlot

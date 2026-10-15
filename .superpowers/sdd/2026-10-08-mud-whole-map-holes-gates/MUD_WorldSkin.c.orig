@@ -1,0 +1,328 @@
+[EntityEditorProps(category: "Mud", description: "TEST: coarse undeformable copy of the whole terrain (mesh + collider, terrain look), then the real terrain is hidden and stops colliding. Place by class anywhere, one per world.", color: "0 200 255 255")]
+class MUD_WorldSkinEntityClass : GenericEntityClass
+{
+}
+
+//! One skin chunk. Own class so MUD_BuildingDestructionFix can keep it out of a ruin's sink-and-delete query.
+class MUD_WorldSkinChunkEntityClass : GenericEntityClass
+{
+}
+
+class MUD_WorldSkinChunkEntity : GenericEntity
+{
+}
+
+//! Scratch buffers for one chunk (static arrays live in a helper class: script class members max 256 KB)
+class MUD_WorldSkinBuffers
+{
+	vector m_aVerts[1089];
+	float m_aUVs[2178];
+	int m_aIndices[6144];
+}
+
+//! THROWAWAY TEST for the "terrain off, our own surface everywhere" route.
+//! Splits the terrain bounds into chunks (32 x 32 cells each, 33 x 33 verts, same as a ground
+//! patch), samples GetSurfaceY per vertex, builds one static mesh + one static trimesh per chunk,
+//! a few chunks per frame. When all are built, the real terrain is hidden and its collision set to
+//! layer 0 (proven 2026-10-08 on Arland: soldier free-falls, our mesh still holds and renders the
+//! terrain look, WORLD traces still return the terrain game material).
+//! Runs locally on every machine (no replication: every machine builds the same skin from the
+//! same terrain). Dedicated server builds colliders only.
+class MUD_WorldSkinEntity : GenericEntity
+{
+	static const int CELLS = 32;
+	static const int VERTS = 33;
+
+	[Attribute("128", UIWidgets.EditBox, "Chunk edge (m). 32 cells per chunk, so 128 m = 4 m between vertices.", category: "Skin")]
+	protected float m_fChunkSize;
+
+	[Attribute("0", UIWidgets.EditBox, "Only chunks within this distance (m) of this entity. 0 = the whole terrain.", category: "Skin")]
+	protected float m_fRadius;
+
+	[Attribute("{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat", UIWidgets.ResourcePickerThumbnail, "Mesh material (terrain look)", "emat", category: "Skin")]
+	protected ResourceName m_Material;
+
+	[Attribute("{C3691F2D8FE0234F}Common/Materials/Game/dirt.gamemat", UIWidgets.ResourcePickerThumbnail, "Collider game material when the trace at the chunk centre finds none", "gamemat", category: "Skin")]
+	protected ResourceName m_GameMaterial;
+
+	[Attribute("0", UIWidgets.EditBox, "Skin height offset from the terrain (m). Only matters while the terrain is still visible (z-fighting).", category: "Skin")]
+	protected float m_fOffset;
+
+	[Attribute("8", UIWidgets.EditBox, "Chunks built per frame", category: "Skin")]
+	protected int m_iChunksPerFrame;
+
+	[Attribute("1", UIWidgets.CheckBox, "When all chunks are built: hide the real terrain and switch its collision off", category: "Skin")]
+	protected bool m_bTerrainOff;
+
+	protected ref MUD_WorldSkinBuffers m_Buf;
+	protected ref array<vector> m_aTodo = {};       // chunk origins (world XZ) not built yet
+	protected ref array<IEntity> m_aChunks = {};
+	protected ref array<ref Resource> m_aMeshRes = {};
+	protected bool m_bRender;
+	protected bool m_bStarted;
+	protected bool m_bDone;
+	protected float m_fStep;
+	protected int m_iTotal;
+	protected int m_iMeshMs;
+	protected int m_iColMs;
+	protected int m_iSampleMs;
+	protected int m_iFrames;
+	protected int m_iStartTick;
+	protected GenericTerrainEntity m_Terrain;
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_WorldSkinEntity(IEntitySource src, IEntity parent)
+	{
+		SetEventMask(EntityEvent.FRAME);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	void ~MUD_WorldSkinEntity()
+	{
+		foreach (IEntity e : m_aChunks)
+		{
+			if (e)
+				delete e;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! First frame (world fully loaded): list the chunks to build
+	protected void Start()
+	{
+		m_bStarted = true;
+		m_bRender = RplSession.Mode() != RplMode.Dedicated;
+		m_fStep = m_fChunkSize / CELLS;
+		m_Buf = new MUD_WorldSkinBuffers();
+		BuildIndices();
+
+		vector pos = GetOrigin();
+		GenericWorldEntity worldEnt = GetGame().GetWorldEntity();
+		if (worldEnt)
+			m_Terrain = worldEnt.GetTerrain(pos[0], pos[2]);
+		if (!m_Terrain)
+		{
+			Print("MUD skin: no terrain - nothing to do", LogLevel.WARNING);
+			m_bDone = true;
+			return;
+		}
+
+		vector mins, maxs;
+		m_Terrain.GetTerrainBoundBox(mins, maxs);
+		int nx = Math.Ceil((maxs[0] - mins[0]) / m_fChunkSize);
+		int nz = Math.Ceil((maxs[2] - mins[2]) / m_fChunkSize);
+		for (int cz = 0; cz < nz; cz++)
+		{
+			for (int cx = 0; cx < nx; cx++)
+			{
+				vector o = Vector(mins[0] + cx * m_fChunkSize, 0, mins[2] + cz * m_fChunkSize);
+				if (m_fRadius > 0)
+				{
+					vector centre = o + Vector(m_fChunkSize * 0.5, 0, m_fChunkSize * 0.5);
+					if (vector.DistanceXZ(centre, pos) > m_fRadius + m_fChunkSize * 0.71)
+						continue;
+				}
+				m_aTodo.Insert(o);
+			}
+		}
+		m_iTotal = m_aTodo.Count();
+		m_iStartTick = System.GetTickCount();
+		Print(string.Format("MUD skin: terrain %1 .. %2, %3 x %4 chunks of %5 m (%6 m step), building %7, render %8",
+			mins, maxs, nx, nz, m_fChunkSize, m_fStep, m_iTotal, m_bRender));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void BuildIndices()
+	{
+		int n;
+		for (int z = 0; z < CELLS; z++)
+		{
+			for (int x = 0; x < CELLS; x++)
+			{
+				int bl = z * VERTS + x;
+				int br = bl + 1;
+				int tl = bl + VERTS;
+				int tr = tl + 1;
+				m_Buf.m_aIndices[n] = bl; n++;
+				m_Buf.m_aIndices[n] = tl; n++;
+				m_Buf.m_aIndices[n] = tr; n++;
+				m_Buf.m_aIndices[n] = tr; n++;
+				m_Buf.m_aIndices[n] = br; n++;
+				m_Buf.m_aIndices[n] = bl; n++;
+			}
+		}
+
+		for (int vz = 0; vz < VERTS; vz++)
+		{
+			for (int vx = 0; vx < VERTS; vx++)
+			{
+				int v = vz * VERTS + vx;
+				m_Buf.m_aUVs[v * 2] = vx / 32.0;
+				m_Buf.m_aUVs[v * 2 + 1] = 1 - vz / 32.0;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void BuildChunk(vector o)
+	{
+		BaseWorld world = GetWorld();
+
+		int t0 = System.GetTickCount();
+		for (int vz = 0; vz < VERTS; vz++)
+		{
+			for (int vx = 0; vx < VERTS; vx++)
+			{
+				float lx = vx * m_fStep;
+				float lz = vz * m_fStep;
+				float h = world.GetSurfaceY(o[0] + lx, o[2] + lz) + m_fOffset;
+				m_Buf.m_aVerts[vz * VERTS + vx] = Vector(lx, h, lz);
+			}
+		}
+		m_iSampleMs += System.GetTickCount(t0);
+
+		EntitySpawnParams params = new EntitySpawnParams();
+		params.TransformMode = ETransformMode.WORLD;
+		params.Transform[3] = o;
+		IEntity ent = GetGame().SpawnEntity(MUD_WorldSkinChunkEntity, world, params);
+		if (!ent)
+		{
+			Print("MUD skin: could not spawn chunk entity", LogLevel.ERROR);
+			return;
+		}
+		m_aChunks.Insert(ent);
+
+		if (m_bRender)
+		{
+			int t1 = System.GetTickCount();
+			int numVerts[] = {1089};
+			int numIndices[] = {6144};
+			string materials[] = {m_Material};
+			Resource res = MeshObject.Create(1, numVerts, numIndices, materials, 0);
+			if (res && res.GetResource())
+			{
+				MeshObject mesh = res.GetResource().ToMeshObject();
+				// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
+				mesh.UpdateIndices(0, m_Buf.m_aIndices);
+				mesh.UpdateVerts(0, m_Buf.m_aVerts, m_Buf.m_aUVs);
+				ent.SetObject(mesh, "");
+				m_aMeshRes.Insert(res);
+			}
+			else
+			{
+				Print(string.Format("MUD skin: MeshObject.Create failed - material '%1' did not load?", m_Material), LogLevel.ERROR);
+				m_bRender = false;
+			}
+			m_iMeshMs += System.GetTickCount(t1);
+		}
+
+		int t2 = System.GetTickCount();
+		ResourceName mat = SurfaceUnder(o + Vector(m_fChunkSize * 0.5, 0, m_fChunkSize * 0.5));
+		if (mat.IsEmpty())
+			mat = m_GameMaterial;
+
+		PhysicsGeom geom = PhysicsGeom.CreateTriMesh(m_Buf.m_aVerts, m_Buf.m_aIndices, 1089, 6144);
+		if (geom)
+		{
+			// same layers as the ground patches: Terrain preset + Foliage (vehicle get in/out sweep skips it)
+			autoptr PhysicsGeomDef defs[] = {PhysicsGeomDef("", geom, mat, EPhysicsLayerPresets.Terrain | EPhysicsLayerDefs.Foliage)};
+			if (!Physics.CreateStaticEx(ent, defs))
+				Print("MUD skin: CreateStaticEx failed", LogLevel.ERROR);
+		}
+		else
+		{
+			Print("MUD skin: CreateTriMesh failed", LogLevel.ERROR);
+		}
+		m_iColMs += System.GetTickCount(t2);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Terrain game material at a world position (WORLD trace, still works with the terrain off)
+	protected ResourceName SurfaceUnder(vector wp)
+	{
+		TraceParam param = new TraceParam();
+		param.Start = Vector(wp[0], GetWorld().GetSurfaceY(wp[0], wp[2]) + 20, wp[2]);
+		param.End = param.Start - vector.Up * 40;
+		param.Flags = TraceFlags.WORLD;
+		param.LayerMask = EPhysicsLayerPresets.Projectile;
+		GetWorld().TraceMove(param, null);
+
+		GameMaterial gm = param.SurfaceProps;
+		if (!gm)
+			return ResourceName.Empty;
+		return gm.GetResourceName();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void TerrainOff()
+	{
+		if (!m_Terrain)
+			return;
+
+		Physics phys = m_Terrain.GetPhysics();
+		if (phys)
+		{
+			phys.SetInteractionLayer(0);
+			int n = phys.GetNumGeoms();
+			for (int i = 0; i < n; i++)
+			{
+				phys.SetGeomInteractionLayer(i, 0);
+			}
+		}
+		else
+		{
+			Print("MUD skin: terrain has no Physics - collision stays on", LogLevel.WARNING);
+		}
+		m_Terrain.ClearFlags(EntityFlags.VISIBLE, false);
+		Print("MUD skin: real terrain hidden + collision off");
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnFrame(IEntity owner, float timeSlice)
+	{
+		if (m_bDone)
+			return;
+
+		if (!m_bStarted)
+		{
+			Start();
+			return;
+		}
+
+		m_iFrames++;
+		int count = Math.ClampInt(m_iChunksPerFrame, 1, 1000);
+		while (count > 0 && !m_aTodo.IsEmpty())
+		{
+			int last = m_aTodo.Count() - 1;
+			BuildChunk(m_aTodo[last]);
+			m_aTodo.Remove(last);
+			count--;
+		}
+
+		if (!m_aTodo.IsEmpty())
+			return;
+
+		m_bDone = true;
+		int verts = m_iTotal * 1089;
+		Print(string.Format("MUD skin: built %1 chunks (%2 verts, %3 tris) over %4 frames, %5 ms wall | heights %6 ms, meshes %7 ms, colliders %8 ms",
+			m_iTotal, verts, m_iTotal * 2048, m_iFrames, System.GetTickCount(m_iStartTick), m_iSampleMs, m_iMeshMs, m_iColMs));
+
+		if (m_bTerrainOff)
+			TerrainOff();
+	}
+
+#ifdef WORKBENCH
+	//------------------------------------------------------------------------------------------------
+	override int _WB_GetAfterWorldUpdateSpecs(IEntitySource src)
+	{
+		return EEntityFrameUpdateSpecs.CALL_WHEN_ENTITY_VISIBLE;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void _WB_AfterWorldUpdate(float timeSlice)
+	{
+		Shape.CreateSphere(ARGB(255, 0, 200, 255), ShapeFlags.WIREFRAME | ShapeFlags.ONCE, GetOrigin(), 2);
+		super._WB_AfterWorldUpdate(timeSlice);
+	}
+#endif
+}

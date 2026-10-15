@@ -1,0 +1,10 @@
+MUD_WorldGroundEntity {
+ ID "267BEEB270EE617A"
+ components {
+  RplComponent "{76531ABE22F03E46}" {
+   Streamable Disabled
+  }
+ }
+ m_bDebug 1
+ m_bBandMesher 1
+}

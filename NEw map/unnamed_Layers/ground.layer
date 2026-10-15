@@ -1,0 +1,8 @@
+$grp MUD_GroundEntity : "{1F5DC58EDF919FB6}Prefabs/Mud/MudGround_TerrainLook.et" {
+ {
+  coords 66.92 0.001 59.206
+ }
+ {
+  coords 66.92 0.001 25.474
+ }
+}

@@ -1,0 +1,10 @@
+SCR_ChimeraCharacter {
+ ID "520EC961A090B1EE"
+ components {
+  SCR_CharacterAnimationComponent "{520EA1D2F659C994}" {
+   ColliderProne PhysAgentCollisionShapeItem "{5570AA6572F30FD1}" {
+    Size 0.6 0.4 0.6
+   }
+  }
+ }
+}

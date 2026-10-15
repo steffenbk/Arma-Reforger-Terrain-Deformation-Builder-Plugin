@@ -1,0 +1,310 @@
+[EntityEditorProps(category: "Mud", description: "THROWAWAY TEST: in play, turns the real terrain's collision and/or rendering off for a while and logs what still works. Place by class where you stand at spawn.", color: "255 0 255 255")]
+class MUD_TerrainOffProbeEntityClass : GenericEntityClass
+{
+}
+
+//! Throwaway probe for the "sculpt, then switch the real terrain off" idea. Answers:
+//! 1. does the terrain have a Physics we can switch off (soldier falls through?)
+//! 2. does hiding it work, and does the ground's terrain look still render?
+//! 3. does a WORLD trace still return the surface game material afterwards?
+//! Everything happens locally on each machine; test in Workbench play first.
+class MUD_TerrainOffProbeEntity : GenericEntity
+{
+	[Attribute("8", UIWidgets.EditBox, "Seconds after start before the terrain is switched off")]
+	protected float m_fDelay;
+
+	[Attribute("1", UIWidgets.CheckBox, "Switch the terrain collision off")]
+	protected bool m_bNoCollision;
+
+	[Attribute("0", UIWidgets.ComboBox, "How collision is switched off", enums: { ParamEnum("Interaction layer 0 (body + every geom)", "0"), ParamEnum("SimulationState.NONE", "1") })]
+	protected int m_iCollisionMethod;
+
+	[Attribute("1", UIWidgets.CheckBox, "Hide the terrain (clear VISIBLE)")]
+	protected bool m_bHide;
+
+	[Attribute("20", UIWidgets.EditBox, "Seconds after switching off before everything is put back (0 = never)")]
+	protected float m_fRestoreAfter;
+
+	[Attribute("12", UIWidgets.EditBox, "Hole scan: half size (m) of the square around the probe traced on the BEFORE stage. 0 = off.")]
+	protected float m_fScanHalf;
+
+	[Attribute("0.5", UIWidgets.EditBox, "Hole scan: spacing (m) between traces")]
+	protected float m_fScanStep;
+
+	[Attribute("0", UIWidgets.CheckBox, "Hole scan: whole terrain instead of the square around the probe (samples at step/2 from the terrain corner; use step 2 = one sample per heightmap cell centre)")]
+	protected bool m_bScanWholeTerrain;
+
+	protected float m_fTime;
+	protected int m_iStage;             // 0 waiting, 1 off, 2 restored
+	protected GenericTerrainEntity m_Terrain;
+	protected int m_iOldLayer;
+	protected ref array<int> m_aOldGeomLayers = {};
+	protected SimulationState m_eOldSim;
+	protected float m_fNextLog;
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_TerrainOffProbeEntity(IEntitySource src, IEntity parent)
+	{
+		SetEventMask(EntityEvent.FRAME);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	override void EOnFrame(IEntity owner, float timeSlice)
+	{
+		m_fTime += timeSlice;
+
+		if (m_iStage == 0 && m_fTime >= m_fDelay)
+		{
+			Report("BEFORE");
+			ScanHoles();
+			SwitchOff();
+			m_iStage = 1;
+			m_fNextLog = m_fTime + 1;
+			return;
+		}
+
+		if (m_iStage == 1)
+		{
+			if (m_fTime >= m_fNextLog)
+			{
+				Report("OFF");
+				m_fNextLog = m_fTime + 5;
+			}
+
+			if (m_fRestoreAfter > 0 && m_fTime >= m_fDelay + m_fRestoreAfter)
+			{
+				Restore();
+				m_iStage = 2;
+				Report("RESTORED");
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void SwitchOff()
+	{
+		vector pos = GetOrigin();
+		GenericWorldEntity worldEnt = GetGame().GetWorldEntity();
+		if (worldEnt)
+			m_Terrain = worldEnt.GetTerrain(pos[0], pos[2]);
+
+		if (!m_Terrain)
+		{
+			Print("MUD probe: no terrain found under the probe", LogLevel.WARNING);
+			return;
+		}
+
+		Physics phys = m_Terrain.GetPhysics();
+		if (m_bNoCollision)
+		{
+			if (!phys)
+			{
+				Print("MUD probe: terrain has NO Physics object -> cannot switch collision off this way", LogLevel.WARNING);
+			}
+			else if (m_iCollisionMethod == 1)
+			{
+				m_eOldSim = phys.GetSimulationState();
+				phys.ChangeSimulationState(SimulationState.NONE);
+				Print(string.Format("MUD probe: collision off via SimulationState %1 -> %2", m_eOldSim, phys.GetSimulationState()));
+			}
+			else
+			{
+				m_iOldLayer = phys.GetInteractionLayer();
+				phys.SetInteractionLayer(0);
+				int n = phys.GetNumGeoms();
+				m_aOldGeomLayers.Clear();
+				for (int i = 0; i < n; i++)
+				{
+					m_aOldGeomLayers.Insert(phys.GetGeomInteractionLayer(i));
+					phys.SetGeomInteractionLayer(i, 0);
+				}
+				Print(string.Format("MUD probe: collision off via layer %1 -> %2, %3 geoms set to 0", m_iOldLayer, phys.GetInteractionLayer(), n));
+			}
+		}
+
+		if (m_bHide)
+		{
+			EntityFlags before = m_Terrain.GetFlags();
+			m_Terrain.ClearFlags(EntityFlags.VISIBLE, false);
+			Print(string.Format("MUD probe: hide - flags %1 -> %2", before, m_Terrain.GetFlags()));
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Restore()
+	{
+		if (!m_Terrain)
+			return;
+
+		Physics phys = m_Terrain.GetPhysics();
+		if (m_bNoCollision && phys)
+		{
+			if (m_iCollisionMethod == 1)
+			{
+				phys.ChangeSimulationState(m_eOldSim);
+			}
+			else
+			{
+				phys.SetInteractionLayer(m_iOldLayer);
+				int n = Math.Min(phys.GetNumGeoms(), m_aOldGeomLayers.Count());
+				for (int i = 0; i < n; i++)
+				{
+					phys.SetGeomInteractionLayer(i, m_aOldGeomLayers[i]);
+				}
+			}
+		}
+
+		if (m_bHide)
+			m_Terrain.SetFlags(EntityFlags.VISIBLE, false);
+
+		Print("MUD probe: terrain restored");
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! One log block: terrain physics state, GetSurfaceY, and a WORLD trace + an entity trace at the probe
+	protected void Report(string stage)
+	{
+		vector pos = GetOrigin();
+		BaseWorld world = GetWorld();
+
+		GenericTerrainEntity terrain = m_Terrain;
+		if (!terrain)
+		{
+			GenericWorldEntity worldEnt = GetGame().GetWorldEntity();
+			if (worldEnt)
+				terrain = worldEnt.GetTerrain(pos[0], pos[2]);
+		}
+
+		string physInfo = "no terrain";
+		if (terrain)
+		{
+			Physics phys = terrain.GetPhysics();
+			if (phys)
+				physInfo = string.Format("physics yes, layer %1, geoms %2, sim %3, flags %4", phys.GetInteractionLayer(), phys.GetNumGeoms(), phys.GetSimulationState(), terrain.GetFlags());
+			else
+				physInfo = string.Format("physics NONE, flags %1", terrain.GetFlags());
+		}
+
+		Print(string.Format("MUD probe [%1] at %2 | terrain %3 | GetSurfaceY %4", stage, pos, physInfo, world.GetSurfaceY(pos[0], pos[2])));
+		Print(string.Format("MUD probe [%1]   WORLD trace: %2", stage, TraceInfo(pos, TraceFlags.WORLD)));
+		Print(string.Format("MUD probe [%1]   WORLD|ENTS trace: %2", stage, TraceInfo(pos, TraceFlags.WORLD | TraceFlags.ENTS)));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Map around the probe from GetSurfaceY (-256 = hole) and a WORLD trace, one row per
+	//! line, north (+Z) first. Also the hole's extent and GetSurfaceY in its middle.
+	protected void ScanHoles()
+	{
+		if (m_fScanHalf <= 0 || m_fScanStep <= 0)
+			return;
+
+		vector pos = GetOrigin();
+		BaseWorld world = GetWorld();
+		int n = Math.Round(m_fScanHalf * 2 / m_fScanStep) + 1;
+		int nz = n;
+		float x0 = pos[0] - m_fScanHalf;
+		float z0 = pos[2] - m_fScanHalf;
+		float minX = 1000000;
+		float maxX = -1000000;
+		float minZ = 1000000;
+		float maxZ = -1000000;
+		int holes = 0;
+
+		if (m_bScanWholeTerrain)
+		{
+			GenericTerrainEntity terrain;
+			GenericWorldEntity worldEnt = GetGame().GetWorldEntity();
+			if (worldEnt)
+				terrain = worldEnt.GetTerrain(pos[0], pos[2]);
+			if (!terrain)
+			{
+				Print("MUD probe HOLE: no terrain for the whole-terrain scan", LogLevel.WARNING);
+				return;
+			}
+			vector mins, maxs;
+			terrain.GetTerrainBoundBox(mins, maxs);
+			x0 = mins[0] + m_fScanStep * 0.5;
+			z0 = mins[2] + m_fScanStep * 0.5;
+			n = Math.Floor((maxs[0] - mins[0]) / m_fScanStep);
+			nz = Math.Floor((maxs[2] - mins[2]) / m_fScanStep);
+			Print(string.Format("MUD probe HOLE terrain box %1 .. %2, tile size TC %3", mins, maxs, terrain.GetTileSizeTC()));
+		}
+
+		Print(string.Format("MUD probe HOLE SCAN from x %1 z %2, step %3 m, %4 x %5 traces ('#' terrain, '.' hole by GetSurfaceY but trace hits, ' ' hole + trace misses, '?' no hole but trace misses), top row = +Z", x0, z0, m_fScanStep, n, nz));
+		for (int iz = nz - 1; iz >= 0; iz--)
+		{
+			string row = "";
+			float z = z0 + iz * m_fScanStep;
+			for (int ix = 0; ix < n; ix++)
+			{
+				float x = x0 + ix * m_fScanStep;
+				TraceParam param = new TraceParam();
+				param.Start = Vector(x, pos[1] + 50, z);
+				param.End = Vector(x, pos[1] - 50, z);
+				param.Flags = TraceFlags.WORLD;
+				param.LayerMask = EPhysicsLayerPresets.Projectile;
+				bool traceHit = world.TraceMove(param, null) < 1;
+				// 2026-10-08 19:58: WORLD traces still hit the heightmap inside a painted hole;
+				// GetSurfaceY returns -256 there (the no-terrain default)
+				bool hole = world.GetSurfaceY(x, z) < -255;
+				if (!hole)
+				{
+					if (traceHit)
+						row += "#";
+					else
+						row += "?";
+				}
+				else
+				{
+					if (traceHit)
+						row += ".";
+					else
+						row += " ";
+					holes++;
+					minX = Math.Min(minX, x);
+					maxX = Math.Max(maxX, x);
+					minZ = Math.Min(minZ, z);
+					maxZ = Math.Max(maxZ, z);
+				}
+			}
+			Print(string.Format("MUD probe HOLE z %1 | %2", z, row));
+		}
+
+		if (holes == 0)
+		{
+			Print("MUD probe HOLE: no hole found in the scan");
+			return;
+		}
+
+		float cx = (minX + maxX) * 0.5;
+		float cz = (minZ + maxZ) * 0.5;
+		Print(string.Format("MUD probe HOLE: %1 hole traces, x %2 .. %3 (%4 m), z %5 .. %6 (%7 m), GetSurfaceY in middle %8, outside %9",
+			holes, minX, maxX, maxX - minX, minZ, maxZ, maxZ - minZ, world.GetSurfaceY(cx, cz), world.GetSurfaceY(pos[0] + m_fScanHalf, pos[2] + m_fScanHalf)));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected string TraceInfo(vector pos, TraceFlags flags)
+	{
+		TraceParam param = new TraceParam();
+		param.Start = pos + vector.Up * 50;
+		param.End = pos - vector.Up * 50;
+		param.Flags = flags;
+		param.LayerMask = EPhysicsLayerPresets.Projectile;
+		param.Exclude = this;
+		float frac = GetWorld().TraceMove(param, null);
+
+		if (frac >= 1)
+			return "nothing hit";
+
+		vector hit = param.Start + (param.End - param.Start) * frac;
+		string mat = "none";
+		if (param.SurfaceProps)
+			mat = param.SurfaceProps.GetResourceName();
+
+		string ent = "none";
+		if (param.TraceEnt)
+			ent = param.TraceEnt.ClassName();
+
+		return string.Format("hit Y %1, entity %2, material %3", hit[1], ent, mat);
+	}
+}

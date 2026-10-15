@@ -1,0 +1,8 @@
+GameProject {
+ ID "Testingplanvechmsh"
+ GUID "6A8F47B45144E6D6"
+ TITLE "Testing plan vech msh"
+ Dependencies {
+  "58D0FB3206B6F859"
+ }
+}

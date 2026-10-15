@@ -1,0 +1,38 @@
+{
+ "format": "asset-pipeline",
+ "version": 1,
+ "asset": {
+  "name": "MudTile",
+  "category": "prop",
+  "asset_dir": "C:\\Users\\Steffen\\Documents\\My Games\\ArmaReforgerWorkbench\\addons\\Testing plan vech msh\\Assets\\Mud",
+  "source": null,
+  "donor": null,
+  "mod_root": "C:\\Users\\Steffen\\Documents\\My Games\\ArmaReforgerWorkbench\\addons\\Testing plan vech msh",
+  "blend_file": null,
+  "install": "Experimental"
+ },
+ "created_at": "2026-10-07T20:32:02+00:00",
+ "phases": {
+  "A": {
+   "status": "done",
+   "started_at": "2026-10-07T20:32:02+00:00",
+   "session_started_at": "2026-10-07T20:32:02+00:00",
+   "active_min": 0.3,
+   "last_seen_at": "2026-10-07T20:32:18+00:00",
+   "results": {
+    "fbx": [
+     "C:\\Users\\Steffen\\Documents\\My Games\\ArmaReforgerWorkbench\\addons\\Testing plan vech msh\\Assets\\Mud\\MudTile.fbx"
+    ]
+   },
+   "open_issues": [
+    "Unproven: does MeshObject.UpdateVerts work on an imported .xob, or only on MeshObject.Create meshes (native has a silent early-out guard)"
+   ],
+   "finished_at": "2026-10-07T20:32:18+00:00",
+   "minutes": 0.3
+  },
+  "B": {
+   "status": "pending"
+  }
+ },
+ "notes": []
+}

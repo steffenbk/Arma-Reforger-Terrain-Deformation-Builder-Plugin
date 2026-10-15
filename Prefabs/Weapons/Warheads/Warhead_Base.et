@@ -1,0 +1,7 @@
+GenericEntity {
+ ID "9D9BE68EA2672F76"
+ components {
+  MUD_WarheadComponent "{4D5544424C415354}" {
+  }
+ }
+}

@@ -1,0 +1,6 @@
+rut_straight  mean     tiny    0 sliver    6 tris  1208 folded   0 cells   654 clamped    0 | mesh->true max 0.119 rms 0.038 | true->mesh max 0.155 rms 0.056 | wall 30 | 84 ms poly 19 ms
+rut_straight  dc_cd    tiny    0 sliver   29 tris  1208 folded   4 cells   654 clamped   16 | mesh->true max 0.117 rms 0.032 | true->mesh max 0.155 rms 0.050 | wall 31 | 119 ms poly 18 ms
+rut_diag      mean     tiny    0 sliver    0 tris  1160 folded   0 cells   630 clamped    0 | mesh->true max 0.124 rms 0.030 | true->mesh max 0.154 rms 0.049 | wall 28 | 80 ms poly 19 ms
+rut_diag      dc_cd    tiny    0 sliver   28 tris  1160 folded   4 cells   630 clamped   14 | mesh->true max 0.106 rms 0.022 | true->mesh max 0.179 rms 0.045 | wall 39 | 109 ms poly 21 ms
+rut_arc       mean     tiny    0 sliver   12 tris  1240 folded   0 cells   667 clamped    0 | mesh->true max 0.124 rms 0.029 | true->mesh max 0.286 rms 0.052 | wall 35 | 81 ms poly 19 ms
+rut_arc       dc_cd    tiny    0 sliver   24 tris  1240 folded   3 cells   667 clamped   10 | mesh->true max 0.113 rms 0.024 | true->mesh max 0.294 rms 0.049 | wall 40 | 111 ms poly 19 ms

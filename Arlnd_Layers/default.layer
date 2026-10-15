@@ -1,0 +1,37 @@
+MUD_CoarseSkinEntity {
+ coords 1420.572 38.572 2185.829
+}
+MUD_DepthBoxEntity MUD_DepthBox_0_5 {
+ coords 2140 51 2727.87
+ m_vSize 20 4 20
+ m_fMaxDepth 0.5
+}
+MUD_MudZoneEntity {
+ coords 997.397 39 2729.715
+}
+GenericEntity : "{21D83950DF36F250}Prefabs/Props/Military/Sandbags/Sandbag_01_long_burlap.et" {
+ coords 997.93 39 2662.291
+}
+$grp GenericEntity : "{31CE12B3D1F6789E}Prefabs/Structures/Military/Flags/FlagPole_01/FlagPole_01_base.et" {
+ MUD_Marker_DepthBox_0_5 {
+  coords 2140 50.5 2727.87
+ }
+ MUD_Marker_HardGround {
+  coords 1683 38 3011
+ }
+}
+$grp Vehicle : "{3F5D19AC3C7E20DC}Prefabs/Vehicles/Wheeled/Ural4320/Ural4320_ammo_FIA.et" {
+ Ural4320_ammo_FIA1 {
+  coords 1040.025 40.259 2602.858
+ }
+ Ural4320_ammo_FIA2 {
+  coords 1006.247 39 2684.969
+ }
+}
+SCR_DestructibleBuildingEntity : "{B27AF198E146D70D}Prefabs/Structures/Houses/Village/House_Village_E_1I01/House_Village_E_1I01_beige.et" {
+ coords 1260.776 0.4 2209.114
+ angles 0 55.182 0
+}
+MUD_WorldGroundEntity : "{C015189C825FFA71}Prefabs/Mud/MudWorldGround.et" {
+ coords 1425 38.6 2190
+}
