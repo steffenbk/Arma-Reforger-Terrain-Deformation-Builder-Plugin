@@ -50,7 +50,7 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 ## Parked ideas (not now - add here, don't start)
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel
   mesh down - as sharp as 0.25 m voxels without the 3D cost, one mesh = look = feel. Plus cheap probes MatTerrainObject /
-  GlobalLayer on voxel tops. docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md
+  GlobalLayer on voxel tops. docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md; build plan docs/superpowers/plans/2026-10-15-displaced-ruts-plan.md
 - FIRST IN LINE: solid ruts in mud zones - voxel rut profile with raised side ridges + zone-tuned step/cap
   (ideas A+B, MP-safe, no new op). docs/superpowers/research/2026-10-15-raised-ruts-ideas.md
 - MudRunner-style mud feel: sinking that gets deeper and more slippery with each pass, belly drag, topsoil break.
