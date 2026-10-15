@@ -500,3 +500,17 @@ Script protos read from the pak of the install the enfusion MCP points at (Arma 
 - String search for Set/Modify/Paint/Edit/Toggle/Add/Remove + Terrain/Height/Hole/Surface found only
   SetSurfaceOverride (vehicle, answer 9), UI SetHeightOverride / Min/MaxDesiredHeight, SetFogHeightDensityOverride,
   and the Workbench-only SetTerrainSurfaceTile / Add/RemoveTerrainFlatterEntity (WorldEditorAPI, answer 12).
+
+---
+## 14. Custom shaders in mods (added 2026-10-16 - user saw a modder do it on Discord)
+Our "mods cannot add shaders" was INFERENCE, never checked. Questions:
+- Does the game / Workbench compile shader SOURCE shipped in an addon (search: shader compiler, ".fx", ".hlsl",
+  "shaders/", ShaderCompile, MaterialSource, DeformFunc - answer 12 found enf::MaterialSource::DeformFunc on the
+  material compile side)? Can an addon add a NEW material class, or override a vanilla shader file by path (as
+  resource overrides work for other files)?
+- Is there a material class with vertex-shader height input (vertex texture fetch / displacement / DeformFunc) that
+  an .emat can drive with a texture - and can script update that texture at runtime (a render target or a texture
+  written from script)?
+- What do the known post-process / NVG mods use: new shaders, or parameters of existing post-process materials?
+- If custom shaders work: is it client-only (yes for rendering) and does the shipped game client accept them
+  (signature / pak checks), not just Workbench?

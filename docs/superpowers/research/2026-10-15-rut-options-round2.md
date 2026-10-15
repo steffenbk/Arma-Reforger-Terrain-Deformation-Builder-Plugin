@@ -119,3 +119,10 @@ Stage 1 cost fix for the current field - A replaces most of that fix if it holds
   is, reachable from script?
 - 13. Vanilla track decals on our map: does SCR_VehicleTrackDecal's terrain path draw on hole cells (our ground over a
   hole) or skip them? (terrain hole test in the decal clip, sub_140B20280 area)
+
+## Correction 2026-10-16: "no custom shaders" is UNVERIFIED
+The user saw a modder use a custom shader (Discord). Our "mods cannot add shaders" was INFERENCE. Open: IDA item 14
++ the Discord example. If it holds, the GPU options come back for the LOOK only: a displacement / parallax shader on
+our ground fed by a rut texture (MudRunner / Batman-style detail). Collision still comes from our CPU meshes (the
+wheel ray hits physics, not pixels), so GPU detail must stay small (a few cm) on top of the real rut - a big
+look-only GPU rut would be the look / feel split we already rejected.
