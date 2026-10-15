@@ -51,6 +51,14 @@ MUD_VoxelProbe.c (RutWheel / RutFlush, RUT_BEHIND), MUD_Wheels.c
   FieldSurfAt fails -> plain rule; RUT_FIELD never marks new carved cells; JIP clients must wait for the ground to be
   ready before applying ops; m_aShow stored before the floor min.
 
+- Review fixes 2026-10-16 (docs/superpowers/results/2026-10-15-review-baseline.md): F1 floor settle
+  (MUD_WorldGroundEntity.FLOOR_SETTLE true, v109 = before) SP PASSED on cost: rebuild ms per rut op 9-15 vs 18-34
+  before (~1/3), same per-build ms; MP not tested. F3 hole check plain + seam points and draw floor plain colours
+  (v108 = before): 0 holes in 1577 plain checks; seam path not exercised yet (no crater crossed).
+  Patch memory (built 2026-10-16, not tested): press arrays only on first write (v110 = before); FLOOR_FREE frees
+  floor-only patches out of range, FieldDue rebuilds them near camera / player / vehicle, FloorDirty makes no new
+  patches (v111 = before).
+
 ## Open
 - Rut field Stage 5 JIP (user: later): late join after a rutted drive + crater crossing a rut. Robot code is
   re-archived: for disp hash on a DS set DISP_HASH_ALWAYS true; heightfield hashes need Hash Every > 0.

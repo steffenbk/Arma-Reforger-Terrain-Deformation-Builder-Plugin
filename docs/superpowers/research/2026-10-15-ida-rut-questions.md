@@ -514,3 +514,6 @@ Our "mods cannot add shaders" was INFERENCE, never checked. Questions:
 - What do the known post-process / NVG mods use: new shaders, or parameters of existing post-process materials?
 - If custom shaders work: is it client-only (yes for rendering) and does the shipped game client accept them
   (signature / pak checks), not just Workbench?
+Answer (IDA + shader pak, 2026-10-16): see 2026-10-16-custom-shaders.md - no compiler in game or Workbench, only
+precompiled .shadercacheDX12 binaries loaded before mods mount, fixed native Mat* classes. The Discord mod is not
+explained by this yet (post-process / existing-material parameters?) - still open.

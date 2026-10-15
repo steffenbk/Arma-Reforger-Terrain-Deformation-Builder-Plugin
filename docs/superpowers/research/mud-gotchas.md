@@ -455,3 +455,5 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   never rebuild in the same frame (frame budget; mesh interval 0.1 s, collider 0.2 s). Reusing the mesh's band build
   for the collider when inputs match caught 14 of 217 collider builds (~6%): a new rut changes the inputs first.
   Halving the mesher cost needs a schedule change (collider right after its mesh), not a cache.
+- Enforce array.Remove(i) moves the LAST entry into slot i (unordered). Never keep an index across a Remove in the
+  same loop - keep the key / value (FieldDue crash 'Index out of bounds' 2026-10-16). RemoveOrdered keeps order.

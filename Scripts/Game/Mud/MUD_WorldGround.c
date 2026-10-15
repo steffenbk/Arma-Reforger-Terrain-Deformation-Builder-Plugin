@@ -90,6 +90,17 @@ class MUD_WorldGroundEntity : GenericEntity
 	// (MUD_VoxelProbe.DISP_SOIL_CUT under the seeded top, which is LIFT over the ground). The reveal's own 0.01 m
 	// (tuned for one-pass heightfield ruts) made the whole 1 m wide trough soil: ruts looked ~2x wider (user 2026-10-15)
 	static const float FIELD_SOIL_D = 0.03;
+	// RUT FIELD settle (review F1 2026-10-16): a patch whose only dirt is rut floor waits until it had no new floor
+	// dirt for FLOOR_QUIET s (or FLOOR_MAX_WAIT s since the first) before mesh + collider rebuild - one build per
+	// crossing instead of one per rut op (~4 / s, 2 patches each, log 21-35-43). Ruts are laid behind the wheels.
+	// false = rebuild at once (v100 .. v108).
+	static const bool FLOOR_SETTLE = true;
+	static const float FLOOR_QUIET = 0.4;
+	static const float FLOOR_MAX_WAIT = 1.5;
+	// RUT FIELD patch memory (review Stage 4, 2026-10-16): a floor-only patch (m_bFloor, not m_bDeformed) holds nothing
+	// the rut tiles don't, so FreeIdle frees it like an undeformed one once nothing is near (FieldDue keeps the ones in
+	// range); FieldDue rebuilds it when a camera / player / vehicle comes near. false = kept for the match (v100 .. v111).
+	static const bool FLOOR_FREE = true;
 	static const int PVERTS = 33;
 	static const int SKIN = 4;          // skin cells per patch side
 	static const int FINE = 8;          // fine cells per skin cell side
@@ -493,6 +504,16 @@ class MUD_WorldGroundEntity : GenericEntity
 
 	// debug stats, printed every 10 s
 	protected float m_fSinceStats;
+	protected int m_iStatFrames;                                // frames since the last Stats print (fps)
+	protected int m_iSettleQuiet;                               // FLOOR_SETTLE per 10 s: released after quiet,
+	protected int m_iSettleMax;                                 // ... after the max wait,
+	protected int m_iSettleHeld;                                // ... patch-frames held
+	protected int m_iFieldMade;                                 // FLOOR_FREE per 10 s: floor patches FieldDue made,
+	protected int m_iFloorFreed;                                // ... floor-only patches freed
+	protected ref set<int> m_sFieldPatches = new set<int>();    // RUT FIELD: patch keys a rut floor change reached (FloorDirty)
+	protected ref array<int> m_aFieldDue = {};                  // of those, in range at the last check (FieldDue)
+	protected ref array<float> m_aFieldDueDist = {};
+	protected float m_fFieldCheckAt;
 	protected int m_iSeq;                                       // server: number of the next live message
 	protected ref array<int> m_aNetKeys = {};                   // server: patch keys with unsent changes
 	protected ref array<ref MUD_NetMsg> m_aHeld = {};           // client: live messages not applied yet
@@ -1006,9 +1027,9 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!p)
 					continue;
 				if (berm)
-					p.m_aBermTouch[lz * PVERTS + lx] = t;
+					p.EnsurePress().m_aBermTouch[lz * PVERTS + lx] = t;
 				else
-					p.m_aRutTouch[lz * PVERTS + lx] = t;
+					p.EnsurePress().m_aRutTouch[lz * PVERTS + lx] = t;
 			}
 		}
 	}
@@ -1089,14 +1110,14 @@ class MUD_WorldGroundEntity : GenericEntity
 
 				if (d < m_fRutRadius)
 				{
-					bool newPass = m_fTime - p.m_aRutTouch[v] > m_fPassGap;
+					bool newPass = m_fTime - p.RutTouch(v) > m_fPassGap;
 					SetTouch(gx, gz, false, m_fTime);
 					// the pass digs from the height it began at, deepest profile wins: a moving (ahead) press first
 					// touches a vertex with its rim (half depth) - one-shot passes left ruts half deep, no berms
 					// (2026-10-11: rut fill changed ground on ~90 % of its presses on straight runs)
 					if (newPass)
-						p.m_aRutFrom[v] = h;
-					float from = p.m_aRutFrom[v];
+						p.EnsurePress().m_aRutFrom[v] = h;
+					float from = p.RutFrom(v);
 					float cap = depth * soft;
 					if (h <= -cap)
 						continue;
@@ -1116,13 +1137,13 @@ class MUD_WorldGroundEntity : GenericEntity
 				}
 				else if (d < m_fBermRadius)
 				{
-					bool newBerm = m_fTime - p.m_aBermTouch[v] > m_fPassGap;
+					bool newBerm = m_fTime - p.BermTouch(v) > m_fPassGap;
 					SetTouch(gx, gz, true, m_fTime);
 					if (newBerm)
-						p.m_aBermFrom[v] = h;
+						p.EnsurePress().m_aBermFrom[v] = h;
 					// ruts win over berms: never push up a vertex that is already below the surface
 					float bermTop = m_fBermHeight * soft;
-					float bfrom = p.m_aBermFrom[v];
+					float bfrom = p.BermFrom(v);
 					if (h < -0.001 || bfrom < -0.001 || bfrom >= bermTop)
 						continue;
 					float t = 1 - (d - m_fRutRadius) / bermSpan;
@@ -1495,9 +1516,9 @@ class MUD_WorldGroundEntity : GenericEntity
 	{
 		if (!m_Rec)
 			return;
-		if (p.m_aPendAt[v] < 0)
-			p.m_aPendOrig[v] = h;
-		p.m_aPendAt[v] = m_fTime;
+		if (p.PendAt(v) < 0)
+			p.EnsurePress().m_aPendOrig[v] = h;
+		p.EnsurePress().m_aPendAt[v] = m_fTime;
 		m_Rec.m_aGx.Insert(gx);
 		m_Rec.m_aGz.Insert(gz);
 	}
@@ -1565,7 +1586,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			int v = 0;
 			MUD_FinePatch p = At(r.m_aGx[i], r.m_aGz[i], v);
 			if (p)
-				p.m_aPendAt[v] = -1;
+				p.ClearPend(v);
 		}
 	}
 
@@ -1580,10 +1601,10 @@ class MUD_WorldGroundEntity : GenericEntity
 			int gz = r.m_aGz[i];
 			int v = 0;
 			MUD_FinePatch p = At(gx, gz, v);
-			if (!p || p.m_aPendAt[v] < 0 || p.m_aPendAt[v] > r.m_fAt)
+			if (!p || p.PendAt(v) < 0 || p.PendAt(v) > r.m_fAt)
 				continue;   // reached since, or a newer pending press owns it
-			p.m_aPendAt[v] = -1;
-			SetH(gx, gz, p.m_aPendOrig[v]);
+			p.ClearPend(v);
+			SetH(gx, gz, p.PendOrig(v));
 			MarkDirty(gx, gx, gz, gz);
 		}
 	}
@@ -1729,8 +1750,8 @@ class MUD_WorldGroundEntity : GenericEntity
 					for (int lx = lx0; lx <= lx1; lx++)
 					{
 						int v = lz * PVERTS + lx;
-						if (p.m_aHideAt[v] >= since)
-							p.m_aHideAt[v] = m_fTime;
+						if (p.HideAt(v) >= since)
+							p.EnsurePress().m_aHideAt[v] = m_fTime;
 					}
 				}
 			}
@@ -2133,7 +2154,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					continue;
 				MUD_FinePatch p = m_mPatches.Get(pz * m_iNPX + px);
 				if (p)
-					p.m_aScrapeTouch[lz * PVERTS + lx] = t;
+					p.EnsurePress().m_aScrapeTouch[lz * PVERTS + lx] = t;
 			}
 		}
 	}
@@ -2338,7 +2359,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!timed)
 				{
 					// one step per pass, like a rut: the belly staying over it keeps the pass going
-					bool newPass = m_fTime - p.m_aScrapeTouch[v] > m_fPassGap;
+					bool newPass = m_fTime - p.ScrapeTouch(v) > m_fPassGap;
 					SetScrapeTouch(gx, gz, m_fTime);
 					if (!newPass)
 						continue;
@@ -2574,7 +2595,7 @@ class MUD_WorldGroundEntity : GenericEntity
 							continue;
 						if (Math.AbsFloat(rx * dz - rz * dx) > rr)
 							continue;
-						p.m_aHideAt[lz * PVERTS + lx] = m_fTime;
+						p.EnsurePress().m_aHideAt[lz * PVERTS + lx] = m_fTime;
 					}
 				}
 			}
@@ -3061,15 +3082,6 @@ class MUD_WorldGroundEntity : GenericEntity
 				p.m_aBase[v] = bh;
 				p.m_aH[v] = 0;
 				p.m_aSmooth[v] = 0;
-				p.m_aRutTouch[v] = -100;
-				p.m_aBermTouch[v] = -100;
-				p.m_aShow[v] = 0;
-				p.m_aHideAt[v] = -100;
-				p.m_aScrapeTouch[v] = -100;
-				p.m_aRutFrom[v] = 0;
-				p.m_aBermFrom[v] = 0;
-				p.m_aPendOrig[v] = 0;
-				p.m_aPendAt[v] = -1;
 				p.m_aLock[v] = 0;
 				if (!ok)
 					continue;
@@ -3486,6 +3498,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		p.m_fNearAt = m_fTime;
 		int tm = System.GetTickCount();
 		InitPatch(p);
+		RutFieldOn(p);      // m_bFloor before the lazy stop: a patch over an old rut builds in full and draws it
 		int copied = CopyNeighbourEdges(p);
 		m_mPatches.Insert(key, p);
 		if (copied > 0)
@@ -3548,10 +3561,13 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Uncover the skin cells (a patch still building never covered them), then delete the patch
+	//! Uncover the skin cells (a patch still building never covered them; an asleep one, waking or not, did - SetCovered
+	//! false clears its sleep flag too), then delete the patch
 	protected void FreePatch(MUD_FinePatch p)
 	{
-		if (p.m_iBuild == 0)
+		if (p.m_bAsleep)
+			m_iAsleep--;
+		if (p.m_iBuild == 0 || p.m_bAsleep)
 		{
 			int t0 = System.GetTickCount();
 			m_Skin.SetCovered(p.m_iPx * SKIN, p.m_iPz * SKIN, SKIN, false);
@@ -3678,6 +3694,7 @@ class MUD_WorldGroundEntity : GenericEntity
 
 		NearPlayers(candKey, candDist);
 		FarDue(candKey, candDist);
+		FieldDue(candKey, candDist);
 
 		if (m_iBuildKey < 0 && candKey.IsEmpty())
 			return;
@@ -3746,6 +3763,8 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				m_iBuildKey = k;
 				m_iMadeAhead++;
+				if (np.m_bFloor && m_aFieldDue.Contains(k))
+					m_iFieldMade++;
 				m_sFrameStep += "setup ";
 			}
 		}
@@ -3814,7 +3833,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				if (key == m_iBuildKey)
 					continue;
-				if (!p.m_bDeformed && !p.m_bFloor && m_fTime - p.m_fNearAt > m_fFreeAfter)
+				if (FreeDue(p))
 					m_aFreeQueue.Insert(key);
 				else if (MaySleep(p))
 					m_aSleepQueue.Insert(key);
@@ -3839,12 +3858,26 @@ class MUD_WorldGroundEntity : GenericEntity
 			int last = m_aFreeQueue.Count() - 1;
 			MUD_FinePatch q = m_mPatches.Get(m_aFreeQueue[last]);
 			m_aFreeQueue.Remove(last);
-			if (q && !q.m_bDeformed && !q.m_bFloor && m_fTime - q.m_fNearAt > m_fFreeAfter)
+			if (q && q.m_iKey != m_iBuildKey && FreeDue(q))
 			{
+				if (q.m_bFloor)
+					m_iFloorFreed++;
 				FreePatch(q);
 				break;
 			}
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Undeformed, no vehicle / player near for m_fFreeAfter; a floor-only one (FLOOR_FREE) also out of FieldDue's range
+	//! that long - its rut tiles stay, a rebuild reads them (StartPatch -> RutFieldOn)
+	protected bool FreeDue(MUD_FinePatch p)
+	{
+		if (p.m_bDeformed || m_fTime - p.m_fNearAt <= m_fFreeAfter)
+			return false;
+		if (!p.m_bFloor)
+			return true;
+		return FLOOR_FREE && m_fTime - p.m_fFieldSeenAt > m_fFreeAfter;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3885,15 +3918,141 @@ class MUD_WorldGroundEntity : GenericEntity
 
 	//------------------------------------------------------------------------------------------------
 	//! RUT FIELD (MUD_VoxelProbe.RUT_FIELD): rut floor samples [gx0..gx1] x [gz0..gz1] (= global fine verts) changed.
-	//! The patches there are made / woken as a wheel press does (server too: it needs the collider), then rebuild
-	//! mesh + collider. The floor is never written into m_aH and never queued for the net (the op stream carries
-	//! it; m_aH would go to every client and again in the patch JIP). Returns the patches marked.
+	//! Only EXISTING patches there are finished / woken as a wheel press does (server too: it needs the collider), then
+	//! rebuild mesh + collider; missing ones read the floor when they are built (StartPatch -> RutFieldOn, FieldDue
+	//! makes them near a camera / player / vehicle) - no patch storm when a joiner replays the ops. Before review
+	//! Stage 4 (v111) this made every missing patch (EnsureRange). The floor is never written into m_aH and never
+	//! queued for the net (the op stream carries it; m_aH would go to every client and again in the patch JIP).
+	//! Returns the patches marked.
 	static int FloorDirty(int gx0, int gx1, int gz0, int gz1)
 	{
 		if (!s_Inst || !s_Inst.m_bReady)
 			return 0;
-		s_Inst.EnsureRange(gx0, gx1, gz0, gz1, true);
+		s_Inst.FloorFinish(gx0, gx1, gz0, gz1);
 		return s_Inst.MarkFloorDirty(gx0, gx1, gz0, gz1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD: EnsureRange for the patches that exist (building -> finished, asleep -> woken; wheel cap), and every
+	//! patch key in range remembered for FieldDue
+	protected void FloorFinish(int gx0, int gx1, int gz0, int gz1)
+	{
+		for (int pz = PatchLo(gz0, m_iNPZ); pz <= PatchHi(gz1, m_iNPZ); pz++)
+		{
+			for (int px = PatchLo(gx0, m_iNPX); px <= PatchHi(gx1, m_iNPX); px++)
+			{
+				int key = pz * m_iNPX + px;
+				m_sFieldPatches.Insert(key);
+				if (m_mPatches.Contains(key))
+					EnsurePatch(px, pz, true);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD (FLOOR_FREE): once a second, the rut patches (m_sFieldPatches) within range of the camera (drawn
+	//! only: m_fClientBuildRadius, 0 = any distance), a player (m_fPlayerRadius) or a wheeled vehicle at any speed
+	//! (m_fAheadRadius; Ahead makes patches for moving ones only). Existing ones there are kept (m_fFieldSeenAt);
+	//! every frame the nearest one still missing or building joins Ahead's candidates (camera ones after the rest).
+	protected void FieldDue(array<int> candKey, array<float> candDist)
+	{
+		if (!MUD_VoxelProbe.RUT_FIELD || !FLOOR_FREE || m_sFieldPatches.IsEmpty())
+			return;
+		if (m_fTime >= m_fFieldCheckAt)
+		{
+			m_fFieldCheckAt = m_fTime + 1;
+			array<vector> fromPos = {};
+			array<float> fromR = {};
+			array<float> fromAdd = {};
+			if (m_bRender)
+			{
+				vector cam[4];
+				GetWorld().GetCurrentCamera(cam);
+				fromPos.Insert(cam[3]);
+				fromR.Insert(m_fClientBuildRadius);
+				fromAdd.Insert(m_fAheadRadius);
+			}
+			PlayerManager pm = GetGame().GetPlayerManager();
+			if (pm && m_fPlayerRadius > 0)
+			{
+				m_aPlayerIds.Clear();
+				pm.GetPlayers(m_aPlayerIds);
+				foreach (int id : m_aPlayerIds)
+				{
+					IEntity ent = pm.GetPlayerControlledEntity(id);
+					if (!ent)
+						continue;
+					fromPos.Insert(ent.GetOrigin());
+					fromR.Insert(m_fPlayerRadius);
+					fromAdd.Insert(0);
+				}
+			}
+			foreach (Vehicle veh : MUD_Wheels.GetAll())
+			{
+				if (!veh)
+					continue;
+				fromPos.Insert(veh.GetOrigin());
+				fromR.Insert(m_fAheadRadius);
+				fromAdd.Insert(0);
+			}
+			m_aFieldDue.Clear();
+			m_aFieldDueDist.Clear();
+			foreach (int fk : m_sFieldPatches)
+			{
+				int fpx = fk - (fk / m_iNPX) * m_iNPX;
+				int fpz = fk / m_iNPX;
+				float best = -1;
+				for (int s = 0; s < fromPos.Count(); s++)
+				{
+					float fd = PatchDist(fpx, fpz, fromPos[s]);
+					if (fromR[s] > 0 && fd > fromR[s])
+						continue;
+					float rank = fd + fromAdd[s];
+					if (best < 0 || rank < best)
+						best = rank;
+				}
+				if (best < 0)
+					continue;
+				MUD_FinePatch fp = m_mPatches.Get(fk);
+				if (fp)
+					fp.m_fFieldSeenAt = m_fTime;
+				m_aFieldDue.Insert(fk);
+				m_aFieldDueDist.Insert(best);
+			}
+		}
+		// the nearest one still to build (Ahead builds one at a time); live, asleep (its mesh shows; NearPlayers and
+		// Ahead wake it), given up or without a hole cell: dropped until the next check
+		// key + dist, not an index: Remove(i) moves the last entry into i (index out of bounds 2026-10-16)
+		int pick = -1;
+		float pickDist;
+		for (int i = m_aFieldDue.Count() - 1; i >= 0; i--)
+		{
+			int k = m_aFieldDue[i];
+			MUD_FinePatch p = m_mPatches.Get(k);
+			bool drop;
+			if (p)
+				drop = p.m_iBuild == 0 || p.m_bAsleep || IsLazyReady(p) || p.m_iBuildFails >= 3;
+			else
+				drop = !HasHole(k - (k / m_iNPX) * m_iNPX, k / m_iNPX);
+			if (drop)
+			{
+				m_aFieldDue.Remove(i);
+				m_aFieldDueDist.Remove(i);
+				continue;
+			}
+			if (k == m_iBuildKey || candKey.Contains(k))
+				continue;
+			if (pick < 0 || m_aFieldDueDist[i] < pickDist)
+			{
+				pick = k;
+				pickDist = m_aFieldDueDist[i];
+			}
+		}
+		if (pick >= 0)
+		{
+			candKey.Insert(pick);
+			candDist.Insert(pickDist);
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3909,6 +4068,16 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!p)
 					continue;
 				p.m_bFloor = true;
+				if (FLOOR_SETTLE)
+				{
+					// hold only a patch with no other dirt owed (MarkDirty clears the hold)
+					if (!p.m_bFloorWait && !p.m_bMeshDirty && !p.m_bColDirty)
+					{
+						p.m_bFloorWait = true;
+						p.m_fFloorFirstAt = m_fTime;
+					}
+					p.m_fFloorDirtAt = m_fTime;
+				}
 				if (m_bRender)
 					p.m_bMeshDirty = true;
 				p.m_bColDirty = true;
@@ -3924,7 +4093,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! RUT FIELD: p's mesh / collider read the rut floor (a floor tile reaches it; also keeps it from being freed)
+	//! RUT FIELD: p's mesh / collider read the rut floor (a floor tile reaches it; FLOOR_FREE false: also keeps it from being freed)
 	protected bool RutFieldOn(MUD_FinePatch p)
 	{
 		if (!MUD_VoxelProbe.RUT_FIELD)
@@ -3958,6 +4127,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (own && m_bRender)
 					p.m_bMeshDirty = true;
 				p.m_bColDirty = true;
+				p.m_bFloorWait = false;     // real dirt: build at today's pace (FLOOR_SETTLE)
 				if (!p.m_bQueued)
 				{
 					p.m_bQueued = true;
@@ -4049,12 +4219,31 @@ class MUD_WorldGroundEntity : GenericEntity
 			if (!p || (!p.m_bMeshDirty && !p.m_bColDirty))
 			{
 				if (p)
+				{
 					p.m_bQueued = false;
+					p.m_bFloorWait = false;
+				}
 				m_aDirty.Remove(i);
 				continue;
 			}
 			if (p.m_iBuild > 0 || p.m_bAsleep)
 				continue;   // building: its last steps use the newest heights; asleep: its wake does
+			if (p.m_bFloorWait)
+			{
+				// FLOOR_SETTLE: held until quiet or the max wait, then released to the normal mesh / collider pace
+				bool quiet = m_fTime - p.m_fFloorDirtAt >= FLOOR_QUIET;
+				bool waitedOut = m_fTime - p.m_fFloorFirstAt >= FLOOR_MAX_WAIT;
+				if (!quiet && !waitedOut)
+				{
+					m_iSettleHeld++;
+					continue;
+				}
+				p.m_bFloorWait = false;
+				if (quiet)
+					m_iSettleQuiet++;
+				else
+					m_iSettleMax++;
+			}
 			if (m_bRender && p.m_bMeshDirty && m_fTime - p.m_fMeshAt >= m_fMeshInterval && (!mp || p.m_fMeshAt < mp.m_fMeshAt))
 				mp = p;
 			if (p.m_bColDirty && m_fTime - p.m_fColAt >= m_fColliderInterval && (!cp || p.m_fColAt < cp.m_fColAt))
@@ -4248,6 +4437,24 @@ class MUD_WorldGroundEntity : GenericEntity
 				dug = rf;
 		}
 		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Disp hole check (MUD_VoxelProbe.DispHoles, RUT_FIELD): the patch at world (x, z) has a live collider that is
+	//! up to date (built, awake, no collider rebuild owed) - else a trace onto it says nothing about the floor.
+	static bool PatchColliderLive(float x, float z)
+	{
+		if (!s_Inst || !s_Inst.m_bReady)
+			return false;
+		float fx;
+		float fz;
+		if (!s_Inst.ToFine(Vector(x, 0, z), fx, fz))
+			return false;
+		int gx = Math.Floor(fx);
+		int gz = Math.Floor(fz);
+		int v;
+		MUD_FinePatch p = s_Inst.At(gx, gz, v);
+		return p && p.m_iBuild == 0 && !p.m_bAsleep && p.m_bColValid && !p.m_bColDirty;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -5819,15 +6026,15 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				int v = vz * PVERTS + vx;
 				float d = p.m_aH[v];
-				if (m_bAheadRuts && m_fTime - p.m_aHideAt[v] < HIDE_HOLD)
+				if (m_bAheadRuts && m_fTime - p.HideAt(v) < HIDE_HOLD)
 				{
-					if (Math.AbsFloat(d - p.m_aShow[v]) > 0.0005)
+					if (Math.AbsFloat(d - p.Show(v)) > 0.0005)
 						hideOwed = true;
-					d = p.m_aShow[v];
+					d = p.Show(v);
 				}
 				else
 				{
-					p.m_aShow[v] = d;
+					p.SetShow(v, d);
 				}
 				float rfD = d;     // groove reveal input: a field rut shows soil only from FIELD_SOIL_D deep (as v097)
 				if (rfOn)
@@ -5962,7 +6169,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					if (rfF < y)
 						y = rfF;
 				}
-				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.m_aRutTouch[v], p.m_aBermTouch[v]) < m_fWheelHold)
+				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.RutTouch(v), p.BermTouch(v)) < m_fWheelHold)
 				{
 					y = p.m_aColH[v];
 					held++;
@@ -6118,13 +6325,13 @@ class MUD_WorldGroundEntity : GenericEntity
 		for (int v = 0; v < PVERTS * PVERTS; v++)
 		{
 			float d = p.m_aH[v];
-			if (m_bAheadRuts && m_fTime - p.m_aHideAt[v] < HIDE_HOLD)
+			if (m_bAheadRuts && m_fTime - p.HideAt(v) < HIDE_HOLD)
 			{
-				if (Math.AbsFloat(d - p.m_aShow[v]) > 0.0005)
+				if (Math.AbsFloat(d - p.Show(v)) > 0.0005)
 					hideOwed = true;
-				d = p.m_aShow[v];
+				d = p.Show(v);
 			}
-			p.m_aShow[v] = d;      // = BuildMesh: a hidden vertex keeps its m_aShow, the rest show m_aH
+			p.SetShow(v, d);      // = BuildMesh: a hidden vertex keeps its m_aShow, the rest show m_aH
 			float rfD = d;         // groove reveal input (m_aD): a field rut shows soil only from FIELD_SOIL_D deep
 			if (rfOn)
 			{
@@ -6290,7 +6497,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					if (rfF < y)
 						y = rfF;
 				}
-				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.m_aRutTouch[v], p.m_aBermTouch[v]) < m_fWheelHold)
+				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.RutTouch(v), p.BermTouch(v)) < m_fWheelHold)
 				{
 					y = p.m_aColH[v];
 					held++;
@@ -6522,7 +6729,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			for (int sv = 0; sv < PVERTS * PVERTS; sv++)
 			{
 				int scol = sv - (sv / PVERTS) * PVERTS;
-				sig += ToMm(p.m_aH[sv]) * (scol + 1) + ToMm(p.m_aShow[sv]);
+				sig += ToMm(p.m_aH[sv]) * (scol + 1) + ToMm(p.Show(sv));
 			}
 			int last = 0;
 			if (m_mDumpSig.Find(key, last) && last == sig)
@@ -6554,7 +6761,7 @@ class MUD_WorldGroundEntity : GenericEntity
 						if (kind == 1)
 							val = p.m_aH[v];
 						else if (kind == 2)
-							val = p.m_aShow[v];
+							val = p.Show(v);
 						else if (kind == 3)
 							val = p.m_aSmooth[v];
 						int mm = Math.Round(val * 1000);
@@ -7412,14 +7619,25 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Every 10 s, always (patch memory baseline 2026-10-15). live = built and awake; heights-only = client far
-	//! patch held unbuilt (m_sFar); building = the rest. live + asleep + building + heights-only = total.
+	//! Every 10 s while m_bDebug (Stats; patch memory baseline 2026-10-15). live = built and awake; heights-only =
+	//! client far patch held unbuilt (m_sFar); lazy = made ahead, index lists only, skin carries it (IsLazyReady,
+	//! freed after m_fFreeAfter like any undeformed patch); building = the rest.
+	//! live + asleep + heights-only + lazy + building = total.
 	//! floor-only and deformed overlap the other four (floor-only = m_bFloor && !m_bDeformed).
-	protected void PatchCounts()
+	//! fps + moving vehicles (> 2 m/s now) added for the review stress run 2026-10-15.
+	//! floor free (review Stage 4, 2026-10-16): FLOOR_FREE, rut patch keys known, in FieldDue range, made by FieldDue, freed.
+	protected void PatchCounts(float fps)
 	{
+		int nMoving;
+		foreach (Vehicle mv : MUD_Wheels.GetAll())
+		{
+			if (mv && mv.GetPhysics() && mv.GetPhysics().GetVelocity().Length() > 2)
+				nMoving++;
+		}
 		int nLive;
 		int nAsleep;
 		int nBuilding;
+		int nLazy;
 		int nHeights;
 		int nFloorOnly;
 		int nDeformed;
@@ -7431,6 +7649,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				nLive++;
 			else if (m_sFar.Contains(ck))
 				nHeights++;
+			else if (IsLazyReady(cp))
+				nLazy++;
 			else
 				nBuilding++;
 			if (cp.m_bDeformed)
@@ -7438,8 +7658,16 @@ class MUD_WorldGroundEntity : GenericEntity
 			else if (cp.m_bFloor)
 				nFloorOnly++;
 		}
-		Print(string.Format("MUD patches: live %1, asleep %2, floor-only %3, deformed %4, heights-only %5, building %6, total %7, mem %8 KB",
-			nLive, nAsleep, nFloorOnly, nDeformed, nHeights, nBuilding, m_mPatches.Count(), System.MemoryAllocationKB()));
+		Print(string.Format("MUD patches: live %1, asleep %2, floor-only %3, deformed %4, heights-only %5, lazy %6, building %7, total %8, mem %9 KB",
+			nLive, nAsleep, nFloorOnly, nDeformed, nHeights, nLazy, nBuilding, m_mPatches.Count(), System.MemoryAllocationKB())
+			+ string.Format(" | fps %1, vehicles moving %2 of %3", fps, nMoving, MUD_Wheels.GetAll().Count())
+			+ string.Format(" | floor settle %1: released quiet %2, max wait %3, held patch-frames %4", FLOOR_SETTLE, m_iSettleQuiet, m_iSettleMax, m_iSettleHeld)
+			+ string.Format(" | floor free %1: rut patch keys %2, in range %3, made near %4, floor-only freed %5", FLOOR_FREE, m_sFieldPatches.Count(), m_aFieldDue.Count(), m_iFieldMade, m_iFloorFreed));
+		m_iFieldMade = 0;
+		m_iFloorFreed = 0;
+		m_iSettleQuiet = 0;
+		m_iSettleMax = 0;
+		m_iSettleHeld = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -7447,10 +7675,13 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected void Stats(float timeSlice)
 	{
 		m_fSinceStats += timeSlice;
+		m_iStatFrames++;
 		if (m_fSinceStats < 10)
 			return;
+		float fps = m_iStatFrames / m_fSinceStats;
 		m_fSinceStats = 0;
-		PatchCounts();
+		m_iStatFrames = 0;
+		PatchCounts(fps);
 		if (m_iMadeAhead + m_iMadeStamp + m_iFreed + m_iMeshBuilds + m_iColBuilds + m_iSlept + m_iWoken + m_iCraters + m_iCraterSkips + m_iDigs + m_iNetMsgs + m_iNetGot == 0)
 			return;
 		Print(string.Format("MUD world: last 10 s - made %1 ahead + %2 by stamps, freed %3, meshes %4 (%5 ms), colliders %6 (%7 ms), smoothing %8 ms, skin swaps %9 ms",

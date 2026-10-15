@@ -58,6 +58,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - MudRunner-style mud feel: sinking that gets deeper and more slippery with each pass, belly drag, topsoil break.
   Research: docs/superpowers/research/2026-10-15-sinking-deep-dive.md, 2026-10-14-mudrunner-ida.md,
   Tools/mudrunner_mcp (telemetry MCP, finished and proven).
+- Mud texture in ruts via MatTerrainObject MaterialBlendUseTerrainDistance (copy of our skin emat + mud BCR/NMO
+  maps; distance to the untouched heightmap = rut depth). No shipped emat uses it. Quick test allowed as a
+  freeze exception (user 2026-10-16), test stopped unresolved (1 white rim, 1 no change), emat restored. Custom shaders are
+  impossible (2026-10-16). docs/superpowers/research/2026-10-16-custom-shaders.md
 - Voxel house / wall panels (code stays, see Lane 2 decision).
 - Papers plan: 0.25 m cells (E, parked), smoothing (C, parked), dual contouring (B1, NO-GO for ruts).
 - AI pathing over holes (navmesh rebuild is a dead end - CLAUDE.md).
