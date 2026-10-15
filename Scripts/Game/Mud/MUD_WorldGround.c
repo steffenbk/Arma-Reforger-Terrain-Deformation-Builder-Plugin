@@ -7412,6 +7412,37 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Every 10 s, always (patch memory baseline 2026-10-15). live = built and awake; heights-only = client far
+	//! patch held unbuilt (m_sFar); building = the rest. live + asleep + building + heights-only = total.
+	//! floor-only and deformed overlap the other four (floor-only = m_bFloor && !m_bDeformed).
+	protected void PatchCounts()
+	{
+		int nLive;
+		int nAsleep;
+		int nBuilding;
+		int nHeights;
+		int nFloorOnly;
+		int nDeformed;
+		foreach (int ck, MUD_FinePatch cp : m_mPatches)
+		{
+			if (cp.m_bAsleep)
+				nAsleep++;
+			else if (cp.m_iBuild == 0)
+				nLive++;
+			else if (m_sFar.Contains(ck))
+				nHeights++;
+			else
+				nBuilding++;
+			if (cp.m_bDeformed)
+				nDeformed++;
+			else if (cp.m_bFloor)
+				nFloorOnly++;
+		}
+		Print(string.Format("MUD patches: live %1, asleep %2, floor-only %3, deformed %4, heights-only %5, building %6, total %7, mem %8 KB",
+			nLive, nAsleep, nFloorOnly, nDeformed, nHeights, nBuilding, m_mPatches.Count(), System.MemoryAllocationKB()));
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Every 10 s while something happened
 	protected void Stats(float timeSlice)
 	{
@@ -7419,6 +7450,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (m_fSinceStats < 10)
 			return;
 		m_fSinceStats = 0;
+		PatchCounts();
 		if (m_iMadeAhead + m_iMadeStamp + m_iFreed + m_iMeshBuilds + m_iColBuilds + m_iSlept + m_iWoken + m_iCraters + m_iCraterSkips + m_iDigs + m_iNetMsgs + m_iNetGot == 0)
 			return;
 		Print(string.Format("MUD world: last 10 s - made %1 ahead + %2 by stamps, freed %3, meshes %4 (%5 ms), colliders %6 (%7 ms), smoothing %8 ms, skin swaps %9 ms",
