@@ -280,3 +280,13 @@ Known (IDA 2026-10-08/12): GenericTerrainEntity script API read-only + AffectFol
 Workbench TerrainToolDesc_* only.
 - List the script registrations of GenericTerrainEntity / terrain classes in the CURRENT exe. Anything new
   (height write, hole toggle, layer paint)? Five minutes - a yes would change the whole architecture.
+
+## 11-13 (added 2026-10-15 late, from research/2026-10-15-rut-options-round2.md)
+- 11. Runtime spline / road / river mesh: can a road / shape / spline entity (RoadEntity, ShapeEntity, generator
+  entities, RiverEntity) be spawned and given points at runtime and generate its mesh in the GAME (not Workbench)?
+  Which script API reaches it?
+- 12. String / class sweep for deformation features: "deform", "footprint", "snow", "mud", "displacement",
+  "tessellat", "track" (non-decal), "SetHeight", "HeightmapEdit", "PaintLayer", "TerrainModif". For each hit: what it
+  is, reachable from script?
+- 13. Vanilla track decals on our map: does SCR_VehicleTrackDecal's terrain path draw on hole cells (our ground over a
+  hole) or skip them? (terrain hole test in the decal clip, sub_140B20280 area)
