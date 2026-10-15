@@ -42,7 +42,9 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
   - writes floor = min(floor, new) - no Put, no 3D samples.
   - marks carved: MarkCarved(gi, gk) where the new floor is more than CARVE_TOL under the surface. Without this a
     rut on fresh ground never draws (cells draw only if IsHoleCell AND Carved - CODE BuildSub / Quad).
-  - queues the bricks whose top crosses the changed floor samples (MarkBox equivalent).
+  - queues the bricks whose top crosses the changed floor samples (MarkBox equivalent) - AND the neighbour brick
+    across a 4 m line when a changed sample is within one floor step (0.25 m) of that line (bilinear Floor at the
+    line reads it). Else the neighbour stays unsplit and stale -> crack on the line (see "Brick-border rule").
 - Ops that move the ground clear the floor ONLY at samples they changed (where Put moved the surface), not in
   the whole op box (a crater box is a square well past its rim):
   - crater (0) / trench cut (2): floor = FLOOR_NONE where the new surface is ABOVE the floor (fresh rim covers the
@@ -53,7 +55,23 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
 - Check: log line `MUD rut floor: N samples, M carved cells, ms` per op. Floor values sane in a debug print.
 
 ## Step 2 - mesher
-- After Polygonize, if the brick has any floor sample under its surface: split pass over the top + dirt buffers.
+- After Polygonize, if the brick is "rutted": split pass over the top + dirt buffers. Rutted = the SAME test as the
+  offline disp2_brick rule: any coarse triangle with any of its 6 split points (3 corners + 3 edge midpoints)
+  pulled by Floor(). Not "has a floor sample under its surface" - see the brick-border rule.
+- Brick-border rule (INFERENCE from the offline crack rule, not measured across bricks):
+  - The offline "0 cracks" holds because a pulled edge midpoint is a split point of BOTH triangles on that edge.
+    Across a 4 m line the two triangles are in different bricks, so it only holds if both bricks run the same
+    split-point test on the same floor values (Floor at the line uses the shared edge-row samples - Step 1 reads
+    the neighbour column for the +x / +z row). A per-brick test like "own column has a floor sample" can say
+    "not rutted" for brick B while brick A pulls a midpoint on the shared edge -> crack.
+  - Both bricks must also be rebuilt after the op (Step 1 neighbour queue). A stale unsplit neighbour = crack.
+  - Overflow fallback (below) on one side of a line breaks this: brick B pulls coarse vertices only, brick A pulls
+    a midpoint B does not have. Then A must not pull midpoints on edges that lie on the line to an overflowed
+    brick (keep them on the straight edge = T-junction, no crack). Needs a per-brick "split" flag A can read.
+  - Lines between a split and an unsplit brick still get T-junctions (offline: 40-85 per 12 m). Bricks are separate
+    meshes / bodies, so no crack; render sparkle there is a Step 4 look check.
+  - Check (Step 4): drive a rut ALONG and ACROSS a 4 m line and end one 0.1 m short of a line; look for gaps from
+    below / at a low angle. Log `rut border pulls` = midpoints pulled on brick-line edges per batch.
   - Edge-midpoint cache (key = the two vertex ids, sorted) so neighbour triangles share midpoints - CellV only
     caches per cell; without it shading goes faceted (engine normals = equal-weight average, PROVEN-IDA).
   - UV of a midpoint = average of its ends (same tile per quad, KindAB).
@@ -64,6 +82,9 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
     sub_140A52060, no checks). Top triangles can't fold (the pull only moves y, so the facing of an upward
     triangle is fixed by its x/z shape; MEASURED 0 folds). Walls can: MEASURED 1 fold in 145 pulled wall
     triangles (rut_x_crater). Count drops in the batch log.
+    Note: a dropped triangle is a hole in BOTH the look and the collider (same buffers). A folded triangle overlaps
+    its neighbours, so the hole is usually covered, but not proven. If drops show in game: clamp the pull for that
+    triangle's vertices (pull less until it no longer flips) instead of dropping it.
   - Decide grass vs soil on rut walls ON PURPOSE: today `top` is per coarse quad (n.y > 0.7). Keep it per coarse
     quad (rut walls stay grass) for step 2; a per-triangle pick is a later look test.
 - Budget (MEASURED 2026-10-15 on the prototype shapes, busiest brick): crater_big 185 tris / 117 verts -> split
