@@ -123,8 +123,17 @@ Pass:
 - Look: rut walls visibly sharper than v035 on the same drive (user, side by side with the switch).
 - No cracks / sparkle at brick lines, no dark faceting in ruts.
 - Cost: rut ms/s on the client vs v035's ~20 ms/s (freeze-test.md), no 'slow brick' spam, fps over ruts.
-- Feel: no new suspension jitter (2026-10-08 lesson: jagged ruts = jitter). If twitchy: rut edge profile to 0 at
-  the rim (today fall = 0.5 at k = 1 = a half-depth step that a 0.25 m floor now shows).
+- Feel: no new suspension jitter (2026-10-08 lesson: jagged ruts = jitter). Watch with the Diag menu
+  Vehicles > Show raycast / Show contacts (IDA 2026-10-15 item 5).
+  IDA 2026-10-15 (research/2026-10-15-ida-rut-questions.md item 5): the wheel is ONE centre ray per wheel, and the
+  contact normal is the raw face normal of the hit triangle (no smoothing, no tyre width). So a wheel at a sharp rut
+  edge drops fully or not at all, and a wall triangle tilts the normal. Sharp walls are a jitter risk, not just a
+  look win. Profile for CarveFloor (DISPLACE path only, so v035 is untouched):
+  - remove the rim step: today fall = 0.5 at k = 1 (a vertical half-depth step at the rut edge, hidden by 0.5 m
+    voxels, VISIBLE and felt at 0.25 m). Use a profile that is 0 at the rim with a rounded top and bottom, e.g.
+    fall = (1 - k^2)^2 (smooth, flat-ish bottom), so the ray never meets a step;
+  - target wall slope <= ~45 deg where wheels run (the offline disp2 walls were 45-49 deg - at the limit);
+  - if Step 4 feels twitchy: widen RUT_R for the floor (wider, flatter bottom) before anything else.
 
 ## Step 5 - MP (the real gate)
 - Robot test as CLAUDE.md (DS or WB host + peer), >= 6 runs per setting, DISPLACE_RUTS false vs true.

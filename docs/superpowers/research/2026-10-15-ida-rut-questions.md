@@ -243,6 +243,15 @@ sub_14056FCD0), layer VehicleCast.
 - **Ideas for less jitter (INFERENCE):** round the rut wall top and bottom over at least 1 cell, or keep wall slopes
   under about 45 degrees where wheels run. Debug view: Vehicles > Show raycast / Show contacts.
 
+## 5b. Follow-ups from answers 1-5 (ask with items 6-10)
+- 1-bis: IDA found no `CreateTrackDecal` string, but steffenbk's spray-can mod calls `world.CreateTrackDecal(...)`.
+  Is it bound under another name / in a script proto (search the World script registrations and the game script
+  pak)? Or was it removed before 1.9?
+- 1-ter: is World.CreateDecal (script module flag 0x10) registered in the GAME client and dedicated server, or only in
+  Workbench / Diag builds?
+- 2-bis: the clutter "discontinuity mask" (MatClutterMaskPostprocess, ClutterMaskDepthRT): what depth difference
+  removes grass (threshold, ClutterOccluderEnlarge link)? Decides whether ruts of 0.1-0.35 m lose their grass.
+
 ## 6. Per-triangle material on a trimesh (decides: mud / rut friction per spot without extra geoms)
 - CreateTriMesh backend (sub_140A52060 -> Bullet): any per-triangle material index (btTriangleIndexVertexMaterialArray
   style), or one material per geom (PhysicsGeomDef)?

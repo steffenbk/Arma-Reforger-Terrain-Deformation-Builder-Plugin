@@ -146,6 +146,36 @@ and the brick count (ruts were most of the bricks made in the freeze-test "After
   vehicles use before the displaced-ruts MP test (IDA item 5).
 - IDA questions for all of this: [2026-10-15-ida-rut-questions.md](2026-10-15-ida-rut-questions.md).
 
+## 6c. IDA answers 1-5 (exe 1.9.0.10 Diag, research/2026-10-15-ida-rut-questions.md) - what they change
+- **Track decals (TrackDecalFactory): terrain only.** A decal starts only on the world's terrain entity and is clipped
+  to the terrain HEIGHTMAP - over our dug ground it would follow the old surface. Dead for ruts on our ground.
+  OPEN: IDA found no `CreateTrackDecal` string, yet the spray-can mod calls `world.CreateTrackDecal(...)` - does that
+  mod still compile / work on 1.9? (2-minute check; if it works, the IDA reading missed a binding.)
+- **World.CreateDecal: a mesh decal clipped from the TARGET entity's own triangles, and MeshObject accepts decals**
+  (INFERENCE: our script meshes are the same class). Our 2026-10-12 miss: stretch 0 + the decal went to the terrain.
+  But the decal hangs off the OLD mesh: every SetObject rebuild drops it. Use only on ground that stopped changing, or
+  re-stamp the touched area after each rebuild (we own the rebuilds; the engine dedupes stamps closer than
+  min((size/2)^2, 0.1) - cheap). Probe values: stretch 1, nearclip ~0, farclip 0.5-1, project = -normal, a
+  MatPBRDecal material, entity = the brick / patch entity.
+- **Grass is GPU clutter from the terrain**, not placed on our mesh (the old ObjectsHeightMap guess was wrong - that is
+  far-shadow data). No script way to clear it along a track. INFERENCE: the clutter mask pass "computing heightmap
+  discontinuities" (ClutterMaskDepthRT) is probably what cleans crater pits - so DEEP ruts may already lose grass by
+  the same rule and shallow ones keep grass standing at the old height. Look with Render > "Grass/Clutter/Obstacles"
+  = "discontinuity mask" over a v035 rut.
+- **AffectFoliage works for tracks:** one 20-byte obstacle per call, max 1000 per frame, flattened grass stays down
+  ~10 s after the last submit and recovers over ~5 s (Render diag defaults FlattenOnset 0.4 / FlattenLying 10 /
+  FlattenRecovery 5, INFERENCE seconds). So: client-only, re-submit the recent track segments within the mask radius
+  every ~5 s -> pressed-grass tracks on the whole map, no net, no geometry. Cheapest visible win found.
+- **No own normals** - confirmed again (no flag reaches the format byte). Sharp-looking ruts need real geometry.
+- **Wheel = one centre ray, raw triangle normal.** This shapes the rut PROFILE more than anything else: rounded,
+  step-free, walls <= ~45 deg where wheels run. Displaced-ruts plan updated (Step 1 profile, Step 4 feel).
+- **Server authority:** the class in this exe is VehicleWheeledSimulation_SA_B; same wheel-cast core
+  (INFERENCE). Check our test vehicles' prefab simulation component before Step 5.
+
+Updated order: (1) AffectFoliage track flattening (client-only, cheap, whole map) can go in any time;
+(2) displaced ruts with the smooth profile; (3) CreateDecal probe on a brick that no longer changes;
+(4) rut field on the heightfield (section 4).
+
 ## 7. Suggested order (user decides)
 1. Let the displaced-ruts build finish - its Displace() is option 1's voxel half anyway, and its debug tools carry
    over. Change its storage later from per-column to per-patch if option 1 goes ahead.
