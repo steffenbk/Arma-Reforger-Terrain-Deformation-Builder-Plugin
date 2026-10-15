@@ -58,7 +58,14 @@ unchanged). Switch: `MUD_VoxelProbe.DISPLACE_RUTS` (false = v035 voxel ruts).
   - Guard: pull only vertices less than ~1 m above the floor (tunnel ceilings / overhang lips stay).
   - Decide grass vs soil on rut walls ON PURPOSE: today `top` is per coarse quad (n.y > 0.7). Keep it per coarse
     quad (rut walls stay grass) for step 2; a per-triangle pick is a later look test.
-- Overflow: count the split verts against MAX_V / MAX_I like today (m_bOverflow -> old brick kept, ERROR log).
+- Budget (MEASURED 2026-10-15 on the prototype shapes, busiest brick): crater_big 185 tris / 117 verts -> split
+  740 tris (2220 indices) / 418 verts with shared midpoints (1110 without sharing). New verts = edges (~1.5 per
+  triangle), not 3 per triangle. MAX_I (24000) binds before MAX_V: a brick over ~2000 coarse tris overflows when
+  split (surface-nets max for 8^3 = 3072 tris -> 36864 indices). Prototype has no tunnels and no UV-parity copies
+  (CellV) - check the real busiest brick in game (log coarse tris per rutted brick).
+- Overflow: check BEFORE splitting (coarse tris x 4 x 3 > MAX_I, or verts + edges > MAX_V). Then don't split:
+  pull the coarse vertices only (a soft rut, still a rut). Don't fall back to "no rut" - with floor-only ruts the
+  field holds no rut there. Log it.
 - Body: unchanged path (same buffers), so wheels feel exactly what is drawn.
 - Check: "slow brick" log lines; new counter `split bricks / verts` in the batch line.
 
