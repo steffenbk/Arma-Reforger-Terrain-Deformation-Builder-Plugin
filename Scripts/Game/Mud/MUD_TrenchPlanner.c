@@ -557,8 +557,16 @@ modded class SCR_PlayerController
 		string why;
 		MUD_TrenchSiteComponent site = MUD_TrenchSiteComponent.Spawn(plan, why);
 		if (!site)
+		{
 			Print("MUD trench site: refused, " + why, LogLevel.WARNING);
-		else if (instant || MUD_TrenchSiteComponent.DEBUG_INSTANT)
+			return;
+		}
+		if (instant && !MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG && !MUD_TrenchSiteComponent.DEBUG_INSTANT)
+		{
+			Print("MUD trench site: instant dig refused (ALLOW_INSTANT_DIG false) - site placed for the shovel", LogLevel.WARNING);
+			return;
+		}
+		if (instant || MUD_TrenchSiteComponent.DEBUG_INSTANT)
 			site.DebugDigAll();
 	}
 }

@@ -29,8 +29,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 ## Lane 2 - before any public test (release switches)
 | Item | State today |
 |---|---|
-| Ground debug off | NOT done: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0) |
+| Ground debug off | flip before release: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0). It also gates the 10 s 'MUD patches' / 'MUD world' lines (Stats) |
 | Trench DEBUG_INSTANT | false in MUD_TrenchSite.c:19 (CODE) - user wants it kept as a test option |
+| Client instant dig (review F6) | flip before release: `MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG` true (testing) -> false; server then refuses Ctrl+F instant dig and logs it (2026-10-16) |
+| Per-op log lines (review F5) | flip before release: `MUD_VoxelProbe.OP_LOG` true -> false ('MUD voxel probe' op line, 'MUD rut field', 'MUD rut floor'; ~4/s per vehicle) (2026-10-16) |
 | JIP ask cap | in code: JIP_MAX_ASKS 10 (MUD_WorldGround.c) - check it still applies to voxel JIP |
 | Per-player trench-site cap | DROPPED 2026-10-15 (user: no per-player limit). Only MAX_SITES 20 server-wide |
 | Voxel house | DONE 2026-10-15: MUD_VoxelHouse ENABLED true for release - user tested it earlier, works |

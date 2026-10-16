@@ -179,5 +179,49 @@ Behind a const MUD_WorldGroundEntity.FLOOR_SETTLE (false = today).
   would sit on the skin, no rut collider.
 - Log: 'MUD patches: ...' line ends ' | floor free true: rut patch keys N, in range N, made near N, floor-only freed N'.
 
+## Stages 3-4 run - 2026-10-16 (log logs_2026-10-16_23-19-11, SP, 23:29-23:32, user: "worked fine")
+- Compiles clean (after the FieldDue stale-index fix). 20 'MUD patches' lines.
+- Floor free works: 'floor-only freed 32' at 23:32:03, then 'in range 30, made near 3' (23:32:13) and 'made near 29'
+  (23:32:23) - freed rut patches came back on return.
+- Patch total: 22 -> 382 (23:31:23) -> 309 at the end; asleep up to 127. Mem 1666803 -> 1841015 KB (+170 MB in 3.5
+  min) - still rising at the end, run too short to say it levels off.
+- Seam test NOT covered: no 'MUD disp N s:' summary line in the log, 0 seam HOLE lines.
+- UNRESOLVED: 20 'HOLE (plain) ... hit none' lines 23:32:46-23:32:52, all at one spot, a cross around
+  1039.5 2533.5 (x 1038..1040 at z 2533.5, z 2532..2534 at x 1039.5), expected 38.61-38.67. 'hit none' = the trace
+  hit neither bricks nor a patch. Came ~25 s after the freed patches were remade near; cause not checked.
+
+## Stage 5 (F4) - option (a) BUILT 2026-10-16, not compiled (checkpoint v113 = before)
+- m_aLock (MUD_FinePatch.c:27) = StartPatch: EdgeLock / EdgeLockCached (skin hole cells = deterministic), then
+  BuildingLock (QueryEntitiesByAABB, Building + MUD_CutBoxEntity boxes + m_fBuildingMargin -> 0). The building part
+  depends on what that machine has loaded / destroyed at the moment the patch is made.
+- Rut floor uses it in 5 places: patch mesh + collider (MUD_WorldGround.c ~6044, 6168, 6342, 6496) and Heights via
+  LockAt (~4390). LockAt falls back to EdgeLock (no buildings) when the patch does not exist, so Heights/DugUndug
+  already differ by "patch made or not" - and since Stage 4 frees patches, on ONE machine over time too.
+- Bricks (MUD_VoxelProbe) apply no lock at all.
+- Proposal (a): rut floor uses the edge-only lock everywhere (new m_aEdgeLock in the patch, copied before
+  BuildingLock, ~4 KB per patch; LockAt reads it; bricks' field floor applies the same EdgeLock). Craters / trenches
+  (m_aH) keep the building lock - not in scope. Cost: a rut can now dip inside the building margin next to a wall.
+- Built: MUD_FinePatch.m_aEdgeLock (copied from m_aLock in StartPatch just before BuildingLock); the 4 rut floor
+  reads in mesh / collider + LockAt use it; new static MUD_WorldGroundEntity.FieldEdgeLocked(gx, gz, f) (LockAt +
+  BaseAt) applied to every floor sample in MUD_VoxelProbe.Displace (m_aDispF).
+- Check: ruts beside a building now cut inside the building margin (expected); rut crossing patch -> brick next to a
+  road (kept terrain) shows no step; hole check still 0. Note: the edge lock is a snapshot of skin hole cells at patch
+  start, as m_aLock was.
+
+## Stage 5 run - 2026-10-16 (same log logs_2026-10-16_23-19-11, scripts recompiled 23:40:35, run 23:42-23:44, user: done)
+- Compiles clean, no MUD script errors. 'MUD world': craters 0, digs 0 the whole run - so no brick (Displace) was
+  rutted in the log; the brick side of F4 is not exercised by this run. Building / road look: user's eyes only.
+- Patches total 22 -> 81 -> 59, floor-only 20.
+- Hole check: 5 more 'HOLE (plain) ... hit none' at 23:43:28, a row 1051..1053 x at z 2536 (expected 38.24-38.28).
+  Same kind as the 20 before Stage 5 (1039.5 2533.5) -> not caused by F4; still unresolved.
+
+## Stage 6 (F5 + F6) - built 2026-10-16, not compiled (checkpoint v114 = before)
+- F5: PatchCounts comment already says 'while m_bDebug' (no change). New MUD_VoxelProbe.OP_LOG (true) gates the op
+  line ('MUD voxel probe: ...'), 'MUD rut field: N samples ...' and 'MUD rut floor: ...'. The one-time 'floor grid on
+  the patch vertices' line stays. Overflow log kept as is.
+- F6: new MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG (true). MUD_RpcAsk_PlaceTrench: instant from a client with it
+  false (and DEBUG_INSTANT false) -> site placed, no DebugDigAll, WARNING 'instant dig refused'. Ctrl+F unchanged now.
+- Not flipped: m_bDebug, OP_LOG, ALLOW_INSTANT_DIG -> master list Lane 2 'flip before release'.
+
 ## Summary
 (fill after the runs: ms/s of patch rebuilds per vehicle, which split part dominates, memory per km)

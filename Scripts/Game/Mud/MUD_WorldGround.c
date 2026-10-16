@@ -3093,6 +3093,12 @@ class MUD_WorldGroundEntity : GenericEntity
 					p.m_aLock[v] = EdgeLockCached(gx, gz);
 			}
 		}
+		// Stage 5 (F4): the rut floor uses the lock before buildings - BuildingLock depends on what this machine has
+		// loaded / destroyed when the patch is made, the kept terrain border does not
+		for (int ev = 0; ev < PVERTS * PVERTS; ev++)
+		{
+			p.m_aEdgeLock[ev] = p.m_aLock[ev];
+		}
 		BuildingLock(p);
 		ApplyFloor(p);
 	}
@@ -3411,6 +3417,24 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (!s_Inst || !s_Inst.m_bReady)
 			return false;
 		return s_Inst.Heights(x, z, dug, undug);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RUT FIELD (Stage 5, F4): rut floor f (world y) at global fine vertex gx, gz with the kept-terrain edge lock
+	//! applied, as the patch mesh / collider do - for the bricks (Displace). f unchanged off the grid or not below
+	//! the undug ground.
+	static float FieldEdgeLocked(int gx, int gz, float f)
+	{
+		if (!s_Inst || !s_Inst.m_bReady)
+			return f;
+		float lock = s_Inst.LockAt(gx, gz);
+		if (lock >= 1)
+			return f;
+		bool ok;
+		float undug = s_Inst.BaseAt(gx, gz, ok);
+		if (!ok || f >= undug)
+			return f;
+		return undug + (f - undug) * lock;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -4395,7 +4419,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		int vz = gz - pz * PCELLS;
 		MUD_FinePatch p = m_mPatches.Get(pz * m_iNPX + px);
 		if (p && vx >= 0 && vx < PVERTS && vz >= 0 && vz < PVERTS)
-			return p.m_aLock[vz * PVERTS + vx];
+			return p.m_aEdgeLock[vz * PVERTS + vx];
 		return EdgeLock(gx, gz);
 	}
 
@@ -6041,7 +6065,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz) - p.m_aBase[v];
 					if (rfF < 0)
-						rfF = rfF * p.m_aLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+						rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
 					if (rfF < d)
 					{
 						d = rfF;
@@ -6165,7 +6189,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz);
 					if (rfF < p.m_aBase[v])
-						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aLock[v];     // edge lock, as the mesh
+						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aEdgeLock[v];     // edge lock, as the mesh
 					if (rfF < y)
 						y = rfF;
 				}
@@ -6339,7 +6363,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				int rfVz = v / PVERTS;
 				float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + rfVx, rfZ0 + rfVz) - p.m_aBase[v];
 				if (rfF < 0)
-					rfF = rfF * p.m_aLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+					rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
 				if (rfF < d)
 				{
 					d = rfF;
@@ -6493,7 +6517,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz);
 					if (rfF < p.m_aBase[v])
-						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aLock[v];     // edge lock, as the mesh
+						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aEdgeLock[v];     // edge lock, as the mesh
 					if (rfF < y)
 						y = rfF;
 				}

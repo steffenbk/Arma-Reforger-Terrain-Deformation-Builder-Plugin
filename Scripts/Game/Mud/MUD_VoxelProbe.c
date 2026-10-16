@@ -274,6 +274,9 @@ class MUD_VoxelProbe
 	// converting voxel columns, the floor lives in its own tile map (m_mRutTiles) and the heightfield patches draw it.
 	// Needs DISPLACE_RUTS. false = v097 (Stage 1: the tile map is filled exactly where v097 filled the columns).
 	static const bool RUT_FIELD = true;    // Stage 2 on (user 2026-10-15); false = v097 (checkpoint v098)
+	// Review F5 (2026-10-16): the per-op log lines ('MUD voxel probe: ...', 'MUD rut field: N samples', 'MUD rut floor')
+	// come ~4 per second per driving vehicle = DS log spam. true in dev; FLIP TO false BEFORE RELEASE (master list Lane 2).
+	static const bool OP_LOG = true;
 	static const float DISP_GUARD = 1.0;        // pull only vertices less than this above the floor (tunnel roofs stay)
 	static const float DISP_EPS = 0.001;
 	static const float DISP_SOIL_CUT = 0.05; // a top tri this far (m) under the seeded ground is groove: soil (DispEmit)
@@ -2505,6 +2508,8 @@ class MUD_VoxelProbe
 			what = string.Format("hole %1 m -> %2 m", op.m_fDepth, op.m_fB);
 			wp = (op.m_vLo + op.m_vHi) * 0.5;
 		}
+		if (!OP_LOG)
+			return true;
 		Print(string.Format("MUD voxel probe: %1 seq %2 at %3: %4 | %5 columns (%6 new, seed %7 chars), %8 new cells carved, %9 bricks made",
 			label, op.m_iSeq, wp, what, keys.Count(), fresh.Count(), op.m_sSeed.Length(), carvedNew, m_iBatchMade - made0)
 			+ string.Format(", %1 queued", queued)
@@ -3010,7 +3015,8 @@ class MUD_VoxelProbe
 			MarkBox(cgi, gjHi, cgk);
 		}
 		m_iDispCarved += m_aOpCarved.Count();
-		Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+		if (OP_LOG)
+			Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -4617,7 +4623,7 @@ class MUD_VoxelProbe
 			{
 				float fs = FloorSample(fi0 + gx, fk0 + gz);
 				if (fs < FLOOR_NONE * 0.5)
-					fs = fs - oy;
+					fs = MUD_WorldGroundEntity.FieldEdgeLocked(fi0 + gx, fk0 + gz, fs) - oy;     // edge lock, as the patches (F4)
 				m_aDispF[gz * DISP_N + gx] = fs;
 			}
 		}

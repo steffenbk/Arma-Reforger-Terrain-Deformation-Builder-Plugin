@@ -17,6 +17,9 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	// TEMP debug (user 2026-10-10 01:02): F in plan mode digs the whole trench at once. false = real play.
 	// 2026-10-11: false - Ctrl+F digs it at once instead (MUD_TrenchInstant), F = dig with the shovel.
 	static const bool DEBUG_INSTANT = false;
+	// Review F6 (2026-10-16): server check for a client's instant dig (Ctrl+F sends instant = true). true for testing;
+	// FLIP TO false BEFORE RELEASE (master list Lane 2) - then a client can't dig a whole trench at once.
+	static const bool ALLOW_INSTANT_DIG = true;
 
 	[RplProp(onRplName: "OnPlanRpl")]
 	protected string m_sPlan;           // MUD_TrenchPlan.Pack text

@@ -25,6 +25,7 @@ class MUD_FinePatch
 	float m_aSmooth[1089];      // m_aH blurred for the collider
 	float m_aFloor[1089];       // deepest m_aH allowed (negative): Max Depth or a depth box
 	float m_aLock[1089];        // 0 = never moves (kept terrain border, building), 1 = free
+	float m_aEdgeLock[1089];    // m_aLock without buildings (kept terrain border only): the rut floor, same on every machine
 	float m_aColH[1089];        // world Y of each vertex in the live collider (P1a wheel hold)
 	// press / ahead / scrape arrays (patch memory Stage 1, 2026-10-16): made on the first write, null = all default
 	// (~39 KB per patch saved where no wheel press, ahead hide, scrape or shown deformation ever touched it)
