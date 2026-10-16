@@ -129,18 +129,23 @@ def measure(op):
                 st_min=min(steep25), st_med=float(np.median(steep25)))
 
 
-rows = []
-for label, D in [("HEAT 0.51 kg", 0.60), ("O-832DU 0.40 kg", 0.86), ("81 mm 0.99 kg", 1.43),
-                 ("Hydra 2.9 kg", 2.04), ("TM-62M 7.5 kg", 2.81)]:
-    for kind, cls in [("voxel today", P.Crater), ("cosine bowl 42", CraterCos)]:
-        m = measure(cls(CX, CZ, D))
-        rows.append((label, D, kind, m))
-        print(label, D, kind, {k: round(v, 2) if isinstance(v, float) else v for k, v in m.items()}, flush=True)
+def main():
+    rows = []
+    for label, D in [("HEAT 0.51 kg", 0.60), ("O-832DU 0.40 kg", 0.86), ("81 mm 0.99 kg", 1.43),
+                     ("Hydra 2.9 kg", 2.04), ("TM-62M 7.5 kg", 2.81)]:
+        for kind, cls in [("voxel today", P.Crater), ("cosine bowl 42", CraterCos)]:
+            m = measure(cls(CX, CZ, D))
+            rows.append((label, D, kind, m))
+            print(label, D, kind, {k: round(v, 2) if isinstance(v, float) else v for k, v in m.items()}, flush=True)
 
-print()
-print("| Charge | Depth m | Shape | Outer r m | Tris | Steepest tri deg | Area > 50 deg % | Area > 60 deg % | "
-      "Steep climb > 50 deg on the EASIEST way out m | ... median way m | Steepest 0.25 m stretch, easiest way deg |")
-print("|---|---|---|---|---|---|---|---|---|---|---|")
-for label, D, kind, m in rows:
-    print(f"| {label} | {D} | {kind} | {m['outer']:.2f} | {m['tris']} | {m['max']:.0f} | {m['p50']:.1f} | {m['p60']:.1f} | "
-          f"{m['run_min']:.2f} | {m['run_med']:.2f} | {m['st_min']:.0f} |")
+    print()
+    print("| Charge | Depth m | Shape | Outer r m | Tris | Steepest tri deg | Area > 50 deg % | Area > 60 deg % | "
+          "Steep climb > 50 deg on the EASIEST way out m | ... median way m | Steepest 0.25 m stretch, easiest way deg |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
+    for label, D, kind, m in rows:
+        print(f"| {label} | {D} | {kind} | {m['outer']:.2f} | {m['tris']} | {m['max']:.0f} | {m['p50']:.1f} | {m['p60']:.1f} | "
+              f"{m['run_min']:.2f} | {m['run_med']:.2f} | {m['st_min']:.0f} |")
+
+
+if __name__ == "__main__":
+    main()
