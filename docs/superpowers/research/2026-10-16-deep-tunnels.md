@@ -2,6 +2,8 @@
 
 User 2026-10-16: "What if we want deep tunnels? I did test and 3 m was not far enough really."
 Status: PLAN ONLY. Nothing in Scripts/ changed. This replaces U1's fixed "FLOOR 6" with a deep-tunnel package.
+**DECIDED (user 2026-10-16): TUNNEL_FLOOR default 5 m for now** ("we don't know how it will behave at 10"). Go to
+10 m only after the section 5 checks pass at 5 m. Everything below is written so 5 -> 10 is one value.
 Labels: VERIFIED-CODE (git f7715c3 line numbers), MEASURED (offline, Tools/), ESTIMATE, UNVERIFIED (needs the game),
 SOURCE.
 
@@ -44,7 +46,8 @@ Nothing else caps depth:
 
 ## 4. The package (replaces U1 "FLOOR 6")
 1. **TUNNEL_FLOOR.** A world-ground prefab attribute (the same prefab on every machine) or written into each tunnel
-   op by the server. The user picks the default. Suggest 10 m: Cu Chi levels 3-10 m (SOURCE in the improvement plan).
+   op by the server. **Default 5 m (user 2026-10-16)**: feet down to ~5 m, a roof of up to ~2.5 m (roof ~ feet depth
+   - 2.5 m, MEASURED). 10 m (Cu Chi levels 3-10 m, SOURCE in the improvement plan) is a later step, after 5 m passes.
 2. **The P3 clamp fix** in every carve.
 3. **The sea-level guard** (P1).
 4. **AtGround and ColSurf read TUNNEL_FLOOR** (P7, P8).
@@ -57,16 +60,17 @@ maker can place boxes where deep digging is allowed; reading it in the tunnel fl
 machine (placed entities).
 
 ## 5. Session checks (add to 1-WB / 1-MP)
-- Dig down at full pitch to 6 m and 10 m. Walk back out with no jump: pass.
-- Dig level for 20 m at 8 m deep. Feet start vs end within 0.2 m.
-- Mortar and RPG into the ground above a 6 m tunnel: no break-in, no refill inside.
-- RPG fired inside a 6 m tunnel: it makes a chamber and does not refill.
+All at the 5 m default (repeat at 10 m only when that step is taken):
+- Dig down at full pitch to 5 m. Walk back out with no jump: pass.
+- Dig level for 20 m at ~4.5 m deep. Feet start vs end within 0.2 m.
+- Mortar and RPG into the ground above a 5 m tunnel: no break-in, no refill inside.
+- RPG fired inside a 5 m tunnel: it makes a chamber and does not refill.
 - Dig toward the coast below the sea level: the guard stops it (and look at what the water does near the guard).
-- Shovel (F) and fill at 8 m deep: not refused.
-- Shoot the ground above a 6 m tunnel from outside while a friend is inside: do rounds come through? (P6)
-- Drop an item at 8 m. Light level at 3 / 6 / 10 m (look only).
+- Shovel (F) and fill at 5 m deep: not refused.
+- Shoot the ground above a 5 m tunnel from outside while a friend is inside: do rounds come through? (P6)
+- Drop an item at 5 m. Light level at 3 / 5 m (look only).
 - 1-MP: hashes after deep digging; a late joiner sees the same tunnel.
-- 1-PERF: brick count / memory with a 100 m tunnel at 10 m vs 3 m.
+- 1-PERF: brick count / memory with a 100 m tunnel at 5 m vs 3 m.
 
 ## 6. Parked (feature freeze): keep the surface over deep tunnels
 A tunnel more than ~2 m under the surface could leave the terrain cell above as it is: not holed, not voxel. Only

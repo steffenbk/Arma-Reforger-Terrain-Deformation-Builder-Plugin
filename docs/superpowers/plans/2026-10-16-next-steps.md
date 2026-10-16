@@ -96,13 +96,13 @@ at release (CLAUDE.md archive rule). It holds:
   with grid position. FillTrench must match.
 - **U2:** level digging. It still sinks ~3.5 cm per m (MEASURED), so add a small lift or hold the start depth.
 - **U1 = the deep-tunnel package** (research/2026-10-16-deep-tunnels.md; user 2026-10-16: 3 m is not far enough):
-  - TUNNEL_FLOOR ~10 m (user picks), the same on every machine;
+  - TUNNEL_FLOOR 5 m (user 2026-10-16; 10 m later, only after 5 m passes), the same on every machine;
   - the clamp becomes "no NEW air below the floor" (`d = max(d, min(old, floorY - y))`). Otherwise a crater inside a
     deep tunnel refills it (MEASURED: 81 of 218 air samples);
   - a sea-level guard;
   - AtGround / ColSurf read the new floor;
   - a dig slope cap so players can walk out.
-- **T needs a shovel + a slower rate** (if decision 3 = yes). This comes with U1: without it, T digs 6 m shafts.
+- **T needs a shovel + a slower rate** (if decision 3 = yes). This comes with U1: without it, T digs 5 m shafts.
 
 **Session 1-WB:**
 - Walk out of every crater size, and compare the crater presets side by side (attributes only).
@@ -111,8 +111,8 @@ at release (CLAUDE.md archive rule). It holds:
 - Trench widths 0.5-2.0 m.
 - A 20 m level tunnel: feet depth start vs end within 0.2 m.
 - A 4 m tunnel: the roof is about feet depth - 2.5 m.
-- Deep tunnels: the checklist in research/2026-10-16-deep-tunnels.md section 5 (walk out of 6 / 10 m, sea level, no
-  refill, shovel at 8 m, light, dropped item).
+- Deep tunnels: the checklist in research/2026-10-16-deep-tunnels.md section 5 (walk out of 5 m, sea level, no
+  refill, shovel at 5 m, light, dropped item).
 - Blast cover ('MUD cover' lines) in a voxel crater.
 - MAX_COLUMNS set to 40: what happens after the cap? Decide the policy.
 - Ruts look with band off; far ruts appear when you drive back.
@@ -179,6 +179,6 @@ time, memory, op count and fps over time.
    - a realistic preset: ~0.47 m deep, ~2.1 m across. It is only ~4 voxel samples wide, so little cover;
    - a middle preset: perKg 0.8, power 0.45 -> 81 mm 0.80 m deep, ~3.3 m crest. All three are attribute values, so
      they can be compared in 1-WB.
-3. **Tunnels:** how deep by default (suggest 10 m), and should T need a shovel and dig slower? Recommended: yes. With U1, T could otherwise dig 6 m shafts at
+3. **Tunnels:** depth DECIDED 5 m default (user 2026-10-16). Still open: should T need a shovel and dig slower? Recommended: yes. With U1, T could otherwise dig 5 m shafts at
    ~4 m³ per click.
 4. **Rut shape.** Recommended: the wide felt rut + a drawn client-only groove. Don't build both.
