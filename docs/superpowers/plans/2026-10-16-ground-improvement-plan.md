@@ -2,8 +2,33 @@
 
 User: "How do we improve, change or make it just better? Don't implement, just make the plan and why, and fact check,
 do research online."
-Status: PLAN ONLY - nothing built. Feature freeze (master list 2026-10-15) still on: most items below FIX shipped
-features (they protect what exists); the user decides which go in now.
+Status (updated 2026-10-16): this page is the ITEM CATALOGUE - each item's problem / change / why / evidence.
+WHAT TO DO AND WHEN lives in plans/2026-10-16-next-steps.md (builds + combined test sessions). Sections 1 (Phase 0),
+5 (hash) and 6 (order) below are SUPERSEDED by it; the item texts stay as the evidence.
+
+| Item | Status 2026-10-16 | In next-steps |
+|---|---|---|
+| J1 joiner never loses an op | not built; test case = Build 0 kit (low cap + fake ops) | Build 1 |
+| R1 rut patches near players | BUILT on da37c47 (FLOOR_FREE + FieldDue), SP OK | 0-MP / 0-PERF check it |
+| R2 band mesher off | prefab value; = rut cells plan Stage 0 | 0-WB #5 decides, Build 1 |
+| V1 bullet slab under voxels | only if 0-WB #1 fails; must cover tunnel walls / roofs too | Build 1 (conditional) |
+| R0 SA vehicles | smoke check after game updates; medium refactor if ever needed | 0-WB #4 |
+| C1-C4 + C6 crater rewrite | not built; size = decision 2 | Build 1 |
+| C5 crater size | user decision (today / realistic / middle preset) | before Build 1 |
+| T1 trench width | not built; WidthOf table (see CORRECTION) | Build 1 |
+| T2 parapet, T3 trench exit | not built | Build 3 |
+| U1 deep tunnels | SUPERSEDED by research/2026-10-16-deep-tunnels.md: TUNNEL_FLOOR 5 m, clamp fix, sea-level guard, slope cap | Build 1 |
+| Shovel tunnels + debug T | DECIDED (user): new shovel mode TUNNEL, T stays as debug key (deep-tunnels 4b) | Build 1 |
+| U2 level digging, U3 roof rules | not built (U2 needs the ~3.5 cm/m sink fix) | U2 Build 1, U3 Build 3 |
+| R3 rut walls, R4 first pass | may be replaced by SCM-lite (research/2026-10-16-soil-rut-literature.md): repose relax + "share of what is left"; R3 = fallback | Build 3 |
+| R5 pressed grass | not built; see also 0-WB #9 grass in ruts | Build 3 |
+| Rut cells (plans/2026-10-16-rut-cells-plan.md) | not started; only if 0-PERF shows rut rebuild cost still too high | Build 1 (conditional) |
+| J2 rut snapshot JIP | not built (prerequisites a-c below) | Build 2 |
+| S1 server rebuild gate | partly covered by FLOOR_SETTLE (da37c47: ~1/3 of the rebuild cost); gate only if PERF still shows the queue growing | Build 2 |
+| C7 buildings / objects over holes | not built; baseline in 0-WB #3 | Build 2 |
+| Field hash (section 5) | redesigned: cm values + mixing, 'MUD field hash seq' line, Tools/compare_op_hashes.py | Build 0 kit |
+
+Feature freeze (master list 2026-10-15) still on: builds 0-2 fix shipped features; build 3 is new look work.
 
 Built on (read these for the evidence):
 - research/2026-10-16-plan-review-second-opinion.md (independent review 2026-10-16: corrections to U1, U2, T1, R0 marked CORRECTION below)
@@ -24,7 +49,7 @@ the network policy blocked the source pages).
    The per-item 'Verify' lines below are folded into those sessions.
 5. Checkpoint before each item (mud_backups/checkpoint.ps1); one switch per item so it can be turned off.
 
-## 1. Phase 0 - five game checks before any code (one session; they decide what Phase 1 needs)
+## 1. Phase 0 - SUPERSEDED by sessions 0-WB / 0-MP / 0-PERF in next-steps (kept for the 'why' column)
 | # | Check | Why | Pass / what it decides |
 |---|---|---|---|
 | 0.1 | Rifle fire at a target prone in a voxel mortar crater (shooter 50 m out, aiming low over the rim); at a standing target in a 1.5 m voxel trench (aim at the parapet); straight down into flat voxel ground | VERIFIED-CODE: no FireGeo bullet slab under voxel cells (VOX cells get slot -1, MUD_WorldGround.c:5652); the heightfield needed one ("bullet got stopped", results 2026-10-09 task 6) | rounds stop -> skip V1; rounds pass -> V1 first |
@@ -263,13 +288,15 @@ the network policy blocked the source pages).
   file = same result). Mines: design call.
 
 ## 5. Cross-cutting: make MP checkable for craters / trenches / tunnels
+- SUPERSEDED design: the hash is now cm + mixing per changed sample, printed as 'MUD field hash seq N kind K: H',
+  compared by Tools/compare_op_hashes.py (Build 0 kit, prompts/2026-10-16-build-0-test-kit.md). Original text:
 - VERIFIED-CODE: only the rut floor is hashed (DISP_HASH); the voxel density of craters / trenches / tunnels / fill is
   never compared between machines. Add a per-op field hash (sum of Round(d x 1000) over the samples Put changed), log
   it like 'MUD disp hash', compare with Tools/compare_hashes.py. Needed to sign off C1-C4, T1-T2, U1-U3, J2.
 - READ: hosted Reforger servers often run the native Linux dedicated server; all our MP proofs were Windows-only.
   Run one session on a Linux DS with the hashes on.
 
-## 6. Order and dependencies
+## 6. Order and dependencies - SUPERSEDED by the builds in next-steps (Build 0 kit, 1 fixes, 2 long matches, 3 look)
 | Step | Items | Needs | Size |
 |---|---|---|---|
 | 1 | Phase 0 checks 0.1-0.5 | - | 1 session |
