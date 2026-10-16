@@ -29,8 +29,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 ## Lane 2 - before any public test (release switches)
 | Item | State today |
 |---|---|
-| Ground debug off | NOT done: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0) |
+| Ground debug off | flip before release: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0). It also gates the 10 s 'MUD patches' / 'MUD world' lines (Stats) |
 | Trench DEBUG_INSTANT | false in MUD_TrenchSite.c:19 (CODE) - user wants it kept as a test option |
+| Client instant dig (review F6) | flip before release: `MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG` true (testing) -> false; server then refuses Ctrl+F instant dig and logs it (2026-10-16) |
+| Per-op log lines (review F5) | flip before release: `MUD_VoxelProbe.OP_LOG` true -> false ('MUD voxel probe' op line, 'MUD rut field', 'MUD rut floor'; ~4/s per vehicle) (2026-10-16) |
 | JIP ask cap | in code: JIP_MAX_ASKS 10 (MUD_WorldGround.c) - check it still applies to voxel JIP |
 | Per-player trench-site cap | DROPPED 2026-10-15 (user: no per-player limit). Only MAX_SITES 20 server-wide |
 | Voxel house | DONE 2026-10-15: MUD_VoxelHouse ENABLED true for release - user tested it earlier, works |
@@ -85,6 +87,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - MudRunner-style mud feel: sinking that gets deeper and more slippery with each pass, belly drag, topsoil break.
   Research: docs/superpowers/research/2026-10-15-sinking-deep-dive.md, 2026-10-14-mudrunner-ida.md,
   Tools/mudrunner_mcp (telemetry MCP, finished and proven).
+- Mud texture in ruts via MatTerrainObject MaterialBlendUseTerrainDistance (copy of our skin emat + mud BCR/NMO
+  maps; distance to the untouched heightmap = rut depth). No shipped emat uses it. Quick test allowed as a
+  freeze exception (user 2026-10-16), test stopped unresolved (1 white rim, 1 no change), emat restored. Custom shaders are
+  impossible (2026-10-16). docs/superpowers/research/2026-10-16-custom-shaders.md
 - Voxel house / wall panels (code stays, see Lane 2 decision).
 - Papers plan: 0.25 m cells (E, parked), smoothing (C, parked), dual contouring (B1, NO-GO for ruts).
 - AI pathing over holes (navmesh rebuild is a dead end - CLAUDE.md).

@@ -274,6 +274,9 @@ class MUD_VoxelProbe
 	// converting voxel columns, the floor lives in its own tile map (m_mRutTiles) and the heightfield patches draw it.
 	// Needs DISPLACE_RUTS. false = v097 (Stage 1: the tile map is filled exactly where v097 filled the columns).
 	static const bool RUT_FIELD = true;    // Stage 2 on (user 2026-10-15); false = v097 (checkpoint v098)
+	// Review F5 (2026-10-16): the per-op log lines ('MUD voxel probe: ...', 'MUD rut field: N samples', 'MUD rut floor')
+	// come ~4 per second per driving vehicle = DS log spam. true in dev; FLIP TO false BEFORE RELEASE (master list Lane 2).
+	static const bool OP_LOG = true;
 	static const float DISP_GUARD = 1.0;        // pull only vertices less than this above the floor (tunnel roofs stay)
 	static const float DISP_EPS = 0.001;
 	static const float DISP_SOIL_CUT = 0.05; // a top tri this far (m) under the seeded ground is groove: soil (DispEmit)
@@ -491,6 +494,11 @@ class MUD_VoxelProbe
 	protected int m_iDispWorst;
 	protected int m_iDispHoles;
 	protected int m_iDispChecks;
+	protected int m_iDispPlainChecks;   // RUT_FIELD hole check (review F3): not-carved points on patches
+	protected int m_iDispPlainHoles;
+	protected int m_iDispSeamChecks;    // ... and either side of a carved / not carved cell line
+	protected int m_iDispSeamHoles;
+	protected int m_iDispLogged;        // HOLE lines this check (DISP_HOLE_MAX_LOG)
 	protected int m_iDispHash;
 	protected int m_iDispOpW;           // this op: floor samples written, cleared
 	protected int m_iFieldDirty;        // RUT FIELD: this op's heightfield patches marked dirty (Stage 3)
@@ -2500,6 +2508,8 @@ class MUD_VoxelProbe
 			what = string.Format("hole %1 m -> %2 m", op.m_fDepth, op.m_fB);
 			wp = (op.m_vLo + op.m_vHi) * 0.5;
 		}
+		if (!OP_LOG)
+			return true;
 		Print(string.Format("MUD voxel probe: %1 seq %2 at %3: %4 | %5 columns (%6 new, seed %7 chars), %8 new cells carved, %9 bricks made",
 			label, op.m_iSeq, wp, what, keys.Count(), fresh.Count(), op.m_sSeed.Length(), carvedNew, m_iBatchMade - made0)
 			+ string.Format(", %1 queued", queued)
@@ -3005,7 +3015,8 @@ class MUD_VoxelProbe
 			MarkBox(cgi, gjHi, cgk);
 		}
 		m_iDispCarved += m_aOpCarved.Count();
-		Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+		if (OP_LOG)
+			Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3849,7 +3860,8 @@ class MUD_VoxelProbe
 		Print(string.Format("MUD disp %1 s: %2 rut ops, %3 floor written, %4 cleared, %5 carved cells | %6 split bricks, %7 split verts, %8 fold drops, %9 overflows",
 			(now - m_iDispT0) / 1000, m_iDispOps, m_iDispWritten, m_iDispCleared, m_iDispCarved, m_iDispSplit, m_iDispSplitV, m_iDispFold, m_iDispOvf)
 			+ string.Format(" | %1 border pulls, displace %2 ms (worst brick %3 ms) | holes %4 in %5 checks", m_iDispBorder, m_iDispMs, m_iDispWorst,
-			m_iDispHoles, m_iDispChecks), LogLevel.NORMAL);
+			m_iDispHoles, m_iDispChecks)
+			+ string.Format(" (plain %1 in %2, seam %3 in %4)", m_iDispPlainHoles, m_iDispPlainChecks, m_iDispSeamHoles, m_iDispSeamChecks), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3869,11 +3881,15 @@ class MUD_VoxelProbe
 		m_iDispWorst = 0;
 		m_iDispHoles = 0;
 		m_iDispChecks = 0;
+		m_iDispPlainChecks = 0;
+		m_iDispPlainHoles = 0;
+		m_iDispSeamChecks = 0;
+		m_iDispSeamHoles = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
 	//! Draw floor: the floor samples round o, coloured by depth under the field (grey < 5 cm, yellow < 15 cm, red
-	//! deeper, white = no field surface found)
+	//! deeper, white = no surface found). RUT_FIELD: no voxel column there -> depth under the undug ground.
 	protected void DispFloorList(vector o)
 	{
 		m_aDispFloorP.Clear();
@@ -3902,7 +3918,11 @@ class MUD_VoxelProbe
 						continue;
 					int c = ARGB(255, 255, 255, 255);
 					float sy = 0;
-					if (FieldSurfAt(fi, fk, fy, sy))
+					// voxel top where a column reads one; RUT_FIELD plain ground: the undug ground (CarveFloor's plain rule)
+					bool known = FieldSurfAt(fi, fk, fy, sy);
+					if (!known && RUT_FIELD)
+						known = MUD_WorldGroundEntity.UndugY(p[0], p[2], sy);
+					if (known)
 					{
 						float d = sy - fy;
 						c = ARGB(255, 150, 150, 150);
@@ -3921,15 +3941,19 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Hole check: a 9 x 9 grid (CELL apart, on the sample columns) round o, in carved cells only. Expected top =
+	//! Hole check: a 9 x 9 grid (CELL apart, on the sample columns) round o. Carved cells: expected top =
 	//! min(field top, rut floor); an ENTS trace onto our bricks must hit within DISP_HOLE_TOL of it, with an upward
 	//! normal. Not while a batch is open (bricks not live yet). A tunnel roof < 2 m over the ground reads as a hole.
+	//! RUT_FIELD (review F3 2026-10-16) also: plain points (not carved, skin hole cell, live patch collider):
+	//! expected = WorldGround dug (floor min + edge lock in it), trace onto bricks or patches; and seam points: every
+	//! carved / not carved neighbour pair gets two traces 0.05 m either side of the cell line, each side with its own
+	//! expected top, bricks or patches.
 	protected void DispHoles(vector o, int now)
 	{
-		BaseWorld world = GetGame().GetWorld();
 		if (!m_DispTrace)
 			m_DispTrace = new TraceParam();
-		int logged = 0;
+		m_iDispLogged = 0;
+		bool field = RUT_FIELD && DISPLACE_RUTS;
 		float x0 = Math.Round((o[0] - m_fX0) / CELL) * CELL + m_fX0;
 		float z0 = Math.Round((o[2] - m_fZ0) / CELL) * CELL + m_fZ0;
 		for (int hz = -4; hz <= 4; hz++)
@@ -3938,46 +3962,138 @@ class MUD_VoxelProbe
 			{
 				float x = x0 + hx * CELL;
 				float z = z0 + hz * CELL;
-				if (!DrawsAt(x, z))
-					continue;
-				float sy = 0;
-				if (!SurfaceAtI(x, z, sy))
-					continue;
-				float ey = sy;
-				if (DISPLACE_RUTS)
+				bool carved = DrawsAt(x, z);
+				float ey = 0;
+				if (carved)
 				{
-					float fy = FloorAtW(x, z, sy);
-					if (fy < ey)
-						ey = fy;
+					if (DispExpect(x, z, true, ey))
+					{
+						m_iDispChecks++;
+						DispTraceCheck(x, z, ey, false, "", now);
+					}
 				}
-				m_DispTrace.Start = Vector(x, ey + 2, z);
-				m_DispTrace.End = Vector(x, ey - 3, z);
-				m_DispTrace.Flags = TraceFlags.ENTS;
-				m_DispTrace.LayerMask = EPhysicsLayerPresets.Projectile;
-				m_DispTrace.TraceEnt = null;
-				float f = world.TraceMove(m_DispTrace, DispOurs);
-				m_iDispChecks++;
-				float hy = ey + 2 - 5 * f;
-				vector hn = m_DispTrace.TraceNorm;
-				bool bad = f >= 1 || Math.AbsFloat(hy - ey) > DISP_HOLE_TOL || hn[1] < 0;
-				if (!bad)
-					continue;
-				m_iDispHoles++;
-				if (logged < DISP_HOLE_MAX_LOG)
+				else if (field && DispExpect(x, z, false, ey))
 				{
-					logged++;
-					string hit = "none";
-					if (f < 1)
-						hit = string.Format("%1 (normal y %2)", hy, hn[1]);
-					Print(string.Format("MUD disp HOLE at %1 %2: expected %3, hit %4", x, z, ey, hit), LogLevel.WARNING);
+					m_iDispChecks++;
+					m_iDispPlainChecks++;
+					if (DispTraceCheck(x, z, ey, true, " (plain)", now))
+						m_iDispPlainHoles++;
 				}
-				if (m_aDispHolePos.Count() < DISP_MARK_MAX)
+				if (!field)
+					continue;
+				// seam: right and up neighbours (each pair once)
+				for (int sn = 0; sn < 2; sn++)
 				{
-					m_aDispHolePos.Insert(Vector(x, ey, z));
-					m_aDispHoleUntil.Insert(now + DISP_MARK_MS);
+					if ((sn == 0 && hx == 4) || (sn == 1 && hz == 4))
+						continue;
+					float nx = x;
+					float nz = z;
+					if (sn == 0)
+						nx = x + CELL;
+					else
+						nz = z + CELL;
+					bool nCarved = DrawsAt(nx, nz);
+					if (nCarved == carved)
+						continue;
+					// the carved-cell line between them = start of the neighbour's DrawsAt cell (SPS * CELL)
+					float cellW = SPS * CELL;
+					float lineX = Math.Floor((nx - m_fX0) / cellW) * cellW + m_fX0;
+					float lineZ = Math.Floor((nz - m_fZ0) / cellW) * cellW + m_fZ0;
+					for (int side = 0; side < 2; side++)
+					{
+						// 0.05 m from the cell line toward x (side 0) or the neighbour (side 1)
+						float sx = x;
+						float sz = z;
+						float toward = -0.05;
+						if (side == 1)
+							toward = 0.05;
+						if (sn == 0)
+							sx = lineX + toward;
+						else
+							sz = lineZ + toward;
+						bool sCarved = DrawsAt(sx, sz);
+						float sy = 0;
+						if (!DispExpect(sx, sz, sCarved, sy))
+							continue;
+						m_iDispChecks++;
+						m_iDispSeamChecks++;
+						if (DispTraceCheck(sx, sz, sy, true, " (seam)", now))
+							m_iDispSeamHoles++;
+					}
 				}
 			}
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check: expected top at world x, z. carved: the voxel field top, min the rut floor. Not carved (RUT_FIELD):
+	//! only where a patch draws (skin hole cell) with a live, up-to-date collider; WorldGround dug (rut floor min and
+	//! edge lock already in it). False = nothing to check there.
+	protected bool DispExpect(float x, float z, bool carved, out float ey)
+	{
+		ey = 0;
+		if (carved)
+		{
+			float sy = 0;
+			if (!SurfaceAtI(x, z, sy))
+				return false;
+			ey = sy;
+			if (DISPLACE_RUTS)
+			{
+				float fy = FloorAtW(x, z, sy);
+				if (fy < ey)
+					ey = fy;
+			}
+			return true;
+		}
+		MUD_CoarseSkinEntity skin = MUD_CoarseSkinEntity.GetInstance();
+		if (!skin)
+			return false;
+		int cx = Math.Floor((x - m_fX0) / m_fCell);
+		int cz = Math.Floor((z - m_fZ0) / m_fCell);
+		if (!skin.IsHoleCell(cx, cz))
+			return false;     // kept terrain draws it
+		if (!MUD_WorldGroundEntity.PatchColliderLive(x, z))
+			return false;
+		float undug = 0;
+		return MUD_WorldGroundEntity.DugUndug(x, z, ey, undug);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check: one ENTS trace down at x, z onto our bricks (patches too when withPatches). True = hole (missed,
+	//! more than DISP_HOLE_TOL off ey, or a downward normal): counted, logged (DISP_HOLE_MAX_LOG per check), marked.
+	protected bool DispTraceCheck(float x, float z, float ey, bool withPatches, string what, int now)
+	{
+		m_DispTrace.Start = Vector(x, ey + 2, z);
+		m_DispTrace.End = Vector(x, ey - 3, z);
+		m_DispTrace.Flags = TraceFlags.ENTS;
+		m_DispTrace.LayerMask = EPhysicsLayerPresets.Projectile;
+		m_DispTrace.TraceEnt = null;
+		float f;
+		if (withPatches)
+			f = GetGame().GetWorld().TraceMove(m_DispTrace, DispOursAll);
+		else
+			f = GetGame().GetWorld().TraceMove(m_DispTrace, DispOurs);
+		float hy = ey + 2 - 5 * f;
+		vector hn = m_DispTrace.TraceNorm;
+		bool bad = f >= 1 || Math.AbsFloat(hy - ey) > DISP_HOLE_TOL || hn[1] < 0;
+		if (!bad)
+			return false;
+		m_iDispHoles++;
+		if (m_iDispLogged < DISP_HOLE_MAX_LOG)
+		{
+			m_iDispLogged++;
+			string hit = "none";
+			if (f < 1)
+				hit = string.Format("%1 (normal y %2)", hy, hn[1]);
+			Print(string.Format("MUD disp HOLE%1 at %2 %3: expected %4, hit %5", what, x, z, ey, hit), LogLevel.WARNING);
+		}
+		if (m_aDispHolePos.Count() < DISP_MARK_MAX)
+		{
+			m_aDispHolePos.Insert(Vector(x, ey, z));
+			m_aDispHoleUntil.Insert(now + DISP_MARK_MS);
+		}
+		return true;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3985,6 +4101,13 @@ class MUD_VoxelProbe
 	protected bool DispOurs(notnull IEntity e)
 	{
 		return MUD_VoxelSubEntity.Cast(e) != null;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Hole check trace (plain / seam points): our voxel bricks or heightfield patches
+	protected bool DispOursAll(notnull IEntity e)
+	{
+		return MUD_VoxelSubEntity.Cast(e) != null || MUD_FinePatchEntity.Cast(e) != null;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -4500,7 +4623,7 @@ class MUD_VoxelProbe
 			{
 				float fs = FloorSample(fi0 + gx, fk0 + gz);
 				if (fs < FLOOR_NONE * 0.5)
-					fs = fs - oy;
+					fs = MUD_WorldGroundEntity.FieldEdgeLocked(fi0 + gx, fk0 + gz, fs) - oy;     // edge lock, as the patches (F4)
 				m_aDispF[gz * DISP_N + gx] = fs;
 			}
 		}

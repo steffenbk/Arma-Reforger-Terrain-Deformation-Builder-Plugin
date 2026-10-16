@@ -25,17 +25,12 @@ class MUD_FinePatch
 	float m_aSmooth[1089];      // m_aH blurred for the collider
 	float m_aFloor[1089];       // deepest m_aH allowed (negative): Max Depth or a depth box
 	float m_aLock[1089];        // 0 = never moves (kept terrain border, building), 1 = free
-	float m_aRutTouch[1089];    // last m_fTime a wheel was on it
-	float m_aBermTouch[1089];
+	float m_aEdgeLock[1089];    // m_aLock without buildings (kept terrain border only): the rut floor, same on every machine
 	float m_aColH[1089];        // world Y of each vertex in the live collider (P1a wheel hold)
-	float m_aShow[1089];        // ahead ruts (TEST 2026-10-11): deformation the mesh shows while the vertex is hidden
-	float m_aHideAt[1089];      // ahead ruts: last m_fTime the vertex was in a wheel's hide corridor
-	float m_aScrapeTouch[1089]; // body scrape: last m_fTime an underside point was over it (one cut step per pass)
-	float m_aRutFrom[1089];     // m_aH when the current rut pass began (a moving press digs the full profile in one pass)
-	float m_aBermFrom[1089];    // m_aH when the current berm pass began
-	float m_aPendOrig[1089];    // ahead undo: m_aH before the first not-yet-reached ahead press (canonical At() copy only)
-	float m_aPendAt[1089];      // ahead undo: m_fTime of the newest pending ahead press on it, -1 = none
-	bool m_bColValid;           // m_aColH is the live body (false: no body yet, asleep, or it failed)
+	// press / ahead / scrape arrays (patch memory Stage 1, 2026-10-16): made on the first write, null = all default
+	// (~39 KB per patch saved where no wheel press, ahead hide, scrape or shown deformation ever touched it)
+	ref MUD_PatchPress m_Press;
+	bool m_bColValid;          // m_aColH is the live body (false: no body yet, asleep, or it failed)
 	int m_aCell[16];            // per skin cell (4 x 4): -1 = kept terrain, else slot | TLBR
 	float m_aCellSoft[16];      // 0 = hard (no ruts, no shovel) .. 1 = soft
 	int m_aCellHard[16];        // 1 = hard game material (int: a fresh bool array reads true)
@@ -51,8 +46,12 @@ class MUD_FinePatch
 	bool m_bColDirty;
 	bool m_bQueued;             // key is in MUD_WorldGroundEntity.m_aDirty
 	bool m_bDeformed;           // some vertex moved: kept for the match, sent to joiners
-	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - kept (not freed), may sleep; NOT sent / hashed
-	bool m_bTraceHidden;        // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
+	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - may sleep, freed out of range (FLOOR_FREE); NOT sent / hashed
+	bool m_bFloorWait;          // RUT FIELD settle (MUD_WorldGroundEntity.FLOOR_SETTLE): only floor dirt, held until quiet
+	float m_fFloorFirstAt;      // m_fTime of the first held floor dirt (max wait)
+	float m_fFloorDirtAt;       // m_fTime of the newest floor dirt (quiet)
+	float m_fFieldSeenAt;       // RUT FIELD: m_fTime it was last in MUD_WorldGroundEntity.FieldDue's range (keeps a floor-only patch)
+	bool m_bTraceHidden;       // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
 	int m_iBuildFails;          // collider steps that made no body
 	bool m_bAsleep;             // deformed, no vehicle near: no collider (skin collider under it), mesh kept
@@ -73,6 +72,125 @@ class MUD_FinePatch
 	bool m_bNetQueued;
 	ref MUD_IdxSet m_Idx;        // its layout's index lists (TEMP probe 2026-10-13, bricks: VOX layouts vary, the IDX_SETS ring
 	                            // alone thrashed); cleared when it sleeps (MUD_WorldGroundEntity.SleepPatch) to bound memory
+
+	//------------------------------------------------------------------------------------------------
+	//! The press arrays, made now if missing (writers)
+	MUD_PatchPress EnsurePress()
+	{
+		if (!m_Press)
+			m_Press = new MUD_PatchPress();
+		return m_Press;
+	}
+
+	// readers: null = the defaults MUD_PatchPress starts with
+	float RutTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aRutTouch[v];
+	}
+
+	float BermTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aBermTouch[v];
+	}
+
+	float Show(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aShow[v];
+	}
+
+	//! Mesh builds write every vertex: a 0 into a missing holder changes nothing, so it is made only for a non-0
+	void SetShow(int v, float d)
+	{
+		if (!m_Press && d == 0)
+			return;
+		EnsurePress().m_aShow[v] = d;
+	}
+
+	float HideAt(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aHideAt[v];
+	}
+
+	float ScrapeTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aScrapeTouch[v];
+	}
+
+	float RutFrom(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aRutFrom[v];
+	}
+
+	float BermFrom(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aBermFrom[v];
+	}
+
+	float PendOrig(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aPendOrig[v];
+	}
+
+	float PendAt(int v)
+	{
+		if (!m_Press)
+			return -1;
+		return m_Press.m_aPendAt[v];
+	}
+
+	void ClearPend(int v)
+	{
+		if (m_Press)
+			m_Press.m_aPendAt[v] = -1;
+	}
+}
+
+//! MUD_FinePatch.m_Press: per-vertex arrays only the heightfield wheel press, ahead ruts / undo and body scrape use.
+//! Defaults as MUD_WorldGroundEntity.InitPatch set them before 2026-10-16.
+class MUD_PatchPress
+{
+	float m_aRutTouch[1089];    // last m_fTime a wheel was on it
+	float m_aBermTouch[1089];
+	float m_aShow[1089];        // ahead ruts (TEST 2026-10-11): deformation the mesh shows while the vertex is hidden
+	float m_aHideAt[1089];      // ahead ruts: last m_fTime the vertex was in a wheel's hide corridor
+	float m_aScrapeTouch[1089]; // body scrape: last m_fTime an underside point was over it (one cut step per pass)
+	float m_aRutFrom[1089];     // m_aH when the current rut pass began (a moving press digs the full profile in one pass)
+	float m_aBermFrom[1089];    // m_aH when the current berm pass began
+	float m_aPendOrig[1089];    // ahead undo: m_aH before the first not-yet-reached ahead press (canonical At() copy only)
+	float m_aPendAt[1089];      // ahead undo: m_fTime of the newest pending ahead press on it, -1 = none
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_PatchPress()
+	{
+		for (int v = 0; v < 1089; v++)
+		{
+			m_aRutTouch[v] = -100;
+			m_aBermTouch[v] = -100;
+			m_aHideAt[v] = -100;
+			m_aScrapeTouch[v] = -100;
+			m_aPendAt[v] = -1;
+			m_aShow[v] = 0;
+			m_aRutFrom[v] = 0;
+			m_aBermFrom[v] = 0;
+			m_aPendOrig[v] = 0;
+		}
+	}
 }
 
 //! One triangle list, first m_iN entries used

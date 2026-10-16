@@ -280,3 +280,240 @@ Known (IDA 2026-10-08/12): GenericTerrainEntity script API read-only + AffectFol
 Workbench TerrainToolDesc_* only.
 - List the script registrations of GenericTerrainEntity / terrain classes in the CURRENT exe. Anything new
   (height write, hole toggle, layer paint)? Five minutes - a yes would change the whole architecture.
+
+---
+Answers 11-13 below: same exe (ArmaReforgerSteamDiag.exe 1.9.0.10, built from continuous_branches_stable_1.9.0),
+IDA base 0x140000000, read 2026-10-16. Labels as above (IDA / PROVEN / INFERENCE).
+
+## 11. Runtime spline / road / river mesh
+Can a road / shape / spline entity (RoadEntity, ShapeEntity, generator entities, RiverEntity) be spawned and given
+points at runtime and generate its mesh in the GAME (not Workbench)? Which script API reaches it?
+
+### Answer 11 (IDA, 2026-10-16)
+**Short answer: a RoadEntity builds its mesh in the game, but only from its saved attributes. No script method sets
+points in the game. ShapeEntity point setters and all generators are Workbench-only.**
+
+- **RoadEntity** (class registration sub_14130DF60, attributes sub_14130EB50, vtable 0x141de38f0):
+  - Attributes: SplinePoints (ShapePoint objects), Points (old vector array, "obsolete" - ignored when SplinePoints is
+    set), IsClosedSpline, Type, Width (default 10, 0 = "Invalid width ... Skipping the road creation"), Lanes,
+    Left/RightLaneOffset, Material (MatPBRRoad, default system/materials/roadDefault.emat), VScale,
+    MarkingMaterial, BeginningPiece / EndPiece, RandomSeed, ForceFullLength, MidPieceSequence, CustomSequence,
+    RoadSort, MatSortBias.
+  - The build is sub_14130F6A0. It reads those attributes from the entity SOURCE, builds the spline
+    (sub_140C9CB10), then the mesh (sub_140C9CFA0), then registers with the road manager (sub_140FB7790).
+  - It is called from the load-from-source slot (vtable +80, sub_14130EAE0). That is the normal spawn path, so a
+    RoadEntity spawned in the game from a prefab does build its mesh. The mesh part runs only when the entity has
+    EntityFlags.VISIBLE (flags at entity+88, bit 1).
+  - Rebuilds: on a transform change (sub_141311380, only while registered, +632) and from WB_EnableAutoReinits
+    (sub_141311070). Both re-read the source. INFERENCE: in the game, moving the road re-runs the same build with the
+    same points.
+  - Script API on RoadEntity: only WB_EnableAutoReinits / WB_DisableAutoReinits. Nothing to set points.
+- **Only route to custom road points in the game (INFERENCE, untested):** load the road prefab's BaseContainer,
+  change "Points" or "SplinePoints" with BaseContainer.Set / SetObjectArray, then spawn the prefab.
+  - BaseContainer.Set (sub_140E459F0) and SetObjectArray (sub_140E45DB0) have no editor check; they just write the
+    variable.
+  - Catches: it edits the shared cached prefab container (every later spawn gets the new points); each MP machine
+    must do the same edit; Y values come from the points (I saw no terrain projection in the game-side build); I did
+    not check whether the road mesh gets a collider.
+  - Verdict: not better than our own MeshObject.Create path. Not worth a probe for ruts.
+- **ShapeEntity / PolylineShapeEntity / SplineShapeEntity** (sub_1414D7F70, sub_1414D8250):
+  - Script methods: GetPointContainerOfType, SetPoints, GenerateTesselatedShape, GetAllInfluenceBBoxes,
+    GetInfluenceBBoxesInSegments, GetPointCount, IsClosed, GetPointsPositions, AddPointData; Spline adds
+    HasPointExplicitTangents, SetPointsSpline, GetTangents.
+  - SetPoints (sub_1414E2A40) calls vtable +760. For Polyline that is sub_1414DFFC0 and for Spline sub_1414E0300.
+    They write the points through the WORLD EDITOR API: BeginEntityAction, CreateObjectArrayVariableMember
+    "ShapePoint", SetVariableValue "%.4f %.4f %.4f", EndEntityAction.
+  - The editor API comes from sub_1413D2AC0 (world+32600), which only exists in Workbench. The +760 code uses it
+    with no null check, so INFERENCE: SetPoints in the game would crash. Treat it as Workbench-only.
+- **Generators** (RoadGeneratorEntity, LakeGeneratorEntity, SplineTerrainGeneratorEntityBase, forest/wall/powerline
+  generators): they create their child entities through the world editor API (e.g. sub_1414E1710 returns early when
+  there is no editor API). Workbench-only.
+- **RiverEntity** (sub_14149C6C0): script methods are read-only (GetExistingInstances, GetCentralPolyline,
+  GetOutlinePoints).
+  - Its mesh IS built at runtime with the same native call as script MeshObject.Create (sub_140AA7870, then
+    sub_140AA5D80), in sub_1414A1E50. It is driven by vtable slot 544 (sub_1414A3540), which reads the parent shape's
+    points.
+  - With no script way to set the shape's points in the game, this gives us nothing new.
+- **Side note for 1-ter (INFERENCE):** BaseContainer's script methods register under the same script-module flag
+  0x10 as World.CreateDecal (sub_140E411D0). Game scripts use BaseContainer.Get, so flag 0x10 is probably not a
+  Workbench-only flag. Not checked on a dedicated server.
+
+## 12. String / class sweep for deformation features
+"deform", "footprint", "snow", "mud", "displacement", "tessellat", "track" (non-decal), "SetHeight",
+"HeightmapEdit", "PaintLayer", "TerrainModif". For each hit: what it is, reachable from script?
+
+### Answer 12 (IDA, 2026-10-16)
+**No hidden ground-deformation feature. Nothing found that changes terrain or mesh shape at runtime.** Hits:
+
+| Search | Hit | What it is | Script, in game? |
+|---|---|---|---|
+| deform | DeformFunc (enf::MaterialSource::DeformFunc, sub_14102D550) | material-source class name (material compile side) | no |
+| footprint | none | - | - |
+| snow | SnowEffect, MatSnow, SnowData, postprocess/ps_Snow, SnowTexGen, snow_BCR/NMO textures | falling-snow weather particles + postprocess | no ground effect |
+| mud | WheelsMud / WheelsMudEffect, GetMuddiness (ParticleEffectInfo, sub_140187EA0) | surface muddiness value used for wheel particles | read only |
+| mud | Get/SetWheelMud, Get/SetBodyMud, Get/SetWheelDust ... (VehicleWheelEffectComponent, sub_1407083D0) | vehicle dirt look (MudAccumulationRange/Factor) | yes, vehicle look only |
+| mud | MudOpacity, MudColor, MudBCRMap, MudMaskMap ... | mud layer params of a vehicle/prop material (VFX map G channel) | material params |
+| displacement | TraceDisplacement / AsynchTraceDisplacement (World, sub_140B80650) | sweep-trace API | yes, not deformation |
+| displacement | GetOceanHeightAndDisplace, "Debug displacement" (Shore) | ocean wave surface | read only |
+| tessellat | ENF_TEST_TESSELLATION | shader define of MatWaterPool (sub_140D02B60), with WATER_ERASE, THERMAL | no |
+| tessellat | HullShader / DomainShader classes | renderer has the shader stages; no ground material uses them that I found | no |
+| tessellat | TessellateEllipse/Circle/RoundedRectangle, TessellateBezierSpline/HermiteSpline, GenerateTesselatedShape | math helpers (2D shapes, splines) | yes, math only |
+| track (non-decal) | VehicleWheelEffectComponent attributes TrackWidth, TrackOpacity, SlidingTrackMaterial, StaticTrackMaterial ("Tyre track when moving without sliding on surfaces with dustiness or muddiness > 0.25", sub_140709E90) | NATIVE tyre-track decals; they feed the same TrackDecal code as the script factory (sub_14070D0B0 -> sub_140B1C020) | prefab data only |
+| track (non-decal) | Tracked / TrackWheel / VehicleTrackedSimulation, TrackIR, CinematicTrack, persistence tracking, music tracks | unrelated | - |
+| SetHeight | SetHeightOverride | UI widget layout (sub_140E9E890) | unrelated |
+| HeightmapEdit / PaintLayer / TerrainModif | none | - | - |
+| (related) | WorldEditorAPI: SetTerrainSurfaceTile, BeginTerrainAction / EndTerrainAction, AddTerrainFlatterEntity, RegenerateFlowMaps (sub_141460840) | terrain editing | Workbench only (editor API) |
+
+- **Possibly useful, data-side (INFERENCE, not tested):**
+  - **Parallax mapping:** ParallaxScale / ParallaxMidlePlane / ParallaxShadowScale are params of MatPBRBasic
+    (sub_140BE2120), MatPBRDecal and MatPBR2Layers (ParallaxScale2). An emat on our ground mesh with a height map and
+    ParallaxScale > 0 might give ruts fake visual depth with no extra triangles. Needs a height texture that matches
+    the rut, so it suits a generic "rutted mud" texture, not exact per-rut depth.
+  - **Native tyre tracks:** the StaticTrackMaterial path draws tracks without sliding on surfaces with
+    muddiness/dustiness > 0.25. It is the same terrain-only decal code as item 1a, so it never draws on our meshes.
+    See item 13.
+
+## 13. Vanilla track decals over our hole cells
+Does SCR_VehicleTrackDecal's terrain path draw on hole cells (our ground over a hole) or skip them? (terrain hole
+test in the decal clip, sub_140B20280 area)
+
+### Answer 13 (IDA, 2026-10-16)
+**The clip has no hole test. In practice no decal starts over our ground, because the wheel is touching our entity,
+not the terrain.**
+
+- **The clip:** sub_140B20280 walks the heightmap cells under the segment and makes 2 triangles per cell.
+  - Heights come from the u16 height array (terrain+48, row stride terrain+68, as (h+1)*scale+offset).
+  - Each triangle is clipped against the segment's 4 planes (sub_140B1A740 -> sub_140B1E170), then vertices are
+    deduped (sub_140B223F0).
+  - Its callees are only math and array helpers. Nothing reads the hole mask (TerrainHoleBlock / "LoadHoles",
+    sub_141021180 / sub_141074430 are elsewhere). So on hole cells the strip is built at the ORIGINAL heightmap
+    height.
+- **Which entity is passed:** SCR_VehicleTrackDecal (scripts/Game/Vehicle/SCR_VehicleTrackDecalComponent.c, read
+  from the pak 2026-10-16) calls `AddPoint(WheelGetContactEntity(i), WheelGetContactPosition(i), ...)`.
+  - It only adds points when lateral or longitudinal slip >= 0.5 (skids), with width 0.25 and lifetime 10.
+  - Its editor category is "GameScripted/Test".
+- **Start check:** a decal starts only when that entity IS the world's terrain entity (sub_140B1ED70: `a2 !=
+  terrain` returns 0).
+  - Over our ground the wheel ray hits our MUD_ entity, so no decal starts there.
+  - A decal already running ends when the contact entity changes (sub_140B1C020, see answer 1a).
+  - The native VehicleWheelEffectComponent path (sub_14070D0B0) uses the same sub_140B1C020. INFERENCE: it passes
+    the contact entity the same way (sub_140750290); not opened.
+- **Leftover edge case (INFERENCE):** a wheel still on real terrain right next to a hole region builds a strip as
+  wide as the track. Any part of that strip that crosses hole cells is drawn at the old heightmap height.
+  - Under our ground it is hidden when our surface is above the heightmap (our normal case, the 1 mm rule).
+  - Over a dug crater it would float in the air at the old ground height.
+  - Strips are 0.25 m (script) or TrackWidth (native), so at most a thin sliver at the hole edge.
+- **Verdict:** vanilla tracks stop at our ground and do not draw on it. To get tracks on our ground we need
+  World.CreateDecal on our entity (answer 1b) or ruts in our own mesh.
+
+---
+Answers 5b + 6-10 below: same exe (ArmaReforgerSteamDiag.exe 1.9.0.10), IDA base 0x140000000, read 2026-10-16.
+Script protos read from the pak of the install the enfusion MCP points at (Arma Reforger Experimental). Labels as above.
+
+## Answers 5b (2026-10-16)
+- **1-bis (pak + IDA): CreateTrackDecal is gone.** The 1.9 script protos have no CreateTrackDecal:
+  scripts/GameLib/generated/World/World.c has only CreateDecal, CreateDecal2, OutlineEntity(Group), ReloadSystems,
+  FindSystem, GetSystems; scripts/Core/generated/World/BaseWorld.c has RemoveDecal but no track decal method. The exe
+  has no such string either. The enfusion MCP api_search still lists `World.CreateTrackDecal` and a `TrackDecal`
+  class - that API dump is older than the pak. INFERENCE: removed before 1.9 (replaced by TrackDecalFactory), so the
+  spray-can mod would no longer compile on 1.9. Not compiled to confirm.
+- **1-ter (pak, INFERENCE for the DS):** CreateDecal is declared in scripts/GameLib/generated/World/World.c, a normal
+  game proto (not under WorkbenchAPI), so it is there for game scripts in the client. The proto comment says it
+  returns null when the decal "wasn't created for some reason (invalid material, NoDecal flag, ...)". On a dedicated
+  server (no renderer) INFERENCE: it compiles and returns null / does nothing. Not checked in the DS exe. Decals are
+  client-side anyway: each client must make its own.
+- **2-bis (IDA): no depth threshold to find, and it does not apply to our ground.**
+  - The discontinuity mask is drawn only from meshes with ClutterOccluder on (render flag 0x4000, answer 2). Our
+    runtime entities do not have it, so their depth never enters the mask.
+  - MatClutterMaskPostprocess (sub_140CA51A0 / sub_140CA5F70) registers no parameters in the exe. The threshold is
+    inside the compiled shader, not readable here. The only exe-side knobs are on the occluder:
+    ClutterOccluderClipPlane ("Distance of the clip plane from object pivot", -10..10) and ClutterOccluderEnlarge
+    ("Intensity of clutter mask discontinuity detection").
+  - Verdict: rut depth alone does not remove grass. Ruts of 0.1-0.35 m keep the grass (it is planted at heightmap
+    height). Ways to hide it stay: terrain holes, flattening (answer 3), or a ClutterOccluder prefab test (answer 2).
+
+## Answer 6 (IDA, 2026-10-16)
+**One material per collider piece. Script trimeshes have no per-triangle material.**
+- Script API: `PhysicsGeom.CreateTriMesh(vector vertices[], int indices[], int numVertices, int numIndices)` - no
+  material argument. The material comes only from PhysicsGeomDef.MaterialName (or AddGeom's material) per geom.
+- Native CreateTriMesh sub_140A52060 builds an enf::BulletTriangleMeshShape (sub_140A4E520): a vertex array
+  (12 bytes per vertex) and a 16-bit index array, then a btBvhTriangleMeshShape (sub_14172BBC0, quantized BVH). No
+  material array (no btTriangleIndexVertexMaterialArray-style data).
+- Side finding (INFERENCE): indices are stored as 16-bit, so one script trimesh should stay under 65536 vertices.
+- Wheel contact material: comes from the hit geom (answer 5, sub_1408FBD20 reads the surface of the hit). With one
+  material per trimesh geom, per-triangle lookup has nothing to read. Not opened further.
+- Verdict: friction that changes spot by spot needs separate geoms (or separate bodies) per material.
+
+## Answer 7 (IDA, INFERENCE, 2026-10-16)
+**No internal-edge smoothing found.**
+- Bullet's internal-edge tool (btGenerateInternalEdgeInfo / btAdjustInternalEdgeContacts) needs a btTriangleInfoMap.
+  That class has a vtable, so its RTTI name would be in the exe if it were used. It is not: the only triangle RTTI
+  names are btTriangleCallback, btTriangleShape, btTriangleMeshShape, btBvhTriangleMeshShape and the raycast /
+  convexcast callbacks. No "InternalEdge" / "TriangleInfo" strings.
+- So contacts at inside edges of our trimeshes are not corrected by Bullet's tool. An engine-own fix was not found
+  (not searched past strings / RTTI).
+- Effect: more, smaller triangles give more chances of edge bumps for bodies that slide on the ground (vehicle
+  bellies, debris). Wheels use rays, so they are not affected. Characters: their controller was not checked.
+
+## Answer 8 (IDA, 2026-10-16)
+**AddGeom works on a live body, but there is no RemoveGeom and no swap. A piece cannot be taken out again.**
+- Physics script methods (registration sub_140E67DF0): ... AddGeom, GetGeom, GetNumGeoms, UpdateGeometries,
+  GetGeom* transforms / bounds / surfaces / name, SetGeomInteractionLayer ... No RemoveGeom, no replace.
+- AddGeom (sub_140E63590 -> sub_140E63320 -> sub_140B0B100):
+  - Refuses bodies with merged physics ("Physics::AddGeom adding geometry to body that has merged physics / is
+    merged") and entities with no world.
+  - Turns the body's shape into a btCompoundShape if it is not one yet (sub_14171E640; it uses a dynamic AABB tree
+    of children when the count is over 20, or 50 for one body type), adds the new child (sub_14171E9A0), recomputes
+    the compound bounds (vtable +64, sub_14171FEF0), and sets the shape on the body (sub_1412F4880).
+  - Cost (INFERENCE): adding one child does not rebuild the other children's BVH, so it is cheap next to building a
+    new trimesh. The new trimesh's own BVH build (in CreateTriMesh) is the main cost either way.
+- UpdateGeometries (sub_140E69E50 -> sub_140B179C0) re-reads the geoms from the entity's MODEL (xob) and rebuilds
+  the body from it. It does not help with script geoms.
+- Verdict: "one body with 4 x 4 sub-geoms, rebuild only the touched one" is not possible - the old geom cannot be
+  removed. The way to rebuild only a 2 m piece is a separate body per piece (a child entity per piece, destroy +
+  CreateStaticEx on that one). Whether that beats one 8 m body depends on our per-body overhead; measure with the
+  'MUD band: mesh/collider split ms' lines.
+
+## Answer 9 (IDA, 2026-10-16)
+**No. The vehicle sim never reads RollingResistance or RollingDrag from the surface (.vhcsurf).**
+- ContactSurface attributes (sub_141320780): NoiseSteer, NoiseFrequency, Roughness, FrictionNonTread,
+  FrictionTread, RollingResistance, RollingDrag. Each one has an attribute index global (0x1423B8B90 ... 0x1423B8BA8).
+- The first five each have a NATIVE reader besides the script getter (sub_141320680, sub_141320630, sub_1413206D0,
+  sub_141320590, sub_1413205E0). RollingResistance (0x1423B8BA4) and RollingDrag (0x1423B8BA8) are touched only by
+  the attribute registration and the script getters GetRollingResistance (sub_141321160) / GetRollingDrag
+  (sub_141321090). So nothing native uses them.
+- The tyre .conf RollingResistance / RollingDrag say "NOT USED ATM!" (sub_140547D60), as known.
+- What a "mud" surface can change for free: friction (tread / non-tread), roughness, steering noise. That gives
+  slipping, not drag.
+- Two script levers that do exist:
+  - `WheelSetRollingDrag(wheelIdx, drag)` on VehicleWheeledSimulation and VehicleWheeledSimulation_SA_B (and the
+    tracked sim). Already rated weak in 2026-10-15-sinking-deep-dive.md.
+  - `VehicleBaseSimulation.SetSurfaceOverride(ResourceName surfaceMat)` (static, sub_140734580, doc says "Internal
+    use only! Overrides surface material of wheel/track casts"). INFERENCE: one global override for all wheel casts,
+    not per spot or per vehicle. Not tested.
+
+## Answer 10 (IDA, 2026-10-16)
+**Nothing new. Script still cannot edit terrain heights, holes or layers in the game.**
+- GenericTerrainEntity script methods (sub_141449370): AffectFoliageEllipse / Circle / Rect / Square,
+  GetTileTextureResName, GetTileNumber, WorldToTerrCoord, TerrToWorldCoord, TryGetHeightTC, GetTileSizeTC,
+  GetTerrainBoundBox, GetTileVerticesCount. All read-only except the foliage obstacles.
+- String search for Set/Modify/Paint/Edit/Toggle/Add/Remove + Terrain/Height/Hole/Surface found only
+  SetSurfaceOverride (vehicle, answer 9), UI SetHeightOverride / Min/MaxDesiredHeight, SetFogHeightDensityOverride,
+  and the Workbench-only SetTerrainSurfaceTile / Add/RemoveTerrainFlatterEntity (WorldEditorAPI, answer 12).
+
+---
+## 14. Custom shaders in mods (added 2026-10-16 - user saw a modder do it on Discord)
+Our "mods cannot add shaders" was INFERENCE, never checked. Questions:
+- Does the game / Workbench compile shader SOURCE shipped in an addon (search: shader compiler, ".fx", ".hlsl",
+  "shaders/", ShaderCompile, MaterialSource, DeformFunc - answer 12 found enf::MaterialSource::DeformFunc on the
+  material compile side)? Can an addon add a NEW material class, or override a vanilla shader file by path (as
+  resource overrides work for other files)?
+- Is there a material class with vertex-shader height input (vertex texture fetch / displacement / DeformFunc) that
+  an .emat can drive with a texture - and can script update that texture at runtime (a render target or a texture
+  written from script)?
+- What do the known post-process / NVG mods use: new shaders, or parameters of existing post-process materials?
+- If custom shaders work: is it client-only (yes for rendering) and does the shipped game client accept them
+  (signature / pak checks), not just Workbench?
+Answer (IDA + shader pak, 2026-10-16): see 2026-10-16-custom-shaders.md - no compiler in game or Workbench, only
+precompiled .shadercacheDX12 binaries loaded before mods mount, fixed native Mat* classes. The Discord mod is not
+explained by this yet (post-process / existing-material parameters?) - still open.
