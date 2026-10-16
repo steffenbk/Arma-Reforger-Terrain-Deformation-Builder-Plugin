@@ -74,6 +74,11 @@ Trench fix: floor rectangle padded 0.25 m each side. Tunnel fix: FLOOR 6 m for t
 
 
 ## Tunnels
+**SUPERSEDED (2026-10-16 later): this table is wrong.** After levelling off, the sim dug at pitch 0, where the
+capsule floor is 0.3 m under the feet, so the tunnel kept sinking to FLOOR (feet reached 6 m, hence the thick roofs).
+Correct numbers (level = pitch +0.3): results/2026-10-16-improve-checks.md U1/U2 - FLOOR 6 m, dug to 4 m: roof
+2.11-2.39 m; to 5 m: 2.82-3.12 m; FLOOR 3 m: 0.45-0.87 m.
+
 | Tunnel FLOOR m | Player levels off at feet under undug m | Roof (sample field) min-max m | Clearance m |
 |---|---|---|---|
 | 3.0 | 3.0 | 0.84-0.87 | 2.15 |
