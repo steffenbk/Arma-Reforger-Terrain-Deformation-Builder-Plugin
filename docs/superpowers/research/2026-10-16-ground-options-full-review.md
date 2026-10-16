@@ -33,7 +33,7 @@ craters and trenches: good enough today, not the end state.**
   tunnels - is the right shape. **The biggest open items are no longer the representation. They are the untested
   gameplay gaps around it** (section 2), most of them cheap to check.
 
-**Six things this read found that no earlier doc lists (NEW):**
+**Six things this read found that no earlier doc lists (NEW; N5 withdrawn 2026-10-16, deep dive: research/2026-10-16-architecture-gaps-deep-dive.md):**
 
 | # | Finding | Why it matters | Evidence |
 |---|---|---|---|
@@ -41,7 +41,7 @@ craters and trenches: good enough today, not the end state.**
 | N2 | **Voxel ops ignore the building lock.** The heightfield never moves ground inside a building's box (m_aLock, BuildingLock CODE MUD_WorldGround.c:2907). Carve / CutTrench / CarveTunnel / FillTrench only skip m_aHard (kept terrain) (CODE :2684, :3257, :3315, :3382). | A mortar next to a house, a trench dug to a wall, a tunnel under a house: the house can float over a pit. | CODE |
 | N3 | **Nothing wakes objects over a new hole.** No SetActive / query after a voxel go-live (grep: only MUD_VanillaHoleFix touches SetActive). Trees, props, mines, dropped weapons, sandbags, parked or GM-placed vehicles at rest stay where they were. | Floating objects over craters; INFERENCE: the open Lane 3 bug "GM-placed vehicle hangs in air" may be this (a sleeping body whose ground went). Old item N8 (perf overview) was never closed. | CODE |
 | N4 | **Voxel craters lost the heightfield crater's shaping.** Crater() hands only `full * scale` to MUD_VoxelProbe.Blast (CODE MUD_WorldGround.c:5380 / :5427) BEFORE the depth jitter, oval / lobe outline, stack cap (m_fCraterStackDepth 2.5 / factor 1.67), deepen gain and the 42 deg max wall slope are applied. Voxel Carve is a fixed half-ellipsoid (crest 2.2 x depth) + funnel + sine rim (CODE :2657). Repeated hits go down to FLOOR 3 m. | Answers the crater README "re-check old crater items against the voxel code": every crater looks the same again, walls near the crest are steep (ellipsoid edge goes vertical, soldier MaxSlope 50 deg), shelled ground sinks to 3 m. | CODE |
-| N5 | **Voxel house is ENABLED for release but SP-only.** MUD_VoxelHouse.c header: "SP only"; no Rpc in MUD_VoxelHouse.c / MUD_WallPanels.c. In MP a client pressing J voxelizes the house LOCALLY, hides it and turns its collision off locally; the server keeps the real house. | Desync; client walks into walls the server still has (corrections / rubber banding), a cheat-like view through walls. | CODE (Lane 2 says "DONE, works" - it was tested in SP) |
+| N5 | ~~Voxel house is ENABLED for release but SP-only~~ **WITHDRAWN 2026-10-16:** MUD_VoxelHouse.Tick and Blast return when `RplSession.Mode() != RplMode.None` (CODE MUD_VoxelHouse.c:105, :125), so in any MP session it does nothing. No desync risk; it simply does not exist in MP. | - | CODE (deep dive 2026-10-16) |
 | N6 | **Two docs call "terrain-look material on voxel tops" an unprobed option - it is already shipped.** MAT_TOP = default_MatTerrainObj1.emat (MatTerrainObject) on every brick top (CODE :351). | voxel-options-deep-dive option 3 and assessment 5.1 can drop it. What is still unprobed is GlobalLayer (angle blend) on walls. | CODE |
 
 Smaller NEW notes: voxel FLOOR is a constant 3 m, DepthBox entities are ignored by voxels (no DepthAt in
@@ -60,7 +60,7 @@ ruts silently stop on SA vehicles after the update (untested, one-line check in 
 | Trenches / shovel / fill | voxel bricks, op 2 / 3 | 0.5 m | as craters | proven | 60 deg walls (SLOPE_RUN 0.58), max 2.5 m, no spoil / parapet, no revetment, MAX_SITES 20 |
 | Tunnels | voxel bricks, op 1 capsule r 0.8, 2.5 m tall | 0.5 m | as craters | server issues, no client prediction | no roof / bridge rules (thin paper roofs), FLOOR 3 m, no AI, building lock ignored |
 | Mud sheet | client-only 0.15 m second mesh | 0.15 m | CharCollide only | client-only | PARKED; proven dead end as a ground (assessment) |
-| Voxel house | 0.25 m voxels + wall panels | 0.25 m | trimesh | NONE (N5) | SP-only, one house per session |
+| Voxel house | 0.25 m voxels + wall panels | 0.25 m | trimesh | none: switched off in MP by its own Tick (N5 withdrawn) | SP-only, one house per session |
 | AI navmesh | - | - | - | - | dead end for script bodies (PROVEN IDA 2026-10-12) |
 
 ## 3. Every representation we could use, and its verdict
@@ -182,7 +182,7 @@ Not tested / open:
 | M7 | Server-owner settings (on / off, depths, budgets) | F10 old list | product work |
 | M8 | GM "repair ground" brush / GM place crater | F11 old list | an op from the GM with the same net path |
 | M9 | AI | dead end for navmesh (PROVEN); PvP scope | only route: invisible .xob navmesh proxies - out of scope |
-| M10 | Voxel house in MP (N5) | NEW risk | switch ENABLED off for release, or make it server-issued ops like the ground |
+| M10 | Voxel house in MP | inert in MP (N5 withdrawn) | only if wanted in MP: server-issued ops like the ground |
 
 ## 5. Engine questions still open (answers change options above)
 
@@ -207,7 +207,7 @@ From research/2026-10-15-ida-rut-questions.md (items 6-10 never answered) plus n
 2. C6 / T6 / U2 dig next to and under a house (N2).
 3. C5 objects over a fresh crater: a tree, a parked truck, a dropped rifle, a GM-placed vehicle (N3; may explain the
    Lane 3 "vehicle hangs in air" bug).
-4. N5 voxel house in MP (or just switch it off for release).
+4. (withdrawn - the voxel house is already off in MP.)
 5. R12 / Q7 vehicle sim class on 1.9.
 6. C3 walk out of a mortar crater.
 
