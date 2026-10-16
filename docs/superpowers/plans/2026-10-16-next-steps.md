@@ -102,7 +102,9 @@ at release (CLAUDE.md archive rule). It holds:
   - a sea-level guard;
   - AtGround / ColSurf read the new floor;
   - a dig slope cap so players can walk out.
-- **T needs a shovel + a slower rate** (if decision 3 = yes). This comes with U1: without it, T digs 5 m shafts.
+- **Shovel tunnels** (DECIDED user 2026-10-16): a new shovel mode TUNNEL (R cycles it, shovel animation, server
+  checks the shovel in hand + 1 swing / s). T stays as a DEBUG key (TUNNEL_DEBUG_T true, no tool, as today) until
+  release. Design: research/2026-10-16-deep-tunnels.md section 4b.
 
 **Session 1-WB:**
 - Walk out of every crater size, and compare the crater presets side by side (attributes only).
@@ -179,6 +181,6 @@ time, memory, op count and fps over time.
    - a realistic preset: ~0.47 m deep, ~2.1 m across. It is only ~4 voxel samples wide, so little cover;
    - a middle preset: perKg 0.8, power 0.45 -> 81 mm 0.80 m deep, ~3.3 m crest. All three are attribute values, so
      they can be compared in 1-WB.
-3. **Tunnels:** depth DECIDED 5 m default (user 2026-10-16). Still open: should T need a shovel and dig slower? Recommended: yes. With U1, T could otherwise dig 5 m shafts at
-   ~4 m³ per click.
+3. **Tunnels: DECIDED (user 2026-10-16).** 5 m default depth; tunnels need a shovel (new shovel mode); T stays as
+   a debug key until release.
 4. **Rut shape.** Recommended: the wide felt rut + a drawn client-only groove. Don't build both.

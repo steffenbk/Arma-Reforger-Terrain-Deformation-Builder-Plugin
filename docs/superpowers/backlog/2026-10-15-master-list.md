@@ -47,6 +47,9 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - Crater items from the old list (M1 rim, size by charge, hit-entity check, lip slope): re-check against the voxel
   crater code before working on them.
 
+## Release checklist (before upload for players)
+- MUD_VoxelProbe.TUNNEL_DEBUG_T false (T = debug tunnel key, no tool; user 2026-10-16: on for testing).
+
 ## Parked ideas (not now - add here, don't start)
 - Keep the terrain + grass over DEEP tunnels (no hole, no surface bricks) - UNVERIFIED (character under an un-holed
   heightfield); research/2026-10-16-deep-tunnels.md section 6.

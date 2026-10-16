@@ -52,12 +52,52 @@ Nothing else caps depth:
 3. **The sea-level guard** (P1).
 4. **AtGround and ColSurf read TUNNEL_FLOOR** (P7, P8).
 5. **A slope cap on downward digs** (P2).
-6. **T needs a shovel + a slower rate** (P4).
+6. **Tunnels need a shovel (DECIDED, user 2026-10-16); T stays as a DEBUG key for now.** Design in section 4b.
 7. **U2 level digging** (with the ~3.5 cm/m sink fixed) and **the U3 roof guard**.
 
 Optional, mission side: MUD_DepthBoxEntity already exists for the heightfield (MUD_WorldGround.c:2966). A mission
 maker can place boxes where deep digging is allowed; reading it in the tunnel floor is cheap and the same on every
 machine (placed entities).
+
+## 4b. Shovel tunnels + debug T (DECIDED user 2026-10-16: "the tunnel should need a shovel ... leave T as a debug
+mode that stays active for now, makes it easier for me to test")
+Today (VERIFIED-CODE):
+- T: MUD_VoxelProbe.TunnelInput (:672-718) reads the camera and sends MUD_RequestVoxelTunnel(mid) every 300 ms.
+  The server checks only "on foot", 3 m range and the rate (MUD_VoxelNet.c:51-65). No tool.
+- Shovel: R cycles OFF -> DIG -> FILL -> PLAN (MUD_Dig.c:28-32). A local helper offers a looping "Dig" action with
+  the shipped shovel animation (:290-306). Each loop sends MUD_RequestDig. The server checks HoldsShovel (:168-178)
+  and 1 swing / 1000 ms (MIN_GAP_MS :16, :446).
+
+The change:
+1. **A new shovel mode TUNNEL.** R cycles OFF -> DIG -> FILL -> TUNNEL -> PLAN.
+   - In TUNNEL the helper is always offered on world ground. UpdateHelper (:204-210) wants a helper for any mode
+     but OFF, so it needs no new rule.
+   - The looping action, with the same shovel animation, computes `mid` exactly like TunnelInput: one shared
+     helper, look pitch clamped, and the P2 slope cap.
+   - It then sends a NEW RPC MUD_RpcAsk_ShovelTunnel(mid).
+2. **Server checks for the shovel RPC:**
+   - on foot;
+   - HoldsShovel(c, true);
+   - mid within 3 m of the feet;
+   - one swing per SHOVEL_TUNNEL_MS (start at 1000 ms, as the shovel; tune in 1-WB);
+   - then ServerTunnel(mid).
+   - The op is the same tunnel op, so MP / JIP / hashes do not change.
+3. **T stays as a debug key.**
+   - New const `TUNNEL_DEBUG_T = true` (MUD_VoxelProbe.c, next to the tunnel constants), with a comment: "debug
+     key, user 2026-10-16: OFF before release".
+   - TunnelInput returns at once when false.
+   - MUD_RpcAsk_VoxelTunnel refuses when false (it must be checked on the server too, or a modified client could
+     still dig).
+   - While true, T works exactly as today (no tool, 300 ms) so testing stays fast.
+   - The server logs `MUD tunnel: debug T by player N` once per player, so a test log shows which path dug.
+4. **A release checklist line** (master list): "TUNNEL_DEBUG_T false". In MP any player can use T while it is
+   true.
+5. **Optional, later:** a capsule ghost in TUNNEL mode (like the free-dig ghost), showing where the next swing digs.
+
+Volume check (geometry): one capsule is r 0.8, 0.9 m straight + two half spheres = ~4.0 m3 per swing when nothing
+there is dug yet. Walking on, a swing mostly re-cuts the last capsule, so the new earth per swing is ~1.4 m3 (a
+0.5 m step: pi x 0.8^2 x ~0.7 m). That is still faster than a real shovel (~0.25 m3/s, improvement plan C5 / review).
+So the rate starts at 1000 ms and gets tuned in 1-WB, as a feel choice.
 
 ## 5. Session checks (add to 1-WB / 1-MP)
 All at the 5 m default (repeat at 10 m only when that step is taken):
@@ -67,6 +107,9 @@ All at the 5 m default (repeat at 10 m only when that step is taken):
 - RPG fired inside a 5 m tunnel: it makes a chamber and does not refill.
 - Dig toward the coast below the sea level: the guard stops it (and look at what the water does near the guard).
 - Shovel (F) and fill at 5 m deep: not refused.
+- Shovel TUNNEL mode: the animation plays, each swing digs, R cycles through all 5 modes, refused with no shovel in
+  hand (put it away mid-dig). T still digs with nothing in hand (debug), and the debug log line shows.
+- 1-MP: a client digs with the shovel and with T; with TUNNEL_DEBUG_T false on the server, T is refused.
 - Shoot the ground above a 5 m tunnel from outside while a friend is inside: do rounds come through? (P6)
 - Drop an item at 5 m. Light level at 3 / 5 m (look only).
 - 1-MP: hashes after deep digging; a late joiner sees the same tunnel.
