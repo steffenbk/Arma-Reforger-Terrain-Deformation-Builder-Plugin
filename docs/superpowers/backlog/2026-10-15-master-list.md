@@ -55,6 +55,8 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   DEEP DIVE 2026-10-16: docs/superpowers/research/2026-10-16-architecture-gaps-deep-dive.md - design shape holds, but
   rut-field cost with many vehicles (no client distance gate, band mesher 3x, ~3 trucks saturate a DS), JIP op-log
   growth and FLOOR 3 m (tunnel roofs <= ~0.8 m) are design-level. Section 4 = one test session, section 5 = fix order.
+  FACT CHECK 2026-10-16: docs/superpowers/research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md (+ results/
+  2026-10-16-gap-checks.md, Tools/gap_checks.py). New: JIP joiner stalls for good past 20000 held ops.
 - Rut field cost (LOG 2026-10-15 23:16: ~20 ms per rut op, mesher run twice per patch = 53%): shared build tried
   and reverted (6% hit, mud-gotchas). Next idea: schedule a patch's collider right after its mesh, then share.
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel

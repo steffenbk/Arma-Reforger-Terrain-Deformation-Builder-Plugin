@@ -20,6 +20,12 @@ around it, and they only show with many vehicles, long matches or deep tunnels -
 | E | Tunnels fit under FLOOR 3 m | **NO** | A full-height tunnel (2.5 m capsule) can never have more than ~0.8 m of roof on flat ground. Thin roofs are built in, not a digging mistake (3.5) |
 | F | The rest | Gaps to test | bullets (3.3), crater shape (3.4, MEASURED offline), building lock (3.6), objects over holes (3.7), 1.9 vehicle class (3.8), column cap fallback (3.9), determinism coverage (3.10) |
 
+**Fact check (later 2026-10-16): research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md.** It narrows 3.1
+(a NEW / sleeping patch is built at most once per frame; existing patches are rebuilt with no distance limit), corrects
+3.5 (roof 0.84-0.87 m in the field, ~1 m drawn), and adds: a joiner drops ops past 20000 held and never recovers
+(MUD_VoxelProbe.c:974), road-edge crater cliffs, repeated hits to 3 m, narrow drawn trench floors, and real crater /
+trench / tunnel reference data. Numbers: results/2026-10-16-gap-checks.md.
+
 Correction to yesterday: finding N5 (voxel house desyncs in MP) is WITHDRAWN - MUD_VoxelHouse.Tick / Blast return
 when `RplSession.Mode() != RplMode.None` (CODE MUD_VoxelHouse.c:105, :125). It is simply off in MP.
 
