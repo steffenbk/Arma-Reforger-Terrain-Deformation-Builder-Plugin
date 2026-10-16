@@ -38,9 +38,10 @@ before each build (CLAUDE.md).
 | research/2026-10-15-rut-options-round2.md, -rut-cells-deep-dive.md | background for rut cells | via the rut cells plan |
 
 ## How to run it (step by step)
-1. Pull this branch locally: `git pull origin claude/stoic-clarke-uiodzl`. It is your da37c47 work + these docs.
-2. Paste prompts/2026-10-16-build-0-test-kit.md into a local Claude session in the mod folder. It builds the kit in
-   4 stages and stops after each so you can compile.
+1. Paste prompts/2026-10-16-build-0-test-kit.md (everything below its line) into a local Claude session in the mod
+   folder. Its Stage 0 checks the folder first: git state, it fetches only the plan docs + tools from this branch
+   (never Scripts), reads the plan and checks every code anchor against your local scripts. Then it stops for your OK.
+2. Stages 1-4 build the kit. It stops after each stage so you can compile.
 3. Run the three sessions below (0-WB, 0-MP, 0-PERF), one launch each, using their checklists. Keep the logs.
 4. Bring the logs (and pictures for 0-WB #7) back here. Hash check: `python Tools/compare_op_hashes.py server.log
    client.log`. We read the results and decide what Build 1 needs (V1? R2? J1 confirmed).
