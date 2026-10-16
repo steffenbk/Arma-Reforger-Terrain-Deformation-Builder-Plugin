@@ -56,3 +56,7 @@ MUD_VoxelProbe.c (RutWheel / RutFlush, RUT_BEHIND), MUD_Wheels.c
   re-archived: for disp hash on a DS set DISP_HASH_ALWAYS true; heightfield hashes need Hash Every > 0.
 - Options after the freeze (displaced ruts, terrain-look material probes, DC for craters): docs/superpowers/research/2026-10-15-voxel-options-deep-dive.md
 - Parked idea first in line: raised side ridges on voxel ruts (master list).
+- Soft / fluid mud without the sheet (2026-10-16): docs/superpowers/research/2026-10-16-soft-mud-alternatives.md -
+  sheet ingredients as rut-field channels (ridges felt; texture drag, slump, wet look client-only), vanilla 1.9 wet-mud
+  particles / muddy vehicles / puddles to probe, and the large-scale catch: rut-field patches are never freed and are not
+  counted in the 2000-patch warning (~206 patches per km of ruts).
