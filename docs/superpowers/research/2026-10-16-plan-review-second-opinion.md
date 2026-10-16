@@ -18,7 +18,7 @@ Five real problems:
 
 ## Confirmed by the reviewer (independent)
 - J1: the client drops ops at 20000 held (MUD_VoxelProbe.c:973-974). Drain applies in seq order (:993-1006). AskJip runs once (:1027-1037). The server sends every batch in one loop (MUD_VoxelNet.c). VERIFIED-CODE.
-- R1: FloorDirty -> EnsureRange -> EnsurePatch has no camera-distance check (MUD_WorldGround.c:3891-3897,
+- R1 (true on f7715c3; FIXED on da37c47 by FLOOR_FREE + FieldDue): FloorDirty -> EnsureRange -> EnsurePatch has no camera-distance check (MUD_WorldGround.c:3891-3897,
   :3148-3175, :3528-3548). VERIFIED-CODE.
 - Rut patches are never freed (:3812-3840) and are not counted in the budget (:973-982). VERIFIED-CODE.
 - The band mesher is on in the prefab (MudWorldGround.et:9). The grid path also draws the rut field. VERIFIED-CODE.

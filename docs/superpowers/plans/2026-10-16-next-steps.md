@@ -8,9 +8,23 @@ One page that merges today's work into BUILDS, each tested in a few COMBINED ses
 - research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md (verdict per claim)
 - results: 2026-10-16-gap-checks.md, -improve-checks.md, -fix-checks.md (its tunnel table is superseded),
   -voxel-crater-slope.md, -mud-look-checks.md
-Nothing in Scripts/ was changed. The user's local scripts are ahead of git: line numbers in the docs are from git
-(f7715c3 code) - check them against the local version before building. Save a checkpoint before each build
-(CLAUDE.md).
+Nothing in Scripts/ was changed by this plan. CODE BASE: the user's branch displaced-ruts-partial-split (da37c47,
+review fixes stages 1-6 + patch memory, results/2026-10-15-review-baseline.md) is merged into this branch
+2026-10-16. Line numbers in the older 2026-10-16 docs are from f7715c3; on da37c47: FLOOR :307, Carve clamp :2724,
+CarveTunnel :3247 (clamp :3283), ColSurf j0 :5048, Receive cap :982, AskJip :1036, TunnelInput :680
+(MUD_VoxelProbe.c); AtGround :4498-4522, Stats :7699, PatchCounts :7653 (MUD_WorldGround.c). Save a checkpoint
+before each build (CLAUDE.md).
+
+**Already built on da37c47 (so the plan below shrinks):**
+| Plan item | Built as | Tested | Still open |
+|---|---|---|---|
+| R1 + far meshes | FLOOR_FREE (frees floor-only patches out of range) + FieldDue (rebuilds them near camera / player / vehicle) + FloorDirty touches existing patches only (no JIP patch storm) | SP, user "worked fine"; freed patches came back on return | MP + late join; memory still rose +170 MB in 3.5 min (run too short) -> PERF |
+| Fewer rut rebuilds (part of S1) | FLOOR_SETTLE: floor-only dirt waits until quiet 0.4 s / max 1.5 s | SP: rebuild ms per rut op ~1/3 of before | MP (robot) |
+| Patch memory | MUD_PatchPress: press arrays only on first write (~39 KB per patch saved) | SP | - |
+| Part of the 10 s line | 'MUD patches' (live / asleep / floor-only / deformed / heights-only / building / lazy / total, mem KB, fps, vehicles moving, settle + free counters) | yes | gated by m_bDebug (Stats) - see the test kit |
+| Rut floor lock same on every machine | F4: m_aEdgeLock (no buildings) in patches, LockAt and bricks | compiled + SP; brick side not exercised | look beside buildings / roads |
+| Hole check covers field ruts | F3: plain + seam points | 0 holes in 1577 plain checks | seam path never run (cross a crater with a rut); 25 'HOLE (plain) ... hit none' at two spots (1039.5 2533.5; 1051-1053 2536) UNRESOLVED |
+| Release switches | OP_LOG, ALLOW_INSTANT_DIG (server-checked) | built | flip before release (master list Lane 2) |
 
 ## Testing rules (user 2026-10-16, also in CLAUDE.md)
 1. **Combined sessions, not single launches.** Every build is tested in at most three sessions, each a checklist of
@@ -43,9 +57,9 @@ The three session types used below:
 ## Build 0 - test kit + baseline (no feature change)
 **Test kit:** one file, behind a TEST_KIT switch that is off for release. It stays through builds 1-3 and is archived
 at release (CLAUDE.md archive rule). It holds:
-- **A 10 s log line:** rebuild queue length, oldest dirty age, builds/s, rut-field patch count, server op count,
-  memory. This extends the existing Stats under m_bDebug (MUD_WorldGround.c:7454-7473), split from the per-patch
-  CheckNew trace.
+- **The 10 s line:** 'MUD patches' exists (table above). Add only: rebuild queue length, oldest dirty age, server
+  op count (m_aOps). It runs inside Stats, which needs m_bDebug - and PERF runs with m_bDebug 0 - so give Stats its
+  own switch (TEST_KIT), split from the per-patch CheckNew trace that m_bDebug also runs.
 - **A voxel FIELD hash per op.** Index + cm-quantised value with a mixing function; log the count of mismatching
   samples. Craters, trenches and tunnels are never compared between machines today.
 - **A fake-rut-op switch:** issue N fake ops.
@@ -63,13 +77,15 @@ at release (CLAUDE.md archive rule). It holds:
 | 5 | Band mesher on / off (replicated switch): ruts and road edges | looks the same -> R2 (off) in build 1 |
 | 6 | Optional, no code: rain + water up / wet drive - are our patches wet, puddles in ruts, mud spray, muddy truck? | notes for build 2 only (mud options E, F) |
 | 7 | Baseline pictures: RPG into a tunnel, crater next to a road, a 1.0 m trench, a level-dug tunnel 20 m long | before / after pictures for build 1 |
+| 8 | Open items from da37c47: drive a rut across a crater (seam hole check); revisit 1039.5 2533.5 and 1051-1053 2536 with the hole check on; ruts beside a building and across patch -> brick by a road (F4 edge lock) | 0 HOLE lines; no step; explains or fixes the 'hit none' spots |
 
 **Session 0-MP** (local DS + 2 peers):
 | # | Do | Pass |
 |---|---|---|
 | 1 | Craters, a trench, a tunnel, then compare field hashes server vs clients | 0 mismatching samples |
 | 2 | Low J1 cap (200) + ~500 fake rut ops, then a late join | expect the stall ('waiting 10 s for op seq') -> the J1 test case for build 1 |
-| 3 | Robot >= 6 runs | snap count baseline |
+| 3 | Robot >= 6 runs | snap count baseline (FLOOR_SETTLE + FLOOR_FREE on: their first MP check) |
+| 4 | Late join after a rutted drive (FLOOR_FREE: patches made only near the joiner) | joins, 'MUD disp hash' equal, rut patches appear near the joiner only |
 
 **Session 0-PERF** (uploaded mod, DS + standalone client, 3-4 trucks off-road, 20 min):
 - Measure fps, worst frames, memory growth, rebuild queue length / age and op count, on the DS and the client.
@@ -81,7 +97,7 @@ at release (CLAUDE.md archive rule). It holds:
 ## Build 1 - MP / scale blockers + crater rewrite + small trench / tunnel fixes (switches per rule 3)
 - **J1:** a joiner never loses an op.
 - **R2:** band mesher off (if 0-WB #5 passed).
-- **R1 + far meshes:** rut patches built only near players; the data is kept everywhere.
+- **R1 + far meshes: BUILT on da37c47** (FLOOR_FREE + FieldDue). Build 1 only fixes what 0-MP / 0-PERF find.
 - **V1** only if 0-WB #1 failed.
 - **R0** only if a game update breaks registration. It is a medium refactor: ~16 typed uses of
   VehicleWheeledSimulation.

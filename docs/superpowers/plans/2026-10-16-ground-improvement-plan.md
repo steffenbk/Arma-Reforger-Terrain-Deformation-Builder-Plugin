@@ -47,6 +47,8 @@ the network policy blocked the source pages).
 - Cost: small. MP: no format change.
 
 ### R1 - the rut field builds only near the camera on clients
+- BUILT 2026-10-16 on the user's branch (da37c47): FLOOR_FREE + FieldDue + FloorDirty touches existing patches only
+  (results/2026-10-15-review-baseline.md Stage 4). SP OK; MP / late join / long-run memory still to test.
 - Problem: FloorDirty -> EnsureRange(.., wheel) -> EnsurePatch builds / wakes the patch synchronously (one per frame,
   ~9-12 ms, MEASURED 2026-10-09) and marks existing patches for mesh + collider rebuilds, with NO distance check
   (VERIFIED-CODE MUD_WorldGround.c:3891-3920, :3144-3175). The old height path skipped far patches (FarFromCamera ->

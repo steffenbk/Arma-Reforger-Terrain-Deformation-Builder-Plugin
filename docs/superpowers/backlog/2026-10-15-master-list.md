@@ -32,6 +32,7 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 | Ground debug off | flip before release: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0). It also gates the 10 s 'MUD patches' / 'MUD world' lines (Stats) |
 | Trench DEBUG_INSTANT | false in MUD_TrenchSite.c:19 (CODE) - user wants it kept as a test option |
 | Client instant dig (review F6) | flip before release: `MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG` true (testing) -> false; server then refuses Ctrl+F instant dig and logs it (2026-10-16) |
+| Debug tunnel key T (plan 2026-10-16, not built yet) | flip before release: `MUD_VoxelProbe.TUNNEL_DEBUG_T` true -> false (T digs with no tool; tunnels then need the shovel mode). User 2026-10-16: keep T on for testing |
 | Per-op log lines (review F5) | flip before release: `MUD_VoxelProbe.OP_LOG` true -> false ('MUD voxel probe' op line, 'MUD rut field', 'MUD rut floor'; ~4/s per vehicle) (2026-10-16) |
 | JIP ask cap | in code: JIP_MAX_ASKS 10 (MUD_WorldGround.c) - check it still applies to voxel JIP |
 | Per-player trench-site cap | DROPPED 2026-10-15 (user: no per-player limit). Only MAX_SITES 20 server-wide |
@@ -49,15 +50,12 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - Crater items from the old list (M1 rim, size by charge, hit-entity check, lip slope): re-check against the voxel
   crater code before working on them.
 
-## Release checklist (before upload for players)
-- MUD_VoxelProbe.TUNNEL_DEBUG_T false (T = debug tunnel key, no tool; user 2026-10-16: on for testing).
-
 ## Parked ideas (not now - add here, don't start)
 - Skip a patch COLLIDER rebuild when the ground moved less than a tolerance since the LAST BUILT collider (mesh
   still rebuilds). Idea from Box2D 'contact recycling' (box2d.org/posts/2026/10/contact-recycling, user 2026-10-16):
   compare against the cached build, never update the cache on a skip (else drift). Must be the same rule on every
   machine. Low value today: rut passes move ~0.08 m (> any useful tolerance). Only if 0-PERF shows collider rebuilds
-  as the cost.
+  as the cost. Note: FLOOR_SETTLE (da37c47) already does the coalescing half of this (one build per quiet window).
 - Keep the terrain + grass over DEEP tunnels (no hole, no surface bricks) - UNVERIFIED (character under an un-holed
   heightfield); research/2026-10-16-deep-tunnels.md section 6.
 - **THE PLAN NOW (2026-10-16, revised after an independent review): docs/superpowers/plans/2026-10-16-next-steps.md**

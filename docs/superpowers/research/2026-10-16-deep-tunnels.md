@@ -4,7 +4,8 @@ User 2026-10-16: "What if we want deep tunnels? I did test and 3 m was not far e
 Status: PLAN ONLY. Nothing in Scripts/ changed. This replaces U1's fixed "FLOOR 6" with a deep-tunnel package.
 **DECIDED (user 2026-10-16): TUNNEL_FLOOR default 5 m for now** ("we don't know how it will behave at 10"). Go to
 10 m only after the section 5 checks pass at 5 m. Everything below is written so 5 -> 10 is one value.
-Labels: VERIFIED-CODE (git f7715c3 line numbers), MEASURED (offline, Tools/), ESTIMATE, UNVERIFIED (needs the game),
+Labels: VERIFIED-CODE (git f7715c3 line numbers; on da37c47 the same code sits at FLOOR :307, Carve clamp :2724,
+CarveTunnel clamp :3283, ColSurf j0 :5048, TunnelInput :680, AtGround :4498-4522 - logic unchanged), MEASURED (offline, Tools/), ESTIMATE, UNVERIFIED (needs the game),
 SOURCE.
 
 ## 1. What stops a tunnel at 3 m today (all VERIFIED-CODE)
