@@ -26,6 +26,15 @@ before each build (CLAUDE.md).
 | Hole check covers field ruts | F3: plain + seam points | 0 holes in 1577 plain checks | seam path never run (cross a crater with a rut); 25 'HOLE (plain) ... hit none' at two spots (1039.5 2533.5; 1051-1053 2536) UNRESOLVED |
 | Release switches | OP_LOG, ALLOW_INSTANT_DIG (server-checked) | built | flip before release (master list Lane 2) |
 
+## How to run it (step by step)
+1. Pull this branch locally: `git pull origin claude/stoic-clarke-uiodzl`. It is your da37c47 work + these docs.
+2. Paste prompts/2026-10-16-build-0-test-kit.md into a local Claude session in the mod folder. It builds the kit in
+   4 stages and stops after each so you can compile.
+3. Run the three sessions below (0-WB, 0-MP, 0-PERF), one launch each, using their checklists. Keep the logs.
+4. Bring the logs (and pictures for 0-WB #7) back here. Hash check: `python Tools/compare_op_hashes.py server.log
+   client.log`. We read the results and decide what Build 1 needs (V1? R2? J1 confirmed).
+5. Decide crater size (decision 2) before Build 1. A Build 1 prompt gets written from the 0-session results.
+
 ## Testing rules (user 2026-10-16, also in CLAUDE.md)
 1. **Combined sessions, not single launches.** Every build is tested in at most three sessions, each a checklist of
    many items, one launch per environment.
@@ -64,7 +73,8 @@ at release (CLAUDE.md archive rule). It holds:
   samples. Craters, trenches and tunnels are never compared between machines today.
 - **A fake-rut-op switch:** issue N fake ops.
 - **A test-only low J1 cap** (e.g. 200 held ops), so the late-join bug shows with ~500 ops instead of 21000.
-- **A server-replicated band-mesher switch.**
+- **Band mesher A/B:** no switch. In WB edit m_bBandMesher in the prefab (one machine). In PERF, use two uploads
+  only if needed.
 - **The robot code back** from the archive.
 
 **Session 0-WB** (one launch, ~45 min checklist):
@@ -74,7 +84,7 @@ at release (CLAUDE.md archive rule). It holds:
 | 2 | Walk out of an 81 mm crater, a Hydra crater, a 1.5 m trench (no jump) | decides T3 (trench exit); a fact for the crater-size decision |
 | 3 | House next to a crater; tunnel under a house; objects (crates, fences) over a new hole | baseline for C7 (today's behaviour, pictures) |
 | 4 | Fresh vanilla truck: `MUD wheels: <id> registered` | smoke check; repeat after every game update (1.9 warned of wheeled-sim changes) |
-| 5 | Band mesher on / off (replicated switch): ruts and road edges | looks the same -> R2 (off) in build 1 |
+| 5 | Band mesher on / off (prefab m_bBandMesher, relaunch): ruts and road edges | looks the same -> R2 (off) in build 1 |
 | 6 | Optional, no code: rain + water up / wet drive - are our patches wet, puddles in ruts, mud spray, muddy truck? | notes for build 2 only (mud options E, F) |
 | 7 | Baseline pictures: RPG into a tunnel, crater next to a road, a 1.0 m trench, a level-dug tunnel 20 m long | before / after pictures for build 1 |
 | 8 | Open items from da37c47: drive a rut across a crater (seam hole check); revisit 1039.5 2533.5 and 1051-1053 2536 with the hole check on; ruts beside a building and across patch -> brick by a road (F4 edge lock) | 0 HOLE lines; no step; explains or fixes the 'hit none' spots |
@@ -89,7 +99,7 @@ at release (CLAUDE.md archive rule). It holds:
 
 **Session 0-PERF** (uploaded mod, DS + standalone client, 3-4 trucks off-road, 20 min):
 - Measure fps, worst frames, memory growth, rebuild queue length / age and op count, on the DS and the client.
-- Compare band mesher on vs off.
+- Band mesher on vs off: only if 0-WB #5 looked the same, as a second upload.
 - Join time with a big op log (21000 fake ops issued BEFORE the joiner and the peers connect, so connected peers
   do not hit the cap).
 - Pass / decides: if the queue drains (rule 4), the rebuild gate can wait. If band off is cheaper, keep it off.
