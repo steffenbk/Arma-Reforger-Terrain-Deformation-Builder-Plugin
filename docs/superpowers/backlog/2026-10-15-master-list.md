@@ -57,6 +57,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   growth and FLOOR 3 m (tunnel roofs <= ~0.8 m) are design-level. Section 4 = one test session, section 5 = fix order.
   FACT CHECK 2026-10-16: docs/superpowers/research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md (+ results/
   2026-10-16-gap-checks.md, Tools/gap_checks.py). New: JIP joiner stalls for good past 20000 held ops.
+  IMPROVEMENT PLAN 2026-10-16: docs/superpowers/plans/2026-10-16-ground-improvement-plan.md - Phase 0 game checks,
+  then MP fixes (J1 JIP never drops ops, R1 rut-field camera gate, R2 band mesher off, V1 bullet slab), shape fixes
+  (crater bowl / stack / road fade / blast under roof, trench pad + parapet, tunnel floor + level dig, rut radius),
+  scale (rut snapshot JIP). Fixes measured offline: results/2026-10-16-improve-checks.md.
 - Rut field cost (LOG 2026-10-15 23:16: ~20 ms per rut op, mesher run twice per patch = 53%): shared build tried
   and reverted (6% hit, mud-gotchas). Next idea: schedule a patch's collider right after its mesh, then share.
 - DISPLACED RUTS (2026-10-15, offline MEASURED): ruts as a 2D rut-floor grid (0.25 m) that pulls the split 0.5 m voxel
