@@ -175,6 +175,8 @@ the network policy blocked the source pages).
   planner; or nothing if soldiers can climb out in game.
 
 ### U1 - tunnels may go deeper (FLOOR per op kind, depth boxes read)
+- SUPERSEDED 2026-10-16 (user: 3 m is not far enough): the deep-tunnel package in research/2026-10-16-deep-tunnels.md
+  (TUNNEL_FLOOR ~10 m, clamp fix, sea-level guard, AtGround / ColSurf, dig slope cap, shovel + rate).
 - Problem: VERIFIED-CODE: FLOOR 3 m for everything; MEASURED: a full-height tunnel under it has a 0.45-0.87 m roof
   (1-2 solid samples). Real references (READ): Cu Chi levels ~4 / ~6 / 7-10 m deep; WWI dugouts 1.8-9 m, an
   "ordinary" one ~2 m of earth on top.

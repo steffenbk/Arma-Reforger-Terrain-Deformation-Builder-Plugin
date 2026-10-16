@@ -48,6 +48,8 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- Keep the terrain + grass over DEEP tunnels (no hole, no surface bricks) - UNVERIFIED (character under an un-holed
+  heightfield); research/2026-10-16-deep-tunnels.md section 6.
 - **THE PLAN NOW (2026-10-16, revised after an independent review): docs/superpowers/plans/2026-10-16-next-steps.md**
   - build 0 test kit + baseline, build 1 MP / scale blockers + crater rewrite + trench / tunnel fixes, build 2 long
   matches (J2, C7), build 3 mud look. Needs user decisions (section end). Review + answers:
