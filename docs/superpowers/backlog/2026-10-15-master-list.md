@@ -48,8 +48,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
-- **THE PLAN NOW (2026-10-16): docs/superpowers/plans/2026-10-16-next-steps.md** - one test session, then MP / scale
-  blockers, crater rewrite, trenches + tunnels, ruts + mud look, long matches. Needs user decisions (section end).
+- **THE PLAN NOW (2026-10-16, revised after an independent review): docs/superpowers/plans/2026-10-16-next-steps.md**
+  - build 0 test kit + baseline, build 1 MP / scale blockers + crater rewrite + trench / tunnel fixes, build 2 long
+  matches (J2, C7), build 3 mud look. Needs user decisions (section end). Review + answers:
+  research/2026-10-16-plan-review-second-opinion.md.
 - FULL OPTIONS REVIEW 2026-10-16 (ruts / craters / trenches / tunnels / more, every untested item with an ID):
   docs/superpowers/research/2026-10-16-ground-options-full-review.md. Its section 6A lists 6 cheap RISK checks on
   shipped code (bullets through voxel walls, voxel ops ignore the building lock, nothing wakes objects over new

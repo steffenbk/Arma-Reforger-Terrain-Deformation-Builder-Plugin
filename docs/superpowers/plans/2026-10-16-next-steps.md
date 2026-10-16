@@ -1,94 +1,178 @@
-# The plan now: ruts, craters, trenches, tunnels (2026-10-16)
+# The plan now: ruts, craters, trenches, tunnels (2026-10-16, revised after the second opinion)
 
 One page that merges today's work into BUILDS, each tested in a few COMBINED sessions. Details and evidence stay in:
 - plans/2026-10-16-ground-improvement-plan.md (items J1, R0-R5, V1, C1-C7, T1-T3, U1-U3, J2, S1 - problem / change /
   why each)
+- research/2026-10-16-plan-review-second-opinion.md (independent review of this page + answers; what changed and why)
 - research/2026-10-16-soft-mud-alternatives.md (mud look options A-K, the MudRunner look)
 - research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md (verdict per claim)
 - results: 2026-10-16-gap-checks.md, -improve-checks.md, -fix-checks.md (its tunnel table is superseded),
   -voxel-crater-slope.md, -mud-look-checks.md
 Nothing in Scripts/ was changed. The user's local scripts are ahead of git: line numbers in the docs are from git
-(f7715c3 code) - check them against the local version before building.
+(f7715c3 code) - check them against the local version before building. Save a checkpoint before each build
+(CLAUDE.md).
 
 ## Testing rules (user 2026-10-16, also in CLAUDE.md)
 1. **Combined sessions, not single launches.** Every build is tested in at most three sessions, each a checklist of
    many items, one launch per environment.
-2. **No performance numbers from Workbench.** Workbench = function and look only (it does not run like the game:
-   WB-only fps swings were already seen 2026-10-15, and a WB host stalls when its window is not in front, PROVEN
-   2026-10-11). Performance (fps, ms, memory, queue lengths, join time) = the uploaded mod on a dedicated server and /
-   or the standalone game client.
-3. Every new behaviour sits behind a switch, so one build can A/B inside one session.
+2. **No performance numbers from Workbench.** Workbench = function and look only. Reasons: WB-only fps swings were
+   seen 2026-10-15, and a WB host stalls when its window is not in front (PROVEN 2026-10-11).
+   Performance means fps, ms, memory, queue lengths and join time. Measure it with the uploaded mod on a dedicated
+   server and / or the standalone game client:
+   - The DS runs `-maxFPS 60`, on its own machine if possible.
+   - Use release prefab values (m_bDebug 0).
+3. **A/B switches must be the same on every machine.**
+   - A switch that changes an op's result (crater shape, trench width, tunnel floor / level) goes INTO the op as a
+     version field. The server writes it.
+   - A switch that changes colliders or the look (band mesher, rut look) is replicated from the server.
+   - Never a per-machine file or const: it forks the field or gives false snaps.
+   - Today's switches are `static const` (MUD_VoxelProbe.c:204-338), so changing one needs a rebuild.
+4. **Pass / fail numbers are set before the session.**
+   - Robot snaps: ≤ 1.5x the baseline, ≥ 6 runs each.
+   - Queue: the queue at 20 min ≤ the queue at 2 min, and the oldest dirty age < 10 s.
+   - Hashes: 0 mismatching samples.
+   - Robot snaps in MP sessions run on WB peer clients, so they count as zero-vs-many only, not performance.
 
 The three session types used below:
 | Session | Where | Checks | Never |
 |---|---|---|---|
 | **WB** | Workbench play, SP, one launch | does it work, does it look right, logs say the right thing | any ms / fps / memory number |
-| **MP** | local dedicated server + peer clients (robot code restored from the archive, CLAUDE.md test setup) | same result on every machine (hashes), late join, robot snap COUNTS (>= 6 runs per setting) | fps / ms judgements |
-| **PERF** | the mod uploaded; dedicated server (ideally not on the playing PC) + the standalone game client | fps, frame times, memory over time, rebuild queue, join time, many vehicles | Workbench numbers |
+| **MP** | local dedicated server + peer clients (CLAUDE.md test setup, robot from the test kit) | field hashes equal on every machine, late join, robot snap COUNTS (>= 6 runs per setting) | fps / ms / join-time judgements |
+| **PERF** | the mod uploaded; dedicated server (`-maxFPS 60`, ideally not the playing PC) + the standalone game client; 3-4 trucks driven by AI waypoints or friends (decide before the session) | fps, frame times, memory over time, rebuild queue, op count, join time | Workbench numbers |
 
 ## Build 0 - test kit + baseline (no feature change)
-Code (small, behind switches, archived after, CLAUDE.md rule): a 10 s log line (rebuild queue length, oldest dirty age,
-builds/s, rut-field patch count, memory); a voxel FIELD hash per op (craters / trenches / tunnels are never compared
-between machines today); a switch issuing N fake rut ops (JIP size test); a RUNTIME switch for the band mesher (so the
-PERF session can compare without a second upload - e.g. a value read once from a profile file); the robot code back.
+**Test kit:** one file, behind a TEST_KIT switch that is off for release. It stays through builds 1-3 and is archived
+at release (CLAUDE.md archive rule). It holds:
+- **A 10 s log line:** rebuild queue length, oldest dirty age, builds/s, rut-field patch count, server op count,
+  memory. This extends the existing Stats under m_bDebug (MUD_WorldGround.c:7454-7473), split from the per-patch
+  CheckNew trace.
+- **A voxel FIELD hash per op.** Index + cm-quantised value with a mixing function; log the count of mismatching
+  samples. Craters, trenches and tunnels are never compared between machines today.
+- **A fake-rut-op switch:** issue N fake ops.
+- **A test-only low J1 cap** (e.g. 200 held ops), so the late-join bug shows with ~500 ops instead of 21000.
+- **A server-replicated band-mesher switch.**
+- **The robot code back** from the archive.
 
 **Session 0-WB** (one launch, ~45 min checklist):
 | # | Do | Pass / what it decides |
 |---|---|---|
-| 1 | Shoot into a voxel crater rim, a trench parapet, flat voxel ground | rounds stop -> no V1 |
-| 2 | Walk out of an 81 mm crater, a Hydra crater, a 1.5 m trench (no jump) | decides crater-rewrite urgency, trench exits |
-| 3 | Fresh vanilla truck: `MUD wheels: <id> registered` | missing -> R0 in build 1 |
-| 4 | Band mesher on / off (runtime switch): ruts and road edges | looks the same -> R2 (off) in build 1 |
-| 5 | Rain + water accumulation up: our patches / bricks wet, puddles in ruts? | mud option E free? |
-| 6 | Wet weather drive: mud spray instead of dust? truck gets muddy? | mud option F free? |
-| 7 | Archived radius probe: tyre sinks, body drops? | mud option H |
-| 8 | Baseline pictures: RPG into a tunnel, crater next to a road and a house, a 1.0 m trench, a level-dug tunnel | before / after pictures for build 1 |
+| 1 | Fire with several calibres: grazing fire over a trench lip; down through a tunnel roof from the surface; at tunnel walls from inside; into a voxel crater rim; at flat voxel ground | rounds stop -> no V1; through -> V1 (note: V1's slab covers the top only, not tunnel walls / roofs) |
+| 2 | Walk out of an 81 mm crater, a Hydra crater, a 1.5 m trench (no jump) | decides T3 (trench exit); a fact for the crater-size decision |
+| 3 | House next to a crater; tunnel under a house; objects (crates, fences) over a new hole | baseline for C7 (today's behaviour, pictures) |
+| 4 | Fresh vanilla truck: `MUD wheels: <id> registered` | smoke check; repeat after every game update (1.9 warned of wheeled-sim changes) |
+| 5 | Band mesher on / off (replicated switch): ruts and road edges | looks the same -> R2 (off) in build 1 |
+| 6 | Optional, no code: rain + water up / wet drive - are our patches wet, puddles in ruts, mud spray, muddy truck? | notes for build 2 only (mud options E, F) |
+| 7 | Baseline pictures: RPG into a tunnel, crater next to a road, a 1.0 m trench, a level-dug tunnel 20 m long | before / after pictures for build 1 |
 
 **Session 0-MP** (local DS + 2 peers):
 | # | Do | Pass |
 |---|---|---|
-| 1 | Craters, a trench, a tunnel, then compare field hashes server vs clients | all equal |
-| 2 | 21000 fake rut ops, then a late join | expect the stall ('waiting 10 s for op seq') -> J1 confirmed |
-| 3 | Robot >= 6 runs | snap count baseline for build 1 |
+| 1 | Craters, a trench, a tunnel, then compare field hashes server vs clients | 0 mismatching samples |
+| 2 | Low J1 cap (200) + ~500 fake rut ops, then a late join | expect the stall ('waiting 10 s for op seq') -> the J1 test case for build 1 |
+| 3 | Robot >= 6 runs | snap count baseline |
 
 **Session 0-PERF** (uploaded mod, DS + standalone client, 3-4 trucks off-road, 20 min):
-fps, worst frames, memory growth, rebuild queue length / age (DS and client), band mesher on vs off (runtime switch).
-Pass / decides: queue drains -> the rebuild gate can wait; band off cheaper -> keep off.
+- Measure fps, worst frames, memory growth, rebuild queue length / age and op count, on the DS and the client.
+- Compare band mesher on vs off.
+- Join time with a big op log (21000 fake ops issued BEFORE the joiner and the peers connect, so connected peers
+  do not hit the cap).
+- Pass / decides: if the queue drains (rule 4), the rebuild gate can wait. If band off is cheaper, keep it off.
 
-## Build 1 - MP / scale blockers + crater rewrite + small trench / tunnel fixes (all behind switches)
-J1 (joiner never loses an op), R2 (band mesher off, if 0-WB #4 passed), R1 + far meshes (rut patches only near players,
-data kept everywhere), R0 / V1 only if 0-WB #3 / #1 failed; crater rewrite (cosine bowl + road fade max(1, 1.7 x depth)
-+ stack cap + sphere under a roof + server jitter in the op; crater SIZE per your decision); T1 trench pad 0.25 m;
-U2 level digging; U1 tunnel FLOOR 6 m.
+## Build 1 - MP / scale blockers + crater rewrite + small trench / tunnel fixes (switches per rule 3)
+- **J1:** a joiner never loses an op.
+- **R2:** band mesher off (if 0-WB #5 passed).
+- **R1 + far meshes:** rut patches built only near players; the data is kept everywhere.
+- **V1** only if 0-WB #1 failed.
+- **R0** only if a game update breaks registration. It is a medium refactor: ~16 typed uses of
+  VehicleWheeledSimulation.
+- **Crater rewrite:**
+  - cosine bowl;
+  - road fade max(1, 1.7 x depth);
+  - stack cap;
+  - sphere under a roof;
+  - server jitter in the op;
+  - SIZE per decision 2.
+- **T1:** wider trench floors. Change the WidthOf table (same as a 0.25 m pad); the drawn floor still varies ±0.15 m
+  with grid position. FillTrench must match.
+- **U2:** level digging. It still sinks ~3.5 cm per m (MEASURED), so add a small lift or hold the start depth.
+- **U1:** tunnel FLOOR 6 m. The Carve / sphere / tunnel clamp must become "no NEW air below the floor"
+  (`d = max(d, min(old, floorY - y))`). Otherwise a crater inside a deep tunnel refills it (MEASURED: 81 of 218 air
+  samples).
+- **T needs a shovel + a slower rate** (if decision 3 = yes). This comes with U1: without it, T digs 6 m shafts.
 
-**Session 1-WB:** walk out of every crater size; crater next to a road and a house; repeated shelling of one spot; RPG
-in a tunnel; trench widths 0.5-2.0 m (floor drawn as planned); dig a tunnel looking ahead (stays level) and one 4 m
-deep (thick roof); ruts look with band off; far ruts appear when you drive back to them. Compare with 0-WB #8 pictures.
-**Session 1-MP:** field hashes after all op kinds; late join after 21000 fake ops + craters (joins, hashes equal); robot
->= 6 runs vs the 0-MP baseline.
-**Session 1-PERF:** same 20 min drive as 0-PERF + a shelling minute: fps, memory, queue, join time vs build 0.
+**Session 1-WB:**
+- Walk out of every crater size, and compare the crater presets side by side (attributes only).
+- Crater next to a road and a house; repeated shelling of one spot.
+- RPG in a tunnel, including a 4 m deep tunnel: it must not refill.
+- Trench widths 0.5-2.0 m.
+- A 20 m level tunnel: feet depth start vs end within 0.2 m.
+- A 4 m tunnel: the roof is about feet depth - 2.5 m.
+- Blast cover ('MUD cover' lines) in a voxel crater.
+- MAX_COLUMNS set to 40: what happens after the cap? Decide the policy.
+- Ruts look with band off; far ruts appear when you drive back.
+- Compare with the 0-WB #7 pictures.
 
-## Build 2 - the MudRunner look on the rut field + trench / tunnel extras
-Rut radius by depth; ridges + bow wave + gradual press in the rut op (felt); texture drag, wet-mud material on fresh
-ruts, slump near the camera (client-only look); whatever 0-WB #5-7 proved free (puddles, mud spray / muddy trucks,
-wheel sink); clods and decals if wanted; T2 spoil parapet, T3 trench exit, U3 tunnel roof guard + collapse rules.
-Both rut shapes behind a switch (tyre-width vs wide soft + drawn groove) so one session compares them.
+**Session 1-MP:**
+- Field hashes after all op kinds, also on a Linux DS (the Carve maths changed).
+- Late join with the low cap + 500 fake ops + craters: it joins and hashes are equal.
+- Robot >= 6 runs vs the 0-MP baseline (rule 4).
 
-**Session 2-WB:** look checklist: ruts in grass / dirt / wet weather, both rut shapes, texture drag, slump, ridges from
-the driver seat and from outside, parapet, trench exit, tunnel roof rules.
-**Session 2-MP:** hashes (ridges are replicated), robot >= 6 runs for each rut shape, late join.
-**Session 2-PERF:** 20 min drive in wet weather with 3-4 trucks, all look features on vs off.
+**Session 1-PERF:** the same 20 min drive as 0-PERF + a shelling minute, compared with build 0:
+- fps and memory;
+- queue and op count;
+- join time with the big log;
+- hitches when driving back to far ruts (R1 rebuilds one patch per frame).
 
-## Build 3 - long matches
-J2 rut snapshot JIP (prerequisites: floor stored in cm on every machine, FillTrench not reading the rut floor, snapshot
-loaded after the voxel ops), S1 server rebuild gate if 1-PERF still shows the queue growing, C7 buildings + objects
-over new holes.
-**Session 3-PERF (on a hosted DS):** a 1-2 hour session with several players and vehicles, late joins every 20 min:
-join time, memory, fps over time. **Session 3-MP:** joiner hashes vs server after the long session.
+## Build 2 (proposed: was build 3) - long matches and shipped-feature fixes
+Before new look work: these fix shipped features, and the J2 format must be fixed before build 3 adds ridge data to
+the rut op.
+- **J2 rut snapshot JIP.** Prerequisites:
+  - the floor is stored in cm on every machine;
+  - FillTrench does not read the rut floor (it does today, via ColumnDepth -> FloorMin);
+  - the snapshot is loaded after the voxel ops.
+  - Reason: J1 alone still replays ~165 s for 21000 ops (ESTIMATE).
+- **S1:** a server rebuild gate, if 1-PERF still shows the queue growing.
+- **C7:** buildings and objects over new holes.
 
-## Decisions needed before Build 1
-1. Feature freeze: builds 0-1 fix shipped features; build 2 is new look work - go now or later?
-2. Crater size: today's game craters (81 mm: 1.43 m deep, 6.3 m across) or a realistic preset (~0.47 m, ~2.1 m).
-3. Tunnels: should T need a shovel like F?
-4. Rut shape for build 2: tyre-width (sheet look, wheel-feel risk) vs wide soft + drawn groove - or both behind a switch
-   (the plan above assumes both).
+**Session 2-WB:** repeat the 0-WB #3 checks (house / tunnel under house / objects) vs the baseline pictures.
+
+**Session 2-PERF (on a hosted DS):** 1-2 hours with several players and vehicles, late joins every 20 min. Measure join
+time, memory, op count and fps over time.
+
+**Session 2-MP:** compare joiner hashes with the server after the long session.
+
+## Build 3 (proposed: was build 2) - the MudRunner look + trench / tunnel extras
+- **Wide felt rut** (R3: radius = max(0.5, cap / 0.58)).
+- **Tyre groove + ridges + bow wave:** a client-only look channel a few cm deep, with a cap. This is the planner's and
+  reviewer's pick for decision 4. A felt tyre-width rut is tried only if the look channel fails.
+- **Look only:** texture drag, a wet-mud material on fresh ruts, slump near the camera.
+- **Whatever 0-WB #6 showed is free:** puddles, mud spray, muddy trucks.
+- **Wheel sink:** restore the radius probe only now.
+- **Clods and decals,** if wanted.
+- **T2** spoil parapet, **T3** trench exit (if 0-WB #2 says it is needed), **U3** tunnel roof guard + collapse rules.
+  ROOF_MIN uses feet depth - 2.5 m.
+
+**Session 3-WB:** look checklist:
+- ruts in grass / dirt / wet weather;
+- texture drag, slump;
+- the groove and ridges from the driver seat and from outside;
+- parapet, trench exit, tunnel roof rules.
+
+**Session 3-MP:**
+- hashes;
+- robot >= 6 runs, which must stay ≤ 1.5x the build 2 count;
+- late join.
+
+**Session 3-PERF:** a 20 min drive in wet weather with 3-4 trucks, all look features on vs off.
+
+## Decisions needed before Build 1 (with the review's recommendation)
+1. **Feature freeze / order.** Recommended (planner + reviewer): builds 0-1 now, then J2 + C7 (new build 2), then the
+   mud look later (new build 3).
+2. **Crater size:**
+   - today's craters: 81 mm 1.43 m deep, 6.3 m across;
+   - a realistic preset: ~0.47 m deep, ~2.1 m across. It is only ~4 voxel samples wide, so little cover;
+   - a middle preset: perKg 0.8, power 0.45 -> 81 mm 0.80 m deep, ~3.3 m crest. All three are attribute values, so
+     they can be compared in 1-WB.
+3. **Tunnels:** should T need a shovel and dig slower? Recommended: yes. With U1, T could otherwise dig 6 m shafts at
+   ~4 m³ per click.
+4. **Rut shape.** Recommended: the wide felt rut + a drawn client-only groove. Don't build both.

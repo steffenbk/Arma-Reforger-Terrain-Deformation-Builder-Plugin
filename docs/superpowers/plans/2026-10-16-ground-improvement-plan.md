@@ -6,6 +6,7 @@ Status: PLAN ONLY - nothing built. Feature freeze (master list 2026-10-15) still
 features (they protect what exists); the user decides which go in now.
 
 Built on (read these for the evidence):
+- research/2026-10-16-plan-review-second-opinion.md (independent review 2026-10-16: corrections to U1, U2, T1, R0 marked CORRECTION below)
 - research/2026-10-16-fact-check-ruts-craters-trenches-tunnels.md (verdict per claim)
 - results/2026-10-16-gap-checks.md (problems, measured offline) - Tools/gap_checks.py
 - results/2026-10-16-improve-checks.md (the fixes below, measured offline) - Tools/improve_checks.py
@@ -85,6 +86,10 @@ the network policy blocked the source pages).
 - Change: MUD_Wheels.Register and the two casts also accept the SA class behind one helper. The script API lists
   VehicleWheeledSimulation_SA_B (READ); check in Workbench that it has WheelCount / WheelHasContact /
   WheelGetContactPosition before relying on it. Verify: the log line, a rut, the robot.
+- CORRECTION (second opinion 2026-10-16): not "one helper + two casts". VehicleWheeledSimulation is a typed parameter
+  in 13 places in MUD_WorldGround.c (+2 MudSheet, +1 GroundEntity), and the API snippet says SA_B inherits
+  VehicleBaseSimulation (a sibling class). If needed, R0 is a medium refactor. Today trucks register (every robot run),
+  so this is a smoke check after game updates.
 
 ## 3. Phase 2 - shape fixes (each is one function on the op path; deterministic)
 
@@ -148,6 +153,9 @@ the network policy blocked the source pages).
 - Change: CutTrench / FillTrench treat a column as inside when it is within half a sample (0.25 m) of the piece
   (OutsideDist - 0.25). Same layout math, same on every machine.
 - Why: MEASURED: with a 0.25 m pad the drawn floor = plan within +0.10 m for all four widths.
+- CORRECTION (second opinion 2026-10-16): that is the MEAN. Per grid offset the spread stays ±0.15 m (1.0 m plan +
+  pad: 0.92-1.22 m). A 0.25 m pad gives exactly the same numbers as planning 0.5 m wider (pad 0.25 / 1.0 m = pad 0 /
+  1.5 m), so changing the WidthOf table is the simpler form.
 
 ### T2 - spoil parapet (trenches give the dug earth back as cover)
 - Problem: VERIFIED-CODE: CutTrench only lowers; no parapet. Doctrine (READ): fighting positions use the spoil for
@@ -173,6 +181,15 @@ the network policy blocked the source pages).
 - Change: CarveTunnel uses TUNNEL_FLOOR 6 m (craters / trenches keep 3); a column's floor also reads
   MUD_DepthBoxEntity.DepthAt (placed entities: same everywhere). Rows below are made lazily already (Put).
 - Why: MEASURED with FLOOR 6: a tunnel dug to 4 m gets a 2.1-2.4 m roof, to 5 m 2.8-3.1 m.
+  CORRECTION (second opinion 2026-10-16, MEASURED: Tools/plan_review_checks.py trace): those labels are the "dig to"
+  target. The feet overshoot it: target 3 -> feet 3.6-4.2 m, target 4 -> 4.3-4.9 m. Read the roof as feet depth
+  - ~2.5 m.
+- MUST come with: Carve / CarveTunnel / the C4 sphere clamp `if (floorY - y > d) d = floorY - y` (MUD_VoxelProbe.c
+  :2714, :3272) forces SOLID below undug - FLOOR. So a crater (FLOOR 3) inside a FLOOR-6 tunnel refills it (MEASURED:
+  81 of 218 air samples, plan_review_checks.py refill). Change it to "no NEW air below the floor":
+  `d = max(d, min(old, floorY - y))`.
+- MUST come with: T needs a shovel + a slower rate (decision 3). Today the server checks only on foot, range and a
+  250 ms rate (VERIFIED-CODE MUD_VoxelNet.c), so with FLOOR 6 one player digs a 6 m shaft in seconds.
 - Cost: more brick rows under tunnels only (memory per tunnel up; MAX_COLUMNS unchanged).
 
 ### U2 - "look straight ahead" digs level
@@ -181,6 +198,8 @@ the network policy blocked the source pages).
   at the floor, which is why every tunnel has the thin roof.
 - Change: TUNNEL_MID 0.95 -> 1.25 (capsule bottom at the feet at pitch 0); look down to go down, up to go up.
 - Why: tunnels stay at the depth the player chose; with U1 that is the roof the player chose.
+- CORRECTION (2026-10-16, MEASURED: plan_review_checks.py trace): with TUNNEL_MID 1.25 the feet still sink ~3.5 cm
+  per m (3.2 -> 3.53 m over ~9 m). Add a small lift or hold the start depth; check over 20 m.
 
 ### U3 - roof guard + collapse rules (after U1 + U2)
 - From research/2026-10-15-voxel-stability-and-optimisation.md: server dig-time guard (refuse / open a capsule that
