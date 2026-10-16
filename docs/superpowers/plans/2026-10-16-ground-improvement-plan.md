@@ -18,7 +18,9 @@ the network policy blocked the source pages).
 2. Ground never changes under or just ahead of a moving tyre (RUT_BEHIND, PROVEN v035 0 corrections / 90 s).
 3. Every op is deterministic: values that differ per machine (random, camera, live entities, timing) are decided by
    the SERVER and carried in the op text; clients only replay. JIP replays the same text.
-4. Measure before and after: offline first (Tools/), then SP log, then the MP robot (>= 6 runs per setting).
+4. Measure before and after: offline first (Tools/), then the combined test sessions in plans/2026-10-16-next-steps.md
+   (Workbench = function / look only; performance only on a dedicated server or the standalone game - user 2026-10-16).
+   The per-item 'Verify' lines below are folded into those sessions.
 5. Checkpoint before each item (mud_backups/checkpoint.ps1); one switch per item so it can be turned off.
 
 ## 1. Phase 0 - five game checks before any code (one session; they decide what Phase 1 needs)
