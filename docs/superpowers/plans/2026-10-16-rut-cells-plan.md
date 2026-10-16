@@ -1,5 +1,8 @@
 # Rut cells - build + test plan (2026-10-16)
 
+Where it sits in the overall plan (2026-10-16): plans/2026-10-16-next-steps.md - Stage 0 = session 0-WB #5 +
+0-PERF; Stages 2-6 = Build 1 if 0-PERF shows the rut cost is still too high after FLOOR_SETTLE.
+
 User picked option A (research/2026-10-15-rut-cells-deep-dive.md, design A1). Ruts get their own small tiles: a 2 m
 skin cell the rut floor reaches becomes a RUT cell, the patch skips it (as it skips VOX cells) and a light "rut layer"
 per patch draws it from base ground + rut floor. A rut op then rebuilds a few small tiles, not whole 8 m patches.

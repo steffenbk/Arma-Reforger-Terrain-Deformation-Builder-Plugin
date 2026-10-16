@@ -26,6 +26,17 @@ before each build (CLAUDE.md).
 | Hole check covers field ruts | F3: plain + seam points | 0 holes in 1577 plain checks | seam path never run (cross a crater with a rut); 25 'HOLE (plain) ... hit none' at two spots (1039.5 2533.5; 1051-1053 2536) UNRESOLVED |
 | Release switches | OP_LOG, ALLOW_INSTANT_DIG (server-checked) | built | flip before release (master list Lane 2) |
 
+## The other plans and prompts - how they fit (2026-10-16)
+| Doc (made in the other session) | Status | Where it goes in this plan |
+|---|---|---|
+| prompts/2026-10-15-review-fixes.md (F1-F6) | Stages 1-6 built (da37c47); **Stage 7 MP gate not run** | Session 0-MP #3 + #4 IS that gate |
+| prompts/2026-10-15-patch-memory.md | Stages 0-2 built (= review Stages 0, 3, 4); **Stage 3 MP gate not run** | Session 0-MP #4 + the 0-PERF memory curve |
+| plans/2026-10-16-rut-cells-plan.md (user picked option A) | not started | Stage 0 (grid mesher A/B) = 0-WB #5 + the 0-PERF band on / off; Stage 1 (offline proto) can run any time; Stages 2-6 = Build 1 **if** 0-PERF still shows rut rebuild cost too high after FLOOR_SETTLE (3-4 trucks); the rut layer is also where Build 3's look goes (0.125 m tiles keep the flat tyre floor that 0.25 m loses - results/2026-10-16-mud-look-checks.md) |
+| research/2026-10-16-soil-rut-literature.md (SCM-lite) | design only | Build 3 felt rut shape: load-based depth + "each pass cuts a share of what is left" (= R4) + bulldozed ridges + angle-of-repose relax (caps rut walls - may replace R3's wider RUT_R). Offline proto first (its section 5) |
+| research/2026-10-15-ida-rut-questions.md (answers 5b-13) | facts | 0-WB #9 (grass standing in ruts); Build 3: a "rut / mud" game material on the rut layer = slip in ruts on every machine |
+| research/2026-10-16-custom-shaders.md | facts: no custom shaders | nothing changes: the mud look options already assumed none. MaterialBlendUseTerrainDistance test unresolved - stays parked |
+| research/2026-10-15-rut-options-round2.md, -rut-cells-deep-dive.md | background for rut cells | via the rut cells plan |
+
 ## How to run it (step by step)
 1. Pull this branch locally: `git pull origin claude/stoic-clarke-uiodzl`. It is your da37c47 work + these docs.
 2. Paste prompts/2026-10-16-build-0-test-kit.md into a local Claude session in the mod folder. It builds the kit in
@@ -86,6 +97,7 @@ at release (CLAUDE.md archive rule). It holds:
 | 4 | Fresh vanilla truck: `MUD wheels: <id> registered` | smoke check; repeat after every game update (1.9 warned of wheeled-sim changes) |
 | 5 | Band mesher on / off (prefab m_bBandMesher, relaunch): ruts and road edges | looks the same -> R2 (off) in build 1 |
 | 6 | Optional, no code: rain + water up / wet drive - are our patches wet, puddles in ruts, mud spray, muddy truck? | notes for build 2 only (mud options E, F) |
+| 9 | Look along a rut at low angle on grass (IDA answer 2-bis: grass is planted at heightmap height) | grass stands in ruts -> rut cells' ClutterOccluder prefab (Build 3) or AffectFoliage |
 | 7 | Baseline pictures: RPG into a tunnel, crater next to a road, a 1.0 m trench, a level-dug tunnel 20 m long | before / after pictures for build 1 |
 | 8 | Open items from da37c47: drive a rut across a crater (seam hole check); revisit 1039.5 2533.5 and 1051-1053 2536 with the hole check on; ruts beside a building and across patch -> brick by a road (F4 edge lock) | 0 HOLE lines; no step; explains or fixes the 'hit none' spots |
 
@@ -108,6 +120,9 @@ at release (CLAUDE.md archive rule). It holds:
 - **J1:** a joiner never loses an op.
 - **R2:** band mesher off (if 0-WB #5 passed).
 - **R1 + far meshes: BUILT on da37c47** (FLOOR_FREE + FieldDue). Build 1 only fixes what 0-MP / 0-PERF find.
+- **Rut cells (plans/2026-10-16-rut-cells-plan.md Stages 2-6), only if** 0-PERF shows rut rebuilds still too
+  costly with 3-4 trucks after FLOOR_SETTLE. Behind RUT_CELLS (false = today). Its Stage 1 offline proto can be
+  done before, without the game.
 - **V1** only if 0-WB #1 failed.
 - **R0** only if a game update breaks registration. It is a medium refactor: ~16 typed uses of
   VehicleWheeledSimulation.
@@ -176,7 +191,11 @@ time, memory, op count and fps over time.
 **Session 2-MP:** compare joiner hashes with the server after the long session.
 
 ## Build 3 (proposed: was build 2) - the MudRunner look + trench / tunnel extras
-- **Wide felt rut** (R3: radius = max(0.5, cap / 0.58)).
+- **Felt rut shape = SCM-lite** (research/2026-10-16-soil-rut-literature.md section 4, offline proto first):
+  load-based depth, each pass cuts a share of what is left, bulldozed ridges, angle-of-repose relax for the walls.
+  Fallback if the relax is not enough: R3's wider rut (radius = max(0.5, cap / 0.58)).
+- **Drawn on the rut layer** if rut cells were built (0.125 m tiles keep the tyre's flat floor); a "rut / mud" game
+  material on that layer for slip; ClutterOccluder on its prefab if grass stands in ruts (0-WB #9).
 - **Tyre groove + ridges + bow wave:** a client-only look channel a few cm deep, with a cap. This is the planner's and
   reviewer's pick for decision 4. A felt tyre-width rut is tried only if the look channel fails.
 - **Look only:** texture drag, a wet-mud material on fresh ruts, slump near the camera.
