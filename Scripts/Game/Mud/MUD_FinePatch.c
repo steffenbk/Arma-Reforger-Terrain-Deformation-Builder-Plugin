@@ -32,6 +32,7 @@ class MUD_FinePatch
 	ref MUD_PatchPress m_Press;
 	bool m_bColValid;          // m_aColH is the live body (false: no body yet, asleep, or it failed)
 	int m_aCell[16];            // per skin cell (4 x 4): -1 = kept terrain, else slot | TLBR
+	int m_iRutMud;              // Build 3 Stage 4: rut mud cell mask of the last grid collider (-1 = no slot free; debug line on change)
 	float m_aCellSoft[16];      // 0 = hard (no ruts, no shovel) .. 1 = soft
 	int m_aCellHard[16];        // 1 = hard game material (int: a fresh bool array reads true)
 	ref array<ResourceName> m_aMats = {};   // collider surfaces, at most MUD_WorldGroundEntity.MAT_SLOTS
@@ -45,6 +46,7 @@ class MUD_FinePatch
 	bool m_bMeshDirty;
 	bool m_bColDirty;
 	bool m_bQueued;             // key is in MUD_WorldGroundEntity.m_aDirty
+	float m_fQueuedAt;          // m_fTime it entered m_aDirty (test kit 10 s line: oldest dirty age)
 	bool m_bDeformed;           // some vertex moved: kept for the match, sent to joiners
 	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - may sleep, freed out of range (FLOOR_FREE); NOT sent / hashed
 	bool m_bFloorWait;          // RUT FIELD settle (MUD_WorldGroundEntity.FLOOR_SETTLE): only floor dirt, held until quiet
@@ -243,6 +245,8 @@ class MUD_FineBuffers
 	int m_aMeshIdx[6144];       // m_aIndices with kept-terrain cells collapsed to a point
 	int m_aShellIdx[6144];      // m_aIndices with the winding reversed
 	int m_aCellSlot[1024];      // collider slot per fine cell, -1 = kept terrain
+	ref MUD_IdxList m_RutRest = new MUD_IdxList();  // Build 3 Stage 4: one slot list without its rut mud cells
+	ref MUD_IdxList m_RutMud = new MUD_IdxList();   // Build 3 Stage 4: rut mud cells of every slot (one collider piece)
 	float m_aBlur[1521];        // smoothing window, up to 39 x 39
 	float m_aBlurRows[1287];    // smoothing X pass, up to 33 x 39
 }

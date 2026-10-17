@@ -1,0 +1,6 @@
+GameEnvironmentProbeEntity : "{5AFD9F654A6D42F7}Prefabs/Mud/MudTunnelProbe.et" {
+ ID "FB4B691778742468"
+ LVReflectionBrightness -12
+ LVDiffuseBrightness -10
+ TopColorEV 0
+}

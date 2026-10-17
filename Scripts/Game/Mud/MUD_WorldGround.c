@@ -114,6 +114,8 @@ class MUD_WorldGroundEntity : GenericEntity
 	                                    // draws there (voxel mesh) - no patch mesh, the patch COLLIDER stays (until VOX)
 	static const int IDX_SETS = 16;     // cached index layouts, MUD_IdxSet (~120-200 KB each)
 	static const int SLOT = 15;
+	static const bool RUT_MUD = true;   // Build 3 Stage 4: rut cells get m_RutMudMaterial on the grid collider (false = as before)
+	static const float RUT_MAT_D = 0.05;    // a 2 m skin cell is rut mud where a vertex's rut floor is this far under its base
 	// MUD_FinePatch.m_iBuild: steps a patch made ahead still needs, one per frame (Fix B, 2026-10-09)
 	static const int BUILD_INDEX = 3;       // index lists (a cache miss is ~2.5 ms)
 	static const int BUILD_COLLIDER = 2;    // collider; the skin stays until it exists
@@ -150,6 +152,12 @@ class MUD_WorldGroundEntity : GenericEntity
 
 	[Attribute("{C3691F2D8FE0234F}Common/Materials/Game/dirt.gamemat", UIWidgets.ResourcePickerThumbnail, "Game material a hard cell turns into where an explosion broke it", "gamemat", category: "Ground")]
 	protected ResourceName m_CraterMaterial;
+
+	[Attribute("{2BCBC124175231A2}Common/Materials/Game/mud_rut.gamemat", UIWidgets.ResourcePickerThumbnail, "Build 3 Stage 4: game material of rut cells (a 2 m cell whose rut floor is RUT_MAT_D under the ground), collider only. Empty = off.", "gamemat", category: "Ground")]
+	protected ResourceName m_RutMudMaterial;
+	// Build 3 Stage 4 fix (2026-10-17): holds the rut mud gamemat loaded. Nothing else keeps a mod gamemat alive, and the
+	// 15:15 log showed the wheels' contact material as a released BaseResourceObject (GetVehicleInfo null)
+	protected ref Resource m_RutMudRes;
 
 	[Attribute("0", UIWidgets.ComboBox, "Locked border: verts at kept terrain never move, digging fades in over Edge Fade. Dirt wall: dig to the edge, a wall fills the gap.", "", ParamEnumArray.FromEnum(MUD_EEdgeMode), category: "Edges")]
 	protected MUD_EEdgeMode m_eEdgeMode;
@@ -386,13 +394,13 @@ class MUD_WorldGroundEntity : GenericEntity
 	[Attribute("1", UIWidgets.EditBox, "Ground more than this (m) above the underside is not dug (a real wall or hill stays)", category: "Ditch escape")]
 	protected float m_fEscapeReach;
 
-	[Attribute("1.5", UIWidgets.EditBox, "Crater depth (m) for 1 kg TNT. Depth = this x (charge weight x TNT equivalent in kg) ^ TNT Power up to Max Depth, read from the exploding thing (ammo -> warhead, mine, charge, vehicle blast).", category: "Craters")]
+	[Attribute("1.5", UIWidgets.EditBox, "Crater depth (m) for 1 kg TNT (old big preset, user 2026-10-17: kept for server stress tests; tried middle 0.8, mix 1.1). Depth = this x (charge weight x TNT equivalent in kg) ^ TNT Power up to Max Depth, read from the exploding thing (ammo -> warhead, mine, charge, vehicle blast).", category: "Craters")]
 	protected float m_fCraterDepthPerKg;
 
-	[Attribute("0.6", UIWidgets.EditBox, "TNT Power: how fast depth grows with charge. 0.6 = the line through 40 mm 0.3 m and mortar 1.5 m (rockets ~1 m). 0.33 = textbook cube root (40 mm much deeper).", category: "Craters")]
+	[Attribute("0.6", UIWidgets.EditBox, "TNT Power: how fast depth grows with charge (old big preset; tried middle 0.45, mix 0.5). 0.33 = textbook cube root.", category: "Craters")]
 	protected float m_fCraterTntPower;
 
-	[Attribute("1.35", UIWidgets.EditBox, "Knee of the size curve (m): bigger charges grow only with the cube root past it (81 mm mortar 0.99 kg -> 1.43 m, Hydra M229 2.9 kg -> 2.0 m, TM-62M 7.5 kg -> 2.8 m).", category: "Craters")]
+	[Attribute("1.35", UIWidgets.EditBox, "Knee of the size curve (m): bigger charges grow only with the cube root past it (old big preset: 81 mm mortar 0.99 kg -> 1.43 m, Hydra M229 2.9 kg -> 2.04 m, TM-62M 7.5 kg -> 2.80 m).", category: "Craters")]
 	protected float m_fCraterMaxDepth;
 
 	[Attribute("0.5", UIWidgets.EditBox, "TNT (kg) for exploding ammo whose warhead has no readable charge (modded ammo)", category: "Craters")]
@@ -407,7 +415,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	[Attribute("2", UIWidgets.EditBox, "Charges below this TNT (kg) are shrunk to fit 2 x 2 patches (outer edge 3.95 m, cheap rebuild). At or above it the crater may span more patches (rare, one slower rebuild).", category: "Craters")]
 	protected float m_fCraterBigTnt;
 
-	[Attribute("0.6", UIWidgets.EditBox, "HEAT / HEDP (shaped charge, the warhead fires a penetrator) digs this share of the depth: the jet goes into the target, not the ground. PG-7VM 1.0 m -> 0.6 m.", category: "Craters")]
+	[Attribute("0.6", UIWidgets.EditBox, "HEAT / HEDP (shaped charge, the warhead fires a penetrator) digs this share of the depth: the jet goes into the target, not the ground. A 1.0 m crater -> 0.6 m.", category: "Craters")]
 	protected float m_fCraterHeatFactor;
 
 	[Attribute("0.15", UIWidgets.EditBox, "Crater variation: depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
@@ -451,6 +459,7 @@ class MUD_WorldGroundEntity : GenericEntity
 
 	[Attribute("0", UIWidgets.CheckBox, "Layered-SDF test (phase 2, 2026-10-13): patch mesh and collider from the band surface-nets mesher (MUD_BandMesher.c) instead of the 33 x 33 grid. Off = the grid exactly as before. Prints a 'MUD band' stats line every 10 s.", category: "Ground")]
 	protected bool m_bBandMesher;
+	protected ref MUD_BandIdx m_RutMudBand;    // Build 3 Stage 4: the band collider's rut mud tris (made on first use)
 
 	[Attribute("0.3", UIWidgets.EditBox, "Band mesher: skirt hanging this far (m) under the patch rim, toward the skin / kept terrain", category: "Ground")]
 	protected float m_fBandSkirt;
@@ -819,6 +828,15 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_bGroove = m_bRender && !m_RutMaterial.IsEmpty();
 		m_RplComponent = RplComponent.Cast(FindComponent(RplComponent));
 		m_Buf = new MUD_FineBuffers();
+		if (!m_RutMudMaterial.IsEmpty())
+		{
+			m_RutMudRes = Resource.Load(m_RutMudMaterial);
+			if (!m_RutMudRes || !m_RutMudRes.IsValid())
+			{
+				Print("MUD world: rut mud material does not load - rut mud off: " + m_RutMudMaterial, LogLevel.WARNING);
+				m_RutMudMaterial = "";
+			}
+		}
 
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
@@ -885,6 +903,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_sFrameRebuild = "";
 		m_iWheelBuilds = 0;
 		GroundRescue();
+		if (MUD_TestKit.TEST_KIT)
+			MUD_JoltProbe.Tick(timeSlice, IsProxy(), this);    // test kit (2026-10-17, back from the archive): MP robot / snap probe
 		MUD_VoxelProbe.Tick(m_fTime);    // TEMP probe 2026-10-12
 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet
 		MUD_VoxelHouse.Tick();    // TEMP probe 2026-10-13
@@ -918,8 +938,8 @@ class MUD_WorldGroundEntity : GenericEntity
 			m_sWorstSplit = string.Format("wheels %1, ahead %2 (%3), rebuild %4 (%5), free %6 (%7 patches), skin swaps in it %8",
 				tW, tA - tW, m_sFrameStep, tR - tA, m_sFrameRebuild, ms - tR, m_iFreed - freed0, m_iSwapMs - swap0);
 		}
-		if (m_bDebug)
-			Stats(timeSlice);
+		if (m_bDebug || MUD_TestKit.TEST_KIT)
+			Stats(timeSlice);   // test kit (2026-10-17): PERF runs m_bDebug 0 and still needs the 10 s lines
 		HashLines(timeSlice);
 		DumpPatches(timeSlice);    // layered-SDF test
 		BandStats(timeSlice);
@@ -3308,6 +3328,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					if (!p.m_bQueued)
 					{
 						p.m_bQueued = true;
+						p.m_fQueuedAt = m_fTime;
 						m_aDirty.Insert(p.m_iKey);
 					}
 				}
@@ -3389,6 +3410,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!p.m_bQueued)
 				{
 					p.m_bQueued = true;
+					p.m_fQueuedAt = m_fTime;
 					m_aDirty.Insert(p.m_iKey);
 				}
 			}
@@ -4108,6 +4130,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!p.m_bQueued)
 				{
 					p.m_bQueued = true;
+					p.m_fQueuedAt = m_fTime;
 					m_aDirty.Insert(p.m_iKey);
 				}
 				marked++;
@@ -4155,6 +4178,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!p.m_bQueued)
 				{
 					p.m_bQueued = true;
+					p.m_fQueuedAt = m_fTime;
 					m_aDirty.Insert(p.m_iKey);
 				}
 
@@ -4295,6 +4319,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					BuildMesh(mp);
 					mp.m_fMeshAt = m_fTime;
+					mp.m_fQueuedAt = m_fTime;     // test kit: waits from its last build
 					m_sFrameRebuild += string.Format("mesh %1 ", System.GetTickCount(tm));
 				}
 			}
@@ -4322,6 +4347,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					int ts = System.GetTickCount(tc);
 					BuildCollider(cp);
 					cp.m_fColAt = m_fTime;
+					cp.m_fQueuedAt = m_fTime;
 					m_sFrameRebuild += string.Format("smooth %1 collider %2 (old body %3, new body %4) ", ts, System.GetTickCount(tc) - ts, m_iLastDropMs, m_iLastStaticMs);
 				}
 			}
@@ -4451,6 +4477,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		// on top: the min of both)
 		if (MUD_VoxelProbe.RUT_FIELD)
 		{
+			float dug0 = dug;
 			float rf = MUD_VoxelProbe.FieldFloorAt(x, z, dug);
 			if (rf < undug)
 			{
@@ -4459,6 +4486,21 @@ class MUD_WorldGroundEntity : GenericEntity
 			}
 			if (rf < dug)
 				dug = rf;
+			// Build 3 Stage 3: the ridge, only ever up and only where the heightfield is at its undug height (as the
+			// patches draw it), so the hole check expects it and MakeSeed carries it into new columns. FieldTopAt blends
+			// each corner's floor, else its ridge, else dug0: between a rut corner and a ridge corner that is the drawn
+			// slope, which the floor-only blend above puts too low. No ridge corner = FLOOR_NONE = no change
+			if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(h) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+			{
+				float rt = MUD_VoxelProbe.FieldTopAt(x, z, dug0);
+				if (rt < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+				{
+					float rgL = LockAt(ix, iz) * (1 - u) * (1 - w) + LockAt(ix + 1, iz) * u * (1 - w) + LockAt(ix, iz + 1) * (1 - u) * w + LockAt(ix + 1, iz + 1) * u * w;
+					rt = undug + (rt - undug) * rgL;     // edge lock, as the patches
+					if (rt > dug)
+						dug = rt;
+				}
+			}
 		}
 		return true;
 	}
@@ -4494,7 +4536,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	//------------------------------------------------------------------------------------------------
 	//! Server: a soldier whose feet are at wp stands on this ground (dug or undug surface within
 	//! the deepest trench + 0.25 m), not on a roof or bridge above it. Voxel cells (bricks): our heightfield there is
-	//! hidden and the voxel floor can be FLOOR under the undug ground, so the tolerance reaches that (2026-10-13).
+	//! hidden and the voxel floor can be TUNNEL_FLOOR under the undug ground (U1 2026-10-17), so the tolerance reaches that.
 	static bool AtGround(vector wp)
 	{
 		if (!s_Inst || !s_Inst.m_bReady)
@@ -4519,7 +4561,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				int vcx = Math.Floor((wp[0] - sx0) / sc);
 				int vcz = Math.Floor((wp[2] - sz0) / sc);
 				if (skin.IsVoxCell(vcx, vcz))
-					tol = Math.Max(tol, MUD_VoxelProbe.FLOOR + 0.25);
+					tol = Math.Max(tol, MUD_VoxelProbe.TUNNEL_FLOOR + 0.25);
 			}
 		}
 		return Math.AbsFloat(wp[1] - dug) <= tol || Math.AbsFloat(wp[1] - undug) <= tol;
@@ -5574,6 +5616,21 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Build 1 (C2 + C6, 2026-10-17): a voxel crater with the heightfield's variation (Depth Jitter, Shape Jitter) and
+	//! stack cap (Stack Depth / Factor, Deepen Gain), rolled HERE on the server and carried in the op - clients replay.
+	//! False = not taken as voxels (the heightfield digs it).
+	protected bool VoxelCrater(vector wp, float full)
+	{
+		float depth = full * (1 + m_fCraterDepthJitter * Math.RandomFloat(-1, 1));
+		float cap = Math.Min(m_fCraterStackDepth, full * m_fCraterStackFactor);
+		float stretch = Math.Clamp(m_fCraterShapeJitter, 0, 0.5);
+		float lobeW = Math.RandomFloat01();
+		float turn2 = Math.RandomFloat(0, Math.PI2);
+		float turn3 = Math.RandomFloat(0, Math.PI2);
+		return MUD_VoxelProbe.Blast(wp, depth, cap, m_fCraterDeepenGain, stretch, lobeW, turn2, turn3);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Cosine bowl from -depth at the centre up to the rim crest (crest radius), cosine fall to 0 at
 	//! the outer edge: no step anywhere, walls no steeper than m_fCraterMaxSlope before the collider
 	//! blur (model + numbers: Tools/crater_profile.py). Depth from the warhead's TNT (kg); blasts up
@@ -5608,7 +5665,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iCraterSkips++;
 				return;
 			}
-			MUD_VoxelProbe.Blast(wp, FullDepth(tnt, heat));
+			VoxelCrater(wp, FullDepth(tnt, heat));
 			return;
 		}
 		int gmax = m_iNPX * PCELLS;
@@ -5655,7 +5712,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		float scale = 1;
 		if (above > airFull)
 			scale = (airNone - above) / (airNone - airFull);
-		if (MUD_VoxelProbe.Blast(wp, full * scale))    // TEMP probe 2026-10-13: voxel craters (SP)
+		if (VoxelCrater(wp, full * scale))    // TEMP probe 2026-10-13: voxel craters (SP)
 			return;
 
 		// variation (server only; clients get the heights): deeper or shallower, also past the cap
@@ -6073,6 +6130,18 @@ class MUD_WorldGroundEntity : GenericEntity
 						if (rfS < rfD)
 							rfD = rfS;
 					}
+					// Build 3 Stage 3: the bulldozed ridge on top, edge-locked (none at kept terrain / roads), only where
+					// the heightfield is at its undug height (a heightfield crater over it hides it). Same in the 4 paths
+					if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+					{
+						float rgF = MUD_VoxelProbe.FieldRidge(rfX0 + vx, rfZ0 + vz);
+						if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+						{
+							float rgD = (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
+							if (rgD > d)
+								d = rgD;
+						}
+					}
 				}
 				float h = p.m_aBase[v] + d;
 				// groove reveal (MUD_GroundEntity.c:1440-1448)
@@ -6128,6 +6197,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		}
 		p.m_Ent.SetObject(mesh, "");
 		p.m_Ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
+		if (m_iMeshBuilds < 3)    // VC flags readback probe (MUD_VoxelProbe.s_iVcLog), log only
+			Print(string.Format("MUD vcflags: ground patch %1 (8 = NOSHADOW)", p.m_Ent.SetVComponentFlags(0)), LogLevel.NORMAL);
 		p.m_MeshRes = res;
 		p.m_bMeshDirty = hideOwed;     // ahead ruts: rebuild again (Mesh Interval) until every hidden change shows
 		m_iMeshBuilds++;
@@ -6162,6 +6233,90 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 4: mask bits (cz * SKIN + cx) of every skin cell that touches fine vertex vx, vz
+	protected int RutMudCells(int vx, int vz)
+	{
+		int x0 = vx - 1;
+		if (x0 < 0)
+			x0 = 0;
+		x0 = x0 / FINE;
+		int x1 = vx / FINE;
+		if (x1 >= SKIN)
+			x1 = SKIN - 1;
+		int z0 = vz - 1;
+		if (z0 < 0)
+			z0 = 0;
+		z0 = z0 / FINE;
+		int z1 = vz / FINE;
+		if (z1 >= SKIN)
+			z1 = SKIN - 1;
+		int mask;
+		for (int cz = z0; cz <= z1; cz++)
+		{
+			for (int cx = x0; cx <= x1; cx++)
+				mask = mask | (1 << (cz * SKIN + cx));
+		}
+		return mask;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 4: rut mud is one more surface piece - false (and one debug line) when the patch already
+	//! uses MAT_SLOTS surfaces (+ slab + plate = MakeStatic's 6)
+	protected bool RutMudFits(MUD_FinePatch p, int used)
+	{
+		if (used < MAT_SLOTS)
+			return true;
+		if (m_bDebug && p.m_iRutMud != -1)
+			Print(string.Format("MUD rutmat: patch %1 full (%2 surfaces) - no rut mud", p.m_iKey, used));
+		p.m_iRutMud = -1;
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 4: debug line when a patch's rut mud cells change
+	protected void RutMudLog(MUD_FinePatch p, int mudMask, int tris, string path)
+	{
+		if (mudMask == p.m_iRutMud || (mudMask == 0 && p.m_iRutMud <= 0))
+			return;
+		if (m_bDebug)
+		{
+			int cells;
+			for (int b = 0; b < 16; b++)
+			{
+				if ((mudMask & (1 << b)) != 0)
+					cells++;
+			}
+			Print(string.Format("MUD rutmat: patch %1 mud cells %2 (mask %3) tris %4 (%5)", p.m_iKey, cells, mudMask, tris, path));
+		}
+		p.m_iRutMud = mudMask;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 4: split one slot list into m_Buf.m_RutRest (cells outside mudMask) and m_Buf.m_RutMud
+	//! (appended: one mud piece for every slot). FillIndices starts every fine cell's 6 indices with its bl vertex.
+	protected void SplitRutMud(MUD_IdxList sl, int mudMask)
+	{
+		MUD_IdxList rest = m_Buf.m_RutRest;
+		MUD_IdxList mud = m_Buf.m_RutMud;
+		rest.m_iN = 0;
+		for (int i = 0; i < sl.m_iN; i += 6)
+		{
+			int bl = sl.m_aIdx[i];
+			int fz = bl / PVERTS;
+			int fx = bl - fz * PVERTS;
+			int sc = (fz / FINE) * SKIN + fx / FINE;
+			MUD_IdxList dst = rest;
+			if ((mudMask & (1 << sc)) != 0)
+				dst = mud;
+			for (int j = 0; j < 6; j++)
+			{
+				dst.m_aIdx[dst.m_iN] = sl.m_aIdx[i + j];
+				dst.m_iN++;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! One trimesh per surface (<= 4) from the smoothed heights, + bullet slab (FireGeo, facing down)
 	//! + safety plate (base + floor - m_fPlateGap). Old body goes and the new one comes in this call
 	//! (MUD_GroundEntity.c:1643).
@@ -6179,6 +6334,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		bool hadBody = p.m_bColValid && p.m_Phys != null;   // TEMP probe 2026-10-11
 		bool moved;
 		int held;
+		bool rutMud = rfOn && RUT_MUD && !m_RutMudMaterial.IsEmpty();
+		int mudMask;     // Build 3 Stage 4: bit per skin cell (cz * SKIN + cx) that is rut mud
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
@@ -6192,6 +6349,20 @@ class MUD_WorldGroundEntity : GenericEntity
 						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aEdgeLock[v];     // edge lock, as the mesh
 					if (rfF < y)
 						y = rfF;
+					// Build 3 Stage 4: every skin cell touching this vertex is rut mud (FLOOR_NONE never passes)
+					if (rutMud && rfF <= p.m_aBase[v] - RUT_MAT_D)
+						mudMask = mudMask | RutMudCells(vx, vz);
+					// Build 3 Stage 3: the ridge on top, as the mesh
+					if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+					{
+						float rgF = MUD_VoxelProbe.FieldRidge(rfX0 + vx, rfZ0 + vz);
+						if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+						{
+							rgF = p.m_aBase[v] + (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
+							if (rgF > y)
+								y = rgF;
+						}
+					}
 				}
 				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.RutTouch(v), p.BermTouch(v)) < m_fWheelHold)
 				{
@@ -6212,11 +6383,31 @@ class MUD_WorldGroundEntity : GenericEntity
 		array<int> layers = {};
 		// Terrain preset + Foliage: vehicle get in/out sweep skips Foliage (MUD_GroundEntity.c:1668-1676)
 		int layer = EPhysicsLayerPresets.Terrain | EPhysicsLayerDefs.Foliage;
+		// Build 3 Stage 4: rut mud = one more surface piece, so only while the patch uses < MAT_SLOTS surfaces
+		if (mudMask != 0)
+		{
+			int used;
+			for (int ku = 0; ku < p.m_aMats.Count() && ku < ix.m_aSlot.Count(); ku++)
+			{
+				if (ix.m_aSlot[ku].m_iN > 0)
+					used++;
+			}
+			if (!RutMudFits(p, used))
+				mudMask = 0;
+		}
+		m_Buf.m_RutMud.m_iN = 0;
 		for (int k = 0; k < p.m_aMats.Count() && k < ix.m_aSlot.Count(); k++)
 		{
 			MUD_IdxList sl = ix.m_aSlot[k];
 			if (sl.m_iN == 0)
 				continue;
+			if (mudMask != 0)
+			{
+				SplitRutMud(sl, mudMask);
+				sl = m_Buf.m_RutRest;
+				if (sl.m_iN == 0)
+					continue;
+			}
 			PhysicsGeom geom = PhysicsGeom.CreateTriMesh(m_Buf.m_aVerts, sl.m_aIdx, 1089, sl.m_iN);
 			if (!geom)
 			{
@@ -6227,6 +6418,21 @@ class MUD_WorldGroundEntity : GenericEntity
 			mats.Insert(p.m_aMats[k]);
 			layers.Insert(layer);
 		}
+		if (m_Buf.m_RutMud.m_iN > 0)
+		{
+			PhysicsGeom mudGeom = PhysicsGeom.CreateTriMesh(m_Buf.m_aVerts, m_Buf.m_RutMud.m_aIdx, 1089, m_Buf.m_RutMud.m_iN);
+			if (mudGeom)
+			{
+				geoms.Insert(mudGeom);
+				mats.Insert(m_RutMudMaterial);
+				layers.Insert(layer);
+			}
+			else
+			{
+				Print("MUD world: CreateTriMesh failed (rut mud)", LogLevel.ERROR);
+			}
+		}
+		RutMudLog(p, mudMask, m_Buf.m_RutMud.m_iN / 3, "grid");
 
 		// slab and plate: every non-kept cell
 		if (m_fBulletSlab > 0 && ix.m_Shell.m_iN > 0 && !geoms.IsEmpty())
@@ -6285,6 +6491,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			if (!p.m_bQueued)
 			{
 				p.m_bQueued = true;
+				p.m_fQueuedAt = m_fTime;
 				m_aDirty.Insert(p.m_iKey);
 			}
 		}
@@ -6370,6 +6577,17 @@ class MUD_WorldGroundEntity : GenericEntity
 					float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
 					if (rfS < rfD)
 						rfD = rfS;
+				}
+				// Build 3 Stage 3: the ridge on top, as BuildMesh
+				if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+				{
+					float rgF = MUD_VoxelProbe.FieldRidge(rfX0 + rfVx, rfZ0 + rfVz);
+					if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+					{
+						float rgD = (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
+						if (rgD > d)
+							d = rgD;
+					}
 				}
 			}
 			m_Band.m_aD[v] = rfD;
@@ -6507,6 +6725,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		bool hadBody = p.m_bColValid && p.m_Phys != null;
 		bool moved = false;
 		int held = 0;
+		bool rutMud = rfOn && RUT_MUD && !m_RutMudMaterial.IsEmpty();
+		int mudMask;     // Build 3 Stage 4: bit per skin cell (cz * SKIN + cx) that is rut mud
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
@@ -6520,6 +6740,20 @@ class MUD_WorldGroundEntity : GenericEntity
 						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aEdgeLock[v];     // edge lock, as the mesh
 					if (rfF < y)
 						y = rfF;
+					// Build 3 Stage 4: every skin cell touching this vertex is rut mud (FLOOR_NONE never passes)
+					if (rutMud && rfF <= p.m_aBase[v] - RUT_MAT_D)
+						mudMask = mudMask | RutMudCells(vx, vz);
+					// Build 3 Stage 3: the ridge on top, as the mesh
+					if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+					{
+						float rgF = MUD_VoxelProbe.FieldRidge(rfX0 + vx, rfZ0 + vz);
+						if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+						{
+							rgF = p.m_aBase[v] + (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
+							if (rgF > y)
+								y = rgF;
+						}
+					}
 				}
 				if (hold && y != p.m_aColH[v] && m_fTime - Math.Max(p.RutTouch(v), p.BermTouch(v)) < m_fWheelHold)
 				{
@@ -6556,6 +6790,29 @@ class MUD_WorldGroundEntity : GenericEntity
 		array<int> layers = {};
 		// Terrain preset + Foliage: vehicle get in/out sweep skips Foliage (MUD_GroundEntity.c:1668-1676)
 		int layer = EPhysicsLayerPresets.Terrain | EPhysicsLayerDefs.Foliage;
+		// Build 3 Stage 4: a tri whose centre lies in a mud skin cell goes to one extra mud piece
+		if (mudMask != 0)
+		{
+			int slotUsed;     // bit per used slot
+			for (int tu = 0; tu < ni / 3; tu++)
+			{
+				int su = m_Band.m_Slot.m_aS[tu];
+				if (su >= 0 && su < p.m_aMats.Count())
+					slotUsed = slotUsed | (1 << su);
+			}
+			int used;
+			for (int ku = 0; ku < MAT_SLOTS; ku++)
+			{
+				if ((slotUsed & (1 << ku)) != 0)
+					used++;
+			}
+			if (!RutMudFits(p, used))
+				mudMask = 0;
+		}
+		if (mudMask != 0 && !m_RutMudBand)
+			m_RutMudBand = new MUD_BandIdx();
+		int nMud = 0;
+		float cellW = m_fFine * FINE;
 		for (int k = 0; k < p.m_aMats.Count(); k++)
 		{
 			int n = 0;
@@ -6563,9 +6820,34 @@ class MUD_WorldGroundEntity : GenericEntity
 			{
 				if (m_Band.m_Slot.m_aS[ti / 3] != k)
 					continue;
-				m_Band.m_Scratch.m_aI[n] = m_Band.m_Ib.m_aI[ti];
-				m_Band.m_Scratch.m_aI[n + 1] = m_Band.m_Ib.m_aI[ti + 1];
-				m_Band.m_Scratch.m_aI[n + 2] = m_Band.m_Ib.m_aI[ti + 2];
+				int i0 = m_Band.m_Ib.m_aI[ti];
+				int i1 = m_Band.m_Ib.m_aI[ti + 1];
+				int i2 = m_Band.m_Ib.m_aI[ti + 2];
+				if (mudMask != 0)
+				{
+					vector ctr = (m_Band.m_Vb.m_aV[i0] + m_Band.m_Vb.m_aV[i1] + m_Band.m_Vb.m_aV[i2]) * (1.0 / 3.0);
+					int tcx = Math.Floor(ctr[0] / cellW);
+					int tcz = Math.Floor(ctr[2] / cellW);
+					if (tcx < 0)
+						tcx = 0;
+					if (tcx >= SKIN)
+						tcx = SKIN - 1;
+					if (tcz < 0)
+						tcz = 0;
+					if (tcz >= SKIN)
+						tcz = SKIN - 1;
+					if ((mudMask & (1 << (tcz * SKIN + tcx))) != 0)
+					{
+						m_RutMudBand.m_aI[nMud] = i0;
+						m_RutMudBand.m_aI[nMud + 1] = i1;
+						m_RutMudBand.m_aI[nMud + 2] = i2;
+						nMud += 3;
+						continue;
+					}
+				}
+				m_Band.m_Scratch.m_aI[n] = i0;
+				m_Band.m_Scratch.m_aI[n + 1] = i1;
+				m_Band.m_Scratch.m_aI[n + 2] = i2;
 				n += 3;
 			}
 			if (n == 0)
@@ -6580,6 +6862,21 @@ class MUD_WorldGroundEntity : GenericEntity
 			mats.Insert(p.m_aMats[k]);
 			layers.Insert(layer);
 		}
+		if (nMud > 0)
+		{
+			PhysicsGeom mudGeom = PhysicsGeom.CreateTriMesh(m_Band.m_Vb.m_aV, m_RutMudBand.m_aI, nv, nMud);
+			if (mudGeom)
+			{
+				geoms.Insert(mudGeom);
+				mats.Insert(m_RutMudMaterial);
+				layers.Insert(layer);
+			}
+			else
+			{
+				Print("MUD world: CreateTriMesh failed (rut mud, band)", LogLevel.ERROR);
+			}
+		}
+		RutMudLog(p, mudMask, nMud / 3, "band");
 
 		// slab: every surface tri, lowered and reversed (facing down)
 		if (m_fBulletSlab > 0 && !geoms.IsEmpty())
@@ -6650,6 +6947,7 @@ class MUD_WorldGroundEntity : GenericEntity
 			if (!p.m_bQueued)
 			{
 				p.m_bQueued = true;
+				p.m_fQueuedAt = m_fTime;
 				m_aDirty.Insert(p.m_iKey);
 			}
 		}
@@ -7643,6 +7941,49 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Test kit (back 2026-10-17; TEMP probe 2026-10-11, MUD_JoltProbe). False = not our ground (kept terrain: road, water edge).
+	//! Within 0.5 m of wp: pend = how far (m) the newest heights differ from the live collider (held
+	//! under a wheel, or not rebuilt yet), age = seconds since a rebuild last moved that collider (1000 =
+	//! never), dirty = a patch there waits for smoothing or a rebuild.
+	bool ProbeGround(vector wp, out float pend, out float age, out bool dirty)
+	{
+		pend = 0;
+		age = 1000;
+		dirty = false;
+		float fx;
+		float fz;
+		if (!m_bReady || !m_Skin || !ToFine(wp, fx, fz))
+			return false;
+		int cx = Math.Floor(fx / FINE);
+		int cz = Math.Floor(fz / FINE);
+		if (!m_Skin.IsHoleCell(cx, cz))
+			return false;
+		int gmax = m_iNPX * PCELLS;
+		int gzmax = m_iNPZ * PCELLS;
+		int gx0 = Math.ClampInt(Math.Round(fx) - 2, 0, gmax);
+		int gx1 = Math.ClampInt(Math.Round(fx) + 2, 0, gmax);
+		int gz0 = Math.ClampInt(Math.Round(fz) - 2, 0, gzmax);
+		int gz1 = Math.ClampInt(Math.Round(fz) + 2, 0, gzmax);
+		for (int gz = gz0; gz <= gz1; gz++)
+		{
+			for (int gx = gx0; gx <= gx1; gx++)
+			{
+				int v;
+				MUD_FinePatch p = At(gx, gz, v);
+				if (!p)
+					continue;
+				if (p.m_bColDirty || p.m_iSx0 >= 0)
+					dirty = true;
+				if (!p.m_bColValid)
+					continue;
+				pend = Math.Max(pend, Math.AbsFloat(p.m_aBase[v] + p.m_aSmooth[v] - p.m_aColH[v]));
+				age = Math.Min(age, m_fTime - p.m_fColChangeAt);
+			}
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Every 10 s while m_bDebug (Stats; patch memory baseline 2026-10-15). live = built and awake; heights-only =
 	//! client far patch held unbuilt (m_sFar); lazy = made ahead, index lists only, skin carries it (IsLazyReady,
 	//! freed after m_fFreeAfter like any undeformed patch); building = the rest.
@@ -7682,11 +8023,27 @@ class MUD_WorldGroundEntity : GenericEntity
 			else if (cp.m_bFloor)
 				nFloorOnly++;
 		}
+		// test kit (2026-10-17): queue = m_aDirty; waiting = awake, not building, with dirt this machine builds (a DS
+		// builds no meshes); oldest dirty = longest of those since it was queued or last built
+		int nWaiting;
+		float oldestDirty;
+		foreach (int dk : m_aDirty)
+		{
+			MUD_FinePatch dp = m_mPatches.Get(dk);
+			if (!dp || dp.m_bAsleep || dp.m_iBuild > 0)
+				continue;
+			if (!dp.m_bColDirty && !(m_bRender && dp.m_bMeshDirty))
+				continue;
+			nWaiting++;
+			if (m_fTime - dp.m_fQueuedAt > oldestDirty)
+				oldestDirty = m_fTime - dp.m_fQueuedAt;
+		}
 		Print(string.Format("MUD patches: live %1, asleep %2, floor-only %3, deformed %4, heights-only %5, lazy %6, building %7, total %8, mem %9 KB",
 			nLive, nAsleep, nFloorOnly, nDeformed, nHeights, nLazy, nBuilding, m_mPatches.Count(), System.MemoryAllocationKB())
 			+ string.Format(" | fps %1, vehicles moving %2 of %3", fps, nMoving, MUD_Wheels.GetAll().Count())
 			+ string.Format(" | floor settle %1: released quiet %2, max wait %3, held patch-frames %4", FLOOR_SETTLE, m_iSettleQuiet, m_iSettleMax, m_iSettleHeld)
-			+ string.Format(" | floor free %1: rut patch keys %2, in range %3, made near %4, floor-only freed %5", FLOOR_FREE, m_sFieldPatches.Count(), m_aFieldDue.Count(), m_iFieldMade, m_iFloorFreed));
+			+ string.Format(" | floor free %1: rut patch keys %2, in range %3, made near %4, floor-only freed %5", FLOOR_FREE, m_sFieldPatches.Count(), m_aFieldDue.Count(), m_iFieldMade, m_iFloorFreed)
+			+ string.Format(" | queue %1 (waiting %2), oldest dirty %3 s, ops %4", m_aDirty.Count(), nWaiting, oldestDirty, MUD_VoxelProbe.OpCount()));
 		m_iFieldMade = 0;
 		m_iFloorFreed = 0;
 		m_iSettleQuiet = 0;
@@ -7801,7 +8158,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_iNetGot = 0;
 		Print(string.Format("MUD world JIP: sent %1 full copies in 10 s, %2 queued, %3 pending here", m_iJipSent, m_aJip.Count(), m_sJipPending.Count()));
 		m_iJipSent = 0;
-		SeamCheck();
+		if (m_bDebug)
+			SeamCheck();    // scans every patch: m_bDebug only, not the test kit (a 10 s spike in PERF)
 		m_iMadeAhead = 0;
 		m_iMadeStamp = 0;
 		m_iFreed = 0;

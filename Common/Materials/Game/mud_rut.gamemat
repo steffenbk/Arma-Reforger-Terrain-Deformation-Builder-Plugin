@@ -1,0 +1,3 @@
+GameMaterial : "{92113D135268D329}Common/Materials/Game/soil.gamemat" {
+ "Vehicle contact surface" "{86F679913611B418}Common/Materials/Vehicles/mud_rut.vhcsurf"
+}
