@@ -7,6 +7,9 @@ or earlier logs, cited), PROVEN / IDA (earlier docs), READ (web search text - th
 ESTIMATE, INFERENCE. Plan only - nothing built. Feature freeze: these are new look features; the user decides.
 
 ## 1. Short answer
+- **CORRECTION 2026-10-17:** the 0.25 m grid check below measured ridge HEIGHT only. The look prototype
+  (results/2026-10-17-mud-look-proto.md) shows the sheet's groove does not survive on the 0.25 m mesh; the sheet look
+  needs a ~0.125 m mesh near the camera.
 - **The sheet's data was never the problem - its MESHES and its being a second ground were.** Its per-tile DATA is
   10.6 KB per 3 m tile (6 arrays x 441 floats, CODE MUD_MudSheetTileData); the measured cost was ~178 KB per tile
   (assessment 2026-10-15, noisy) because every zone tile was pre-built as a mesh + collider and kept. Our rut field

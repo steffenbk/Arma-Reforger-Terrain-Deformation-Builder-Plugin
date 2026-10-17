@@ -52,6 +52,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- MUD LOOK LAYER (the sheet / MudRunner look back, user 2026-10-17): client-only drawn groove + dirt ridge + drag
+  derived from the rut floor (no net / J2 change) on a 0.125 m mesh near the camera. Offline proto:
+  results/2026-10-17-mud-look-proto.md (close to the sheet at 0.125 m, fails on the 0.25 m mesh; drawn mud up to
+  ~0.19 m over the felt ground). Needs: user go (freeze), then a PERF cost check.
 - Tunnel darkness (user 2026-10-17 'put a pin in it'): off via MUD_VoxelProbe TUNNEL_DARK / DARK_MAT false. Resume
   notes: docs/features/trenches-tunnels/README.md (ambient-on-walls cause proven, graded IBL materials untested).
 - Crater size + look fine-tune (user 2026-10-17: "we will fine tune this at a later point"): old big preset stays for
