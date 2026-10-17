@@ -74,6 +74,20 @@ in Enforce. In Tools/mud_look_proto.py add a `look_fast` model and compare it wi
 ## Stage 2 - Enforce: the look mesh (mesh only, behind a switch)
 - New const `MUD_WorldGroundEntity.LOOK_LAYER = true` (dev) and `LOOK_RADIUS` (from Stage 0).
 - Add to the master list Lane 2: "LOOK_LAYER: decide on / off for release after PERF".
+- **SAME ON EVERY CLIENT (user 2026-10-17: "the client mud must follow the ruts so players see the same").** The look
+  is a pure function of replicated data only:
+  - the rut floor + ridge (FieldFloor / FieldRidge, whole cm on every machine, J2 snapshot for joiners);
+  - the patch base heights;
+  - the edge lock.
+  Forbidden as inputs:
+  - time / clocks;
+  - vehicle state (speed, wheel, which way it drove);
+  - which client saw the truck pass;
+  - random numbers not seeded from the world position (the sheet's DIRT_NOISE used a per-world-quad hash - do the
+    same).
+  The camera may only decide WHETHER a patch gets the fine look (the radius gate), never its shape. Drag direction
+  comes from the track shape (Stage 1 tensor) with a fixed sign rule. Anything that needs time (fresh / wet age,
+  slump) must come from replicated data (e.g. the rut op seq), else it stays out.
 - **New BuildMeshLook(p)** for patches where RutFieldOn(p) is true AND the patch is within LOOK_RADIUS of the camera
   (2 m hysteresis so it does not flip).
   - Use a 0.125 m grid: 65 x 65 = 4225 vertices, 64 x 64 x 2 triangles, index count 24576.
@@ -124,7 +138,9 @@ in Enforce. In Tools/mud_look_proto.py add a `look_fast` model and compare it wi
 - MP:
   - a DS log has no 'MUD look' builds;
   - robot >= 6 runs, LOOK_LAYER on vs off (the collider is unchanged, so the snap count must not change);
-  - a late joiner sees the same look (it comes from the snapshot floor).
+  - a late joiner sees the same look (it comes from the snapshot floor);
+  - two clients + a late joiner stand at the same rut, same spot: the same groove, ridge, dirt edge and drag
+    (screenshots side by side).
 
 ## How to work
 - Checkpoint before each code stage (`mud_backups/checkpoint.ps1 save "name"`) and after I confirm it works.
