@@ -59,6 +59,7 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   sheet). Next candidate: the SYNCED SHEET - the mud sheet as a look-only layer pressed from the replicated rut ops
   + local prediction at the tyre (results/2026-10-17-mud-sheet-sync-proto.md: identical on every client, ~6 mm rms
   from the old sheet; handoff jump median 6 cm morphed out; joiners need the mud cells in the snapshot).
+  USER GO 2026-10-17: prompts/2026-10-17-synced-mud-sheet.md.
 - Tunnel darkness (user 2026-10-17 'put a pin in it'): off via MUD_VoxelProbe TUNNEL_DARK / DARK_MAT false. Resume
   notes: docs/features/trenches-tunnels/README.md (ambient-on-walls cause proven, graded IBL materials untested).
 - Crater size + look fine-tune (user 2026-10-17: "we will fine tune this at a later point"): old big preset stays for
