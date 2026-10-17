@@ -1,5 +1,8 @@
 # Prompt: mud look layer (the sheet / MudRunner look back) - 2026-10-17
 
+ON HOLD 2026-10-17 (user: still not as good as the mud sheet). Next candidate: the synced look-only sheet,
+results/2026-10-17-mud-sheet-sync-proto.md. Do not paste this prompt.
+
 Paste everything below the line into a new chat in the mod folder.
 
 -------------------------------------------------------------------------------------------------------------------

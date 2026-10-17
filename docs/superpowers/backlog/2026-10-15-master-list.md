@@ -55,7 +55,10 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - MUD LOOK LAYER (the sheet / MudRunner look back, user 2026-10-17): client-only drawn groove + dirt ridge + drag
   derived from the rut floor (no net / J2 change) on a 0.125 m mesh near the camera. Offline proto:
   results/2026-10-17-mud-look-proto.md (close to the sheet at 0.125 m, fails on the 0.25 m mesh; drawn mud up to
-  ~0.19 m over the felt ground). USER GO 2026-10-17 (freeze exception): prompts/2026-10-17-mud-look-layer.md.
+  ~0.19 m over the felt ground). USER GO 2026-10-17, then ON HOLD the same day (user: still not as good as the
+  sheet). Next candidate: the SYNCED SHEET - the mud sheet as a look-only layer pressed from the replicated rut ops
+  + local prediction at the tyre (results/2026-10-17-mud-sheet-sync-proto.md: identical on every client, ~6 mm rms
+  from the old sheet; handoff jump median 6 cm morphed out; joiners need the mud cells in the snapshot).
 - Tunnel darkness (user 2026-10-17 'put a pin in it'): off via MUD_VoxelProbe TUNNEL_DARK / DARK_MAT false. Resume
   notes: docs/features/trenches-tunnels/README.md (ambient-on-walls cause proven, graded IBL materials untested).
 - Crater size + look fine-tune (user 2026-10-17: "we will fine tune this at a later point"): old big preset stays for
