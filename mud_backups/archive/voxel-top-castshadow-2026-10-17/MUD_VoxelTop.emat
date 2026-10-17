@@ -1,0 +1,4 @@
+MatTerrainObject : "{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat" {
+ CastShadow 1
+ DisableInteriorProbes 0
+}

@@ -25,7 +25,8 @@
 //!  - Hard columns (on / next to kept terrain) are never dug; kept columns sit KEPT_SINK under the terrain.
 //! Tunnel test: on foot, hold T (MUD_VoxelTunnelContext in Configs/System/chimeraInputCommon.conf) digs an upright
 //! capsule (r 0.8, 2.5 m tall) 1.1 m ahead, now and every 300 ms; look down/up to ramp down/up.
-//! Nothing digs deeper than FLOOR (3 m) under the undug ground.
+//! Nothing digs deeper than FLOOR (3 m) under the undug ground; tunnels and the C4 sphere TUNNEL_FLOOR (10 m, U1),
+//! never under the sea guard. Clamps add no NEW air below the floor; older air stays (U1 2026-10-17).
 //! Remove with the hook lines in MUD_WorldGround.c (Clear, Tick, Crater, HasHole, trench hooks, RpcDo_VoxelOp,
 //! VoxCellsChanged, UndugY, DugUndug, VOX, AtGround), CELL_VOX in MUD_CoarseSkin.c, MUD_VoxelNet.c, m_sPlan in
 //! MUD_TrenchLayout.c, MUD_VoxelSubEntity in MUD_Surface.c / MUD_BuildingDestructionFix.c / GroundCovers.
@@ -146,6 +147,8 @@ class MUD_RutTile
 {
 	static const int SIZE_F = 256;  // = MUD_VoxelProbe.FSUB^2 (SizesOk checks)
 	float m_aFloor[SIZE_F];         // rut floor (world y) per floor sample fk_local * FSUB + fi_local, FLOOR_NONE = none
+	float m_aRidge[SIZE_F];         // Build 3 Stage 3: bulldozed ridge top (world y), same index, FLOOR_NONE = none. Plain RUT
+	                                // FIELD ground only (MUD_VoxelProbe.GrowRidges); a sample with a floor never has one
 }
 
 class MUD_VoxelOp
@@ -160,6 +163,8 @@ class MUD_VoxelOp
 	string m_sPlan;                     // 2 / 3: MUD_TrenchPlan text
 	string m_sSeed;                     // seed of the columns it converts (MakeSeed), empty = all undug
 	string m_sText;                     // the op as sent (JIP)
+	string m_sRows;                     // 4: brick rows this rut op made, "colkey,bj;..." (J2 snapshot: a joiner skips the
+	                                    // op but makes these rows at its seq - a row changes later Puts, KEEP_ROW)
 	ref MUD_TrenchLayout m_Lay;         // 2 / 3: built from m_sPlan
 	vector m_vLo;                       // x, z box of everything it changes (Prepare)
 	vector m_vHi;
@@ -168,6 +173,19 @@ class MUD_VoxelOp
 	// 5: m_fDepth = half width of the strip
 	ref array<vector> m_aSegA = {};
 	ref array<vector> m_aSegB = {};
+}
+
+//! J2 (Build 2 Stage 3, 2026-10-17), server: one joiner's snapshot send. Ops <= m_iS go as voxel ops with the rut ops
+//! (kind 4) as placeholders "a|R|b" (rows: "a|R|a|rows"), then the rut tiles as they were at m_iS (built at the ask:
+//! a tile written after S would take a later rut op twice), then the live ops > m_iS as before.
+class MUD_JipSnap
+{
+	int m_iS;                           // newest seq at the ask
+	ref array<string> m_aTiles = {};    // tile parts "T|S|i|key:data/key:data..."
+	int m_iTile;                        // next part to send
+	bool m_bHead;                       // head "S|S|parts" sent
+	bool m_bDone;                       // all sent (tile texts freed); kept so a J1 ask from <= S gets placeholders again:
+	                                    // real rut ops there would make other rows on a joiner without the earlier ruts
 }
 
 //! All-voxel test (2026-10-13): one vehicle's wheel points since its last rut op (server)
@@ -211,7 +229,29 @@ class MUD_VoxelProbe
 	static const float RUT_STEP = 0.5;          // a track point every this many m a wheel travels
 	static const float RUT_JUMP = 2;            // farther than this since the last point (air, teleport): track restarts
 	static const int RUT_EVERY_MS = 250;        // one rut op per vehicle at most this often
-	static const float RUT_R = 0.5;             // rut radius (the heightfield's Rut Radius)
+	static const float RUT_R = 0.3;             // rut radius. 0.5 until 2026-10-17 (user: too wide for the tyres; offline
+	                                            // heavy 6 passes with relax 40: 0.78 m wide, max wall 50 deg - build-3 plan Stage 2)
+	static const float RUT_SHARE = 0.4;         // Build 3 Stage 1 (R4): a pass cuts at least this share of what is left to
+	                                            // the cap (heavy: cap after 4 passes, was 6; light unchanged).
+	                                            // results/2026-10-17-scm-lite-proto.md. Build const = same on every machine
+	static const float RUT_REPOSE_TAN = 0.8390996;  // Build 3 Stage 2: tan 40 deg (was 30 with RUT_R 0.5; user 2026-10-17
+	                                            // narrower ruts: 30 widened RUT_R 0.3 back to 0.94 m) - after the relax no rut depth step
+	                                            // to a 4-neighbour floor sample is over this x FCELL
+	static const int RUT_REPOSE_ITERS = 4;      // relax passes per rut op (0 = off). Proto: 30 deg x4, 4 neighbours, heavy
+	                                            // max wall 49.9 -> 40.3 deg, rut 0.98 -> 1.19 m (results/2026-10-17-scm-lite-proto.md)
+	// Build 3 Stage 3 (user OK 2026-10-17; MEASURED offline, results/2026-10-17-scm-lite-proto.md "Re-run 2026-10-17"):
+	// bulldozed ridges. Each rut op raises a band RUT_R + GAP .. + W beside its segments by B x (deepest cut this op) x
+	// pi / 3 x RUT_R / W x sin(pi (d - RUT_R - GAP) / W) - it GROWS each pass, capped RUT_RIDGE_MAX over the undug
+	// ground. Plain RUT FIELD ground only (no voxel column round the sample): no bricks, no Displace, no rows (J2
+	// placeholders untouched). false = v143 exactly
+	static const bool RUT_RIDGES = true;
+	static const float RUT_RIDGE_B = 0.4;       // share of the cut volume pushed up beside the rut
+	static const float RUT_RIDGE_GAP = 0.2;     // flat strip between the rut edge (RUT_R) and the ridge
+	static const float RUT_RIDGE_W = 0.5;       // ridge band width
+	static const float RUT_RIDGE_MAX = 0.08;    // highest ridge over the undug ground
+	static const float RUT_RIDGE_FLAT = 0.02;   // patches draw a ridge only where the heightfield is this close to undug
+	static const int RUT_RIDGE_SALT = 50021;    // disp hash: a ridge value is not a floor value
+	static const int RUT_RIDGE_GONE = 7927;     // disp hash: a ridge back to none (7919 = a floor back to none)
 	static const int RUT_MAX_SEGS = 40;         // segments per op (the rest of a long frame gap is dropped)
 	static const float RUT_ON = 0.6;            // CarveRut: wheel this far off a column's surface = not on it (skip)
 	// convert ahead (user 2026-10-13 23:00, v032 = before): the 2 leading wheels' strip ahead goes VOX before they
@@ -225,10 +265,11 @@ class MUD_VoxelProbe
 	// whole 2 m skin cells to voxels (MarkCarved), so the rear tyre's cell could switch under it. 3 m clears that.
 	// 2026-10-14 (user felt lag with the look test, "delay more"): 4 m. RUT_LOOK draws the rut at once, so the feel
 	// cut can wait longer
-	static const float RUT_BEHIND_GAP = 3;    // v035 value again (user 2026-10-15); 4 was for RUT_LOOK
+	static const float RUT_BEHIND_GAP = 1.5;  // user 2026-10-17: ruts showed too late (3 = v035, 4 was for RUT_LOOK). RUT_FIELD
+	                                          // never flips skin cells (no MarkCarved); a cut reaches RUT_R + 2 relax samples = 0.8 m
 	// smart gap (user 2026-10-13 23:40: 3 m behind looked too far): a segment whose cut reaches only skin cells that
 	// are voxel already (SegOnVox) flips no cell, so it needs only RUT_R + 1 sample clear of the rear wheel
-	static const float RUT_BEHIND_GAP_VOX = 3;    // = RUT_BEHIND_GAP: smart gap off (v035 had none; 2026-10-14 4, was 1)
+	static const float RUT_BEHIND_GAP_VOX = 1.5;  // = RUT_BEHIND_GAP: smart gap off (v035 had none; 2026-10-14 4, was 1)
 	static const int RUT_BEHIND_MAX_MS = 4000;  // waiting longer than this (parked, reversing back): cut anyway ...
 	static const float RUT_BEHIND_CLEAR = 6;    // ... but only once both ends are this far (flat) from the vehicle
 	                                            // origin: slow driving took > 4 s to pass a front-wheel segment
@@ -305,8 +346,21 @@ class MUD_VoxelProbe
 	static const float LIFT = 0.02;     // seeded surface above our ground
 	static const int GRAVE_MS = 1000;   // a dropped brick entity is deleted this long after (MUD_VoxelGrave)
 	static const float FLOOR = 3;       // nothing digs deeper than this under the undug ground
+	// U1 deep tunnels (user 2026-10-17: 10 m; was 5 m). Build consts = the same on every machine (rule 3).
+	// results/2026-10-17-u1-deep-tunnels.md (10 m: Carve gj1 with TUNNEL_FLOOR still opens a crater at a 10 m shaft bottom)
+	static const float TUNNEL_FLOOR = 10;       // tunnels (CarveTunnel) and the C4 sphere dig this deep under the undug ground
+	static const float SEA_GAP = 1;             // sea guard (P1): no tunnel / sphere air lower than this above the ocean base height
 	static const float MAX_DEPTH = 3;   // crater depth clamp
-	static const float FUNNEL = 0.5;    // crater radius growth per metre above the hit point (no undercut)
+	static const float FUNNEL = 0.5;    // crater radius growth per metre above the hit point (no undercut) - old Carve; MUD_MudSheet copies it
+	// Build 1 crater (2026-10-17): the heightfield's cosine bowl (C1), = MUD_WorldGround attribute defaults (Crater Max
+	// Slope, Rim Share, Rim Width Share). Consts, not attributes: every machine carves the same (rule 3).
+	static const float CRATER_SLOPE = 0.9;      // steepest bowl wall, rise per m (42 deg; offline <= 44 deg drawn)
+	static const float CRATER_RIM_SHARE = 0.17; // rim height / depth
+	static const float CRATER_RIM_W_SHARE = 0.4; // rim width outside the crest / depth
+	static const float CRATER_FADE = 1.0;       // C3: a crater fades to nothing within this of a hard (road / kept) column
+	static const float ROOF_MIN = 0.75;         // C4: a hit this far under the undug ground ...
+	static const float ROOF_GAP = 0.5;          // ... with solid ground from this ...
+	static const float ROOF_REACH = 3;          // ... up to this far above it is under a roof: a sphere, not a crater
 	static const float CARVE_TOL = 0.05;  // a sample next to the surface moving more than this marks its cells carved
 	static const float KEPT_SINK = 0.3;// kept terrain columns: seeded this far under the terrain, which carries them
 	// tunnel test (2026-10-13): hold T on foot = dig a vertical capsule in front of you every TUNNEL_EVERY_MS.
@@ -314,11 +368,49 @@ class MUD_VoxelProbe
 	static const string TUNNEL_CONTEXT = "MUD_VoxelTunnelContext";
 	static const string TUNNEL_ACTION = "MUD_VoxelTunnel";
 	static const float TUNNEL_R = 0.8;          // capsule radius
-	static const float TUNNEL_HALF = 0.45;      // capsule half length (vertical): 2.5 m tall, floor 0.3 m under the feet
+	static const float TUNNEL_HALF = 0.45;      // capsule half length (vertical): 2.5 m tall, floor at the feet at pitch 0 (TUNNEL_MID)
 	static const float TUNNEL_AHEAD = 1.1;      // capsule middle this far ahead of the feet (flat look direction)
-	static const float TUNNEL_MID = 0.95;       // capsule middle above the feet
-	static const float TUNNEL_SLOPE = 1;        // m up / down per click at the steepest look (pitch clamped to 0.7)
+	static const float TUNNEL_MID = 1.25;       // capsule middle above the feet (U2 2026-10-17: was 0.95 = floor 0.3 m under the feet, a level look sank ~18 deg; 1.25 = level, Tools/u2_level_check.py)
+	static const float TUNNEL_SLOPE = 1;        // m up / down per click at the steepest look (pitch clamped to the slope choice TunnelDrop / TUNNEL_SLOPE)
+	static const float TUNNEL_DOWN_MAX = 1.0;   // server: the steepest slope choice (TunnelDrop); the client's choice is not sent
+	static const int TUNNEL_STEEP_COUNT = 5;    // slope choices, X in shovel TUNNEL mode (user 2026-10-17: "let the player choose")
+	static const int TUNNEL_STEEP_START = 1;    // 0.5 m per click (~27 deg)
+	static const string TUNNEL_STEEP_CONTEXT = "MUD_TunnelShovelContext";
+	static const string TUNNEL_STEEP_ACTION = "MUD_TunnelSteep";
+	static const float TUNNEL_LAG = 0.5;        // server down check: feet may lag the client's by this much
+	static const bool TUNNEL_DEBUG_T = true;    // debug key, user 2026-10-16: OFF before release (false = T does nothing, the server refuses it)
+	// Sun-spot hunt (2026-10-17): first T press selects the engine diag menu 'Clustering' (Probes shapes, Disable local
+	// probes, Probes volumes log; 'System textures' > Show shadowmap showed no sun on the blob). The id is a startup counter that differs per exe, so select by name.
+	static const bool TUNNEL_DIAG_SMASK = false;   // off 2026-10-17: blob found (probe coverage)
 	static const int TUNNEL_EVERY_MS = 300;
+	// Tunnel darkness (user 2026-10-17, probe): client / host spawns one MudTunnelProbe.et (vanilla ProbeEnvCave_base values
+	// + a 5 m ProbeVolume box; script cannot size a ProbeVolume, no methods) per TUNNEL_DARK_STEP grid cell a tunnel dig
+	// under a roof (RoofOver) reaches. Unproven: a runtime-spawned probe darkens anything.
+	static const bool TUNNEL_DARK = false;    // PARKED 2026-10-17 (user): no tunnel darkening - docs/features/trenches-tunnels/README.md
+	static const ResourceName TUNNEL_PROBE = "{5AFD9F654A6D42F7}Prefabs/Mud/MudTunnelProbe.et";
+	// darker the deeper (user 2026-10-17: 'pitch black at 10 m'): feet depth under the undug ground picks a child prefab
+	// (_1.._4 lower LVDiffuse / LVReflection / TopColorEV; tune the EVs in the prefabs). Depth from TUNNEL_DARK_D1 up.
+	static const ResourceName TUNNEL_PROBE_1 = "{1FBBFDEBCD8F6776}Prefabs/Mud/MudTunnelProbe_1.et";
+	static const ResourceName TUNNEL_PROBE_2 = "{153D30A1A6B1E88F}Prefabs/Mud/MudTunnelProbe_2.et";
+	static const ResourceName TUNNEL_PROBE_3 = "{6C3251C97CD9B1FC}Prefabs/Mud/MudTunnelProbe_3.et";
+	static const ResourceName TUNNEL_PROBE_4 = "{7976E85D844A3442}Prefabs/Mud/MudTunnelProbe_4.et";
+	static const float TUNNEL_DARK_D1 = 1;     // m feet depth: level 1 from here, then one level darker every TUNNEL_DARK_BAND (was 3)
+	static const float TUNNEL_DARK_BAND = 1;   // levels at 1 / 2 / 3 / 4 m: level 4 = darkest from 4 m (user 2026-10-17; was 2 = 3 / 5 / 7 / 9 m)
+	// the probe box (MudTunnelProbe.et Size 5 3 5) must sit wholly under ground (user shot 2026-10-17: a tunnel dug from a
+	// trench blacked the trench wall): ground top over 9 points (middle, edges, corners) at least ROOF above the middle
+	static const float TUNNEL_DARK_HALF = 2.5;  // m, half the box side (keep = prefab Size x / 2)
+	static const float TUNNEL_DARK_ROOF = 1.5;  // m, half the box height (keep = prefab Size y / 2; 1.0 tried 2026-10-17: no visible gain)
+	// sun-shadow LID PROBE (user 2026-10-17): our heightfield (MatTerrainObject) casts no sun shadow (PROVEN WB), so sun
+	// shines through the roof. Does a script MeshObject with MAT_DIRT cast? One up-facing square per probe, TUNNEL_LID_SINK
+	// under the lowest of BoxRoofed's 9 ground tops (hidden under the surface; seen from a tunnel below = back face, culled).
+	static const bool TUNNEL_LID = false;   // off 2026-10-17: lids did not stop the spots, and blasts expose them as flat squares
+	static const float TUNNEL_LID_HALF = 2.5;  // m, half the square side (= TUNNEL_DARK_HALF: only that ground was checked)
+	// VC flags readback probe (IDA 2026-10-17: SetVComponentFlags ORs into the mesh instance flags and returns them,
+	// so (0) only reads; the shadow caster gather skips an instance with bit 8 = NOSHADOW). Log only.
+	protected static int s_iVcLog;
+	static const float TUNNEL_LID_SINK = 0.15; // m under the lowest ground top (BoxRoofed: >= ROOF above mid, so over the capsule top)
+	static const float TUNNEL_DARK_STEP = 4;     // m, probe grid across (box 5 m; was 2 = up to ~18 boxes over one point: lit spot inside cover, gone at 4 / 2.5 - WB OK 2026-10-17)
+	static const float TUNNEL_DARK_STEP_Y = 2.5; // m, probe grid up (box 3 m; WB OK 2026-10-17)
 	static const int MAX_COLUMNS = 6000;        // converted columns per match (~250 craters); past this the heightfield
 	static const int MAX_OP_COLUMNS = 400;      // one op converting more (a box past ~80 m): the heightfield
 	static const int SEED_CHARS = 4000;         // seed text longer than this: the heightfield (measure, then tune)
@@ -327,6 +419,22 @@ class MUD_VoxelProbe
 	static const int JOIN_MS = 25;              // build / drain budget per frame while a client joins
 	static const int DRAIN_MS = 4;              // MP client: received ops applied per frame until this is spent
 	static const int JIP_CHARS = 1500;          // MP: ops per JIP message, joined with '#' (one longer op goes alone)
+	// Build 3 Stage 6 (T2, user 2026-10-17: both sides, none for the shovel square): spoil parapet beside a planned
+	// trench. Starts PARA_BERM past the wall top of the plan's full depth; rises over PARA_RISE, flat PARA_TOP, falls
+	// over PARA_RISE; height = this swing's depth x PARA_K, at most PARA_MAX. false = no parapet (v150 = before).
+	static const bool PARAPET = true;
+	static const float PARA_BERM = 0;       // was 0.25: left a grass strip between the wall top and the mound (user 2026-10-17)
+	static const float PARA_RISE = 0.5;
+	static const float PARA_TOP = 1.0;
+	static const float PARA_K = 0.25;
+	static const float PARA_MAX = 0.4;
+	static const float TRENCH_PAD = 0.25;      // T1 2026-10-17: trench cut / fill take columns within this of a piece as inside (drawn floor = plan width within +0.10 m on average, +-0.15 m by grid offset; results/2026-10-16-fix-checks.md)
+	static const int JIP_MSGS_PER_FRAME = 4;    // MP server: JIP messages per frame per asking player (J1 2026-10-17; was the whole log in one frame)
+	static const bool JIP_SNAPSHOT = true;      // J2 2026-10-17: a first ask (seq 1) gets voxel ops + rut tiles, not every rut op
+	static const int SNAP_CHARS = 1500;         // J2: rut tiles per snapshot message, joined with '/' (= JIP_CHARS, a size already sent)
+	static const int SNAP_TEST_MS = 30000;      // J2 test kit: server snapshot self-test at most this often (when the seq moved)
+	static const int HELD_CAP = 20000;          // MP client: ops held out of order; past it they are dropped and asked again (J1)
+	static const int RESEND_WAIT_MS = 15000;    // MP client: a seq gap this old asks the server again from that seq (J1)
 	static const float MISS = 100000;           // gathered sample of a column that is not converted
 	static const float ROW_PAD = 0.5;           // rows reach this far past the seeded tops of a column and its neighbours
 	static const float KEEP_ROW = 1.0;          // Put: a value this far from 0 on both sides of a change makes no row
@@ -349,15 +457,33 @@ class MUD_VoxelProbe
 	                                            // 'MUD scan check: MISMATCH'. The band result is kept.
 	static const int VKEY = 16384;              // cell vertex cache: (stamp * 4 + parity) * VKEY + vertex (VKEY > MAX_V)
 	static const int STAMP_MAX = 30000;         // (m_iStamp * 4 + 3) * VKEY stays under 2^31 (caches reset past this)
+	// crater decal PROBE (user 2026-10-17): vanilla's mortar decal lands on the surface the crater then hides; at go-live
+	// each client lays one on the brick entities under the crater (World.CreateDecal, projected down). 'MUD decal:' lines.
+	static const bool CRATER_DECAL = false;   // PARKED 2026-10-17: trace hit the hidden terrain, CreateDecal null (master list)
+	static const ResourceName DECAL_MAT = "{039FA43299C7980D}Assets/Decals/Miscellaneous/Mortar/Decal_Impact_Mortar_01.emat";   // Warhead_Shell_HE.et SpawnDecalEffect (Exp 1.9 pak)
+	static const float DECAL_SIZE = 1.0;     // decal size per m of crater crest radius (vanilla M821: Scale 2.75 - tune in WB)
+	static const float DECAL_LIFE = 60;      // s, as Warhead_Shell_HE.et
+	static const float GRASS_TOL = 0.05;    // Stage 6 (user 2026-10-17): a flat face draws grass only when all 4 corners are within this of the seeded ground (OnGround); dug or raised more (parapet, crater rim, the strip between) draws dirt (was -0.15 .. any, then RAISED_DIRT 0.1 left a grass strip)
 	static const float TOP_TILE = 64;   // grass top UVs 0..1 per skin chunk, as our fine patches
 	static const float SOIL_TILE = 12;  // soil UVs 0..1 per 12 m = MUD_MudSheet.SIZE, so the dirt grain lines up with the mud sheet (8 until 2026-10-15, user 'layered like a cake')
 	static const ResourceName MAT_TOP = "{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat";
 	static const ResourceName MAT_DIRT = "{6EBF7ADA9FD582F7}Assets/Structures/Military/Fortifications/DirtMounds/Data/DirtCover_01.emat";   // as our groove layer (user pick 2026-10-12; Soil_01 at tiling 8 also worked, v013)
+	// Tunnel walls (DirtMat): ambient light cut by material (DiffuseIBL / SpecularIBL) - kills the lit spots probes could not
+	// (all-black IBL 0 fixed them, user 2026-10-17, but looked bad). Roof over the brick's highest vertex picks the level.
+	static const ResourceName MAT_DARK_1 = "{4D55445441524B32}Assets/Mud/Data/MUD_TunnelDark1.emat";   // IBL 0.5
+	static const ResourceName MAT_DARK_2 = "{4D55445441524B33}Assets/Mud/Data/MUD_TunnelDark2.emat";   // IBL 0.25
+	static const ResourceName MAT_DARK_3 = "{4D55445441524B31}Assets/Mud/Data/MUD_TunnelDark.emat";    // IBL 0.1
+	static const bool DARK_MAT = false;     // PARKED 2026-10-17 (user) with TUNNEL_DARK: false = MAT_DIRT everywhere
+	static const float DARK_ROOF_1 = 1;     // m of ground over the brick's top vertex: level 1 from here
+	static const float DARK_ROOF_2 = 2.5;
+	static const float DARK_ROOF_3 = 4;   // as our groove layer (user pick 2026-10-12; Soil_01 at tiling 8 also worked, v013)
 	static const ResourceName GAMEMAT = "{C3691F2D8FE0234F}Common/Materials/Game/dirt.gamemat";
 
 	protected static ref MUD_VoxelProbe s_Inst;
 	protected static bool s_bTraceHidden;  // MUD_GroundEntity.HideFromTraces: bricks off traces (get in / out)
 	protected static bool s_bDigHeld;
+	protected static bool s_bDiagSelected;
+	protected static int s_iTunnelSteep = 1;   // = TUNNEL_STEEP_START; local player's slope choice (T and the shovel)
 	protected static int s_iDigAt;
 	// MP client: ops by seq until they can go in order (held before s_Inst exists too)
 	protected static ref map<int, string> s_mPending = new map<int, string>();
@@ -365,14 +491,36 @@ class MUD_VoxelProbe
 	protected static bool s_bAskedJip;
 	protected static int s_iGapAt;      // tick a seq gap was first seen (0 = none)
 	protected static bool s_bToldGap;
+	protected static bool s_bLost;     // J1: an op was dropped at the held cap - asked again from s_iNextSeq (Drain)
+	protected static int s_iAskAt;     // tick of the last op log ask (0 = none)
+	protected static int s_iAsks;      // op log asks this match (log)
+	protected static ref map<int, int> s_mJipFrom = new map<int, int>();   // server: player id -> next seq to send (J1)
+	protected static ref map<int, ref MUD_JipSnap> s_mSnap = new map<int, ref MUD_JipSnap>();   // server: player id -> snapshot send (J2)
+	protected static int s_iSnapS;      // J2 joiner: seq of the snapshot coming (0 = none): its tiles load once ops <= it are in
+	protected static ref array<string> s_aSnapParts = {};   // ... its tile parts by index ("" = not here yet)
+	protected static int s_iSnapGot;    // ... parts here
+	protected static int s_iSnapWaitAt; // ... tick the ops reached it with parts missing (0 = not waiting)
+	protected static bool s_bToldSnap;
+	protected static int s_iSnapRows;   // ... rows made from rut placeholders (log)
+	protected static int s_iSnapSkipped;   // ... rut ops covered by placeholders (log)
 	protected static ref array<ref MUD_VoxelRutTrack> s_aTracks = {};
+	protected static float s_fFakeAt = -1;     // test kit FakeRutTick: time the fake rut ops start (-1 = not yet known)
+	protected static int s_iFakeN;             // ... issued so far
+	protected static int s_iFakeSeq0;          // ... m_iSeq before the first
+	protected static vector s_vFakeO;          // ... grid corner
 
 	protected ref map<int, ref MUD_VoxelColumn> m_mCols = new map<int, ref MUD_VoxelColumn>();
 	// RUT FIELD: rut floor tiles (ColKey), only where a floor sample was ever written
 	protected ref map<int, ref MUD_RutTile> m_mRutTiles = new map<int, ref MUD_RutTile>();
 	// DIG NOW (2026-10-15): surface height per sample column, read from the field (no traces); cleared every go-live
 	protected ref map<int, float> m_mSurf = new map<int, float>();
+	protected ref map<string, int> m_mDark = new map<string, int>();   // tunnel darkness: probe grid cells done
+	protected ref array<ref Resource> m_aLidRes = {};                  // lid probe meshes (the mesh goes without a ref)
 	protected ref array<ref MUD_VoxelOp> m_aOps = {};    // every op, in seq order (JIP)
+	protected bool m_bRowLog;           // J2: Submit of a rut op - Row() notes the rows it makes (m_sRowLog -> op.m_sRows)
+	protected string m_sRowLog;
+	protected int m_iSnapTestSeq;       // J2 test kit: seq of the last self-test
+	protected int m_iSnapTestAt;        // ... its tick (0 = none yet)
 	protected ref array<MUD_VoxelBrick> m_aQueue = {};  // bricks to build, in order (weak: columns own them)
 	protected int m_iQHead;
 	protected ref array<MUD_VoxelBrick> m_aShow = {};   // made since the last GoLive: shown at the next
@@ -382,6 +530,8 @@ class MUD_VoxelProbe
 	protected ref array<vector> m_aMudHi = {};
 	protected ref array<vector> m_aMudWp = {};
 	protected ref array<float> m_aMudR = {};
+	protected ref array<int> m_aMudKind = {};      // Build 2 Stage 5: op kind, and a fill's rise (m), for MUD_GroundFollow
+	protected ref array<float> m_aMudLift = {};
 	protected ref array<MUD_VoxelBrick> m_aSwap = {};   // shown bricks with a pending build
 	protected ref array<ref MUD_VoxelGrave> m_aGrave = {}; // old brick entities waiting GRAVE_MS to be deleted (Bury)
 	protected ref array<int> m_aNewCarved = {};         // skin cells (CellKey) carved since the last GoLive: they go VOX
@@ -409,6 +559,7 @@ class MUD_VoxelProbe
 	protected float m_fX0;              // skin grid corner = brick grid corner (top UVs too)
 	protected float m_fZ0;
 	protected float m_fCell;            // skin cell side
+	protected float m_fSeaY = -1000000;  // U1 sea guard: tunnel / sphere floors never under this (ocean base + SEA_GAP; no ocean: off)
 	protected float m_fLastG;           // ground y for a sample column our ground cannot give
 	protected bool m_bHeadless;         // dedicated server: bounds meshes, no rendering
 	protected int m_iSeq;               // server: ops made so far
@@ -500,6 +651,8 @@ class MUD_VoxelProbe
 	protected int m_iDispSeamHoles;
 	protected int m_iDispLogged;        // HOLE lines this check (DISP_HOLE_MAX_LOG)
 	protected int m_iDispHash;
+	protected int m_iFieldHash;     // test kit (2026-10-17): this op's changed FEEL samples, mod DISP_HASH_M (FieldHashAdd)
+	protected int m_iFieldHashN;    // ... writes hashed
 	protected int m_iDispOpW;           // this op: floor samples written, cleared
 	protected int m_iFieldDirty;        // RUT FIELD: this op's heightfield patches marked dirty (Stage 3)
 	protected bool m_bFChg;             // RUT FIELD: this op changed a floor sample; box m_iFi0..1 x m_iFk0..1
@@ -518,6 +671,7 @@ class MUD_VoxelProbe
 	protected ref array<vector> m_aDispHolePos = {};    // hole check: marks, until (ms)
 	protected ref array<int> m_aDispHoleUntil = {};
 	protected ref TraceParam m_DispTrace;
+	protected ref TraceParam m_DecalTrace;    // crater decal probe
 #ifdef ENABLE_DIAG
 	protected static bool s_bDispMenu;
 #endif
@@ -528,9 +682,10 @@ class MUD_VoxelProbe
 	protected int m_iJoinT0;
 
 	//------------------------------------------------------------------------------------------------
-	//! MUD_WorldGroundEntity.Crater: dig this crater into voxels. False = not taken (client, refused), the caller digs
-	//! the heightfield crater.
-	static bool Blast(vector wp, float depth)
+	//! MUD_WorldGroundEntity.VoxelCrater: dig this crater into voxels. depth = this charge's (jittered) depth on flat
+	//! ground; cap / gain = the stack cap (C2); stretch, lobeW, turn2, turn3 = the outline (C6), all rolled by the server.
+	//! False = not taken (client, refused), the caller digs the heightfield crater.
+	static bool Blast(vector wp, float depth, float cap, float gain, float stretch, float lobeW, float turn2, float turn3)
 	{
 		if (!ENABLED || !Replication.IsServer())
 			return false;   // clients get the server's ops
@@ -538,7 +693,7 @@ class MUD_VoxelProbe
 			return false;
 		if (!SURFACE_OPS && !InArea(wp))
 			return false;   // heightfield crater
-		return s_Inst.DoBlast(wp, depth);
+		return s_Inst.DoBlast(wp, depth, cap, gain, stretch, lobeW, turn2, turn3);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -573,10 +728,25 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Carve reach of a crater of this (clamped) depth: rim outer edge + one cell
-	protected static float Reach(float depth)
+	//! Carve reach of a crater of this (clamped) depth and outline stretch: rim outer edge + one cell
+	protected static float Reach(float depth, float stretch)
 	{
-		return Math.Max(0.75, depth * 2.2) + Math.Max(0.5, depth) + CELL;
+		return (CraterCrest(depth) + CraterRimW(depth)) * (1 + stretch) + CELL;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C1: crest radius of the cosine bowl (rim crest), as MUD_WorldGroundEntity.Crater: walls no steeper than CRATER_SLOPE
+	static float CraterCrest(float depth)
+	{
+		return Math.Max(0.75, depth * (1 + CRATER_RIM_SHARE) * Math.PI / (2 * CRATER_SLOPE));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C1: rim width outside the crest (cosine fall to the undug ground)
+	static float CraterRimW(float depth)
+	{
+		float w = Math.Max(0.5, depth * CRATER_RIM_W_SHARE);
+		return Math.Max(w, depth * CRATER_RIM_SHARE * Math.PI / (2 * CRATER_SLOPE));
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -603,9 +773,17 @@ class MUD_VoxelProbe
 			AskJip();
 			Drain();
 		}
+		else
+		{
+			s_Inst.JipSendTick();
+			if (MUD_TestKit.TEST_KIT && RplSession.Mode() == RplMode.None)
+				s_Inst.SnapSelfTestTick();     // SP / WB only: on a live server it would spoil the PERF frames
+		}
 		s_Inst.Graves();
 		s_Inst.Step();
 		s_Inst.DispTick();
+		if (MUD_TestKit.FakeRutOps() > 0 && Replication.IsServer())
+			s_Inst.FakeRutTick(time);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -636,7 +814,9 @@ class MUD_VoxelProbe
 	{
 		if (!ENABLED || !lay || lay.Count() < 1 || !Ensure())
 			return false;
-		float margin = MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + CELL;
+		float margin = MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + TRENCH_PAD + CELL;
+		if (PARAPET)
+			margin = Math.Max(margin, ParapetStart(lay) + PARA_RISE * 2 + PARA_TOP + CELL);     // Stage 6: as Prepare
 		float x0 = 100000000;
 		float z0 = 100000000;
 		float x1 = -100000000;
@@ -676,10 +856,11 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Tunnel test: T held on foot digs a capsule ahead of the player, at once then every TUNNEL_EVERY_MS
+	//! Tunnel test: T held on foot digs a capsule ahead of the player, at once then every TUNNEL_EVERY_MS.
+	//! Debug key (TUNNEL_DEBUG_T): no tool; the shovel TUNNEL mode is the real way.
 	protected static void TunnelInput()
 	{
-		if (System.IsConsoleApp())
+		if (!TUNNEL_DEBUG_T || System.IsConsoleApp())
 			return;
 		ChimeraCharacter player = ChimeraCharacter.Cast(SCR_PlayerController.GetLocalControlledEntity());
 		if (!player || player.IsInVehicle())
@@ -692,6 +873,12 @@ class MUD_VoxelProbe
 		if (!input || !cameras || !cameras.CurrentCamera())
 			return;
 		input.ActivateContext(TUNNEL_CONTEXT);
+		if (TUNNEL_DIAG_SMASK && !s_bDiagSelected && input.GetActionValue(TUNNEL_ACTION) >= 0.5)
+		{
+			s_bDiagSelected = true;
+			DiagMenu.SelectMenuByName("Clustering");
+			Print("MUD tunnel: diag menu 'Clustering' selected - Probes shapes / Disable local probes / Probes volumes log");
+		}
 		if (input.GetActionValue(TUNNEL_ACTION) < 0.5)
 		{
 			s_bDigHeld = false;
@@ -703,26 +890,103 @@ class MUD_VoxelProbe
 		s_bDigHeld = true;
 		s_iDigAt = now;
 
+		vector mid;
+		if (!TunnelAimLocal(player, mid))
+			return;
+		// MP client: the server checks and digs it (and sends it to everyone); host / SP: the same checks, run here
+		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
+		if (pc)
+			pc.MUD_RequestVoxelTunnel(mid);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! U1 stage 2: where a tunnel click (T or a shovel TUNNEL swing) digs for the local player, from the camera look.
+	//! False with no camera.
+	static bool TunnelAimLocal(notnull IEntity player, out vector mid)
+	{
+		CameraManager cameras = GetGame().GetCameraManager();
+		if (!cameras || !cameras.CurrentCamera())
+			return false;
 		vector cam[4];
 		cameras.CurrentCamera().GetTransform(cam);
-		vector look = cam[2];
+		mid = TunnelAim(player, cam[2], TunnelDrop(s_iTunnelSteep));
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Most a click goes up / down (m) for slope choice i. Ramp angles MEASURED offline (Tools/u1_deep_tunnel_checks.py
+	//! deep10, mean deg): 0.35 = 19, 0.5 = 27, 0.7 = 39, 0.85 = 47, 1.0 = 54. The character climbs ~50 deg (IDA
+	//! 2026-10-15), so the two steepest may not walk back out.
+	static float TunnelDrop(int i)
+	{
+		if (i <= 0)
+			return 0.35;
+		if (i == 1)
+			return 0.5;
+		if (i == 2)
+			return 0.7;
+		if (i == 3)
+			return 0.85;
+		return TUNNEL_DOWN_MAX;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Local: the next slope choice (X in shovel TUNNEL mode), with a hint
+	static void NextTunnelSteep()
+	{
+		s_iTunnelSteep = (s_iTunnelSteep + 1) % TUNNEL_STEEP_COUNT;
+		SCR_HintManagerComponent.ShowCustomHint(TunnelSteepText() + "\nX: next slope", "Tunnel slope", 3, true);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static string TunnelSteepText()
+	{
+		int i = s_iTunnelSteep;
+		if (i <= 0)
+			return "Gentle: ~19 deg";
+		if (i == 1)
+			return "Normal: ~27 deg";
+		if (i == 2)
+			return "Steep: ~39 deg";
+		if (i == 3)
+			return "Very steep: ~47 deg (may not walk back out)";
+		return "Steepest: ~54 deg (too steep to walk out)";
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Local, every frame while the shovel is in TUNNEL mode (MUD_Dig): X cycles the slope. Own context, only on then,
+	//! so X is not taken from vanilla at other times.
+	static void TunnelSteepInput()
+	{
+		InputManager input = GetGame().GetInputManager();
+		if (!input)
+			return;
+		input.ActivateContext(TUNNEL_STEEP_CONTEXT);
+		if (input.GetActionTriggered(TUNNEL_STEEP_ACTION))
+			NextTunnelSteep();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! U1 stage 2 (user 2026-10-17): capsule middle for a look direction. Up / down per click capped at drop
+	//! (TunnelDrop); a look (near) straight down / up digs ahead along the body facing, never a shaft in place.
+	static vector TunnelAim(notnull IEntity player, vector look, float drop)
+	{
 		vector flat = Vector(look[0], 0, look[2]);
 		if (flat.Length() > 0.1)
 			flat = flat.Normalized();
 		else
-			flat = vector.Zero;     // straight down / up: dig in place
-		float pitch = Math.Clamp(look[1], -0.7, 0.7);
-		vector mid = player.GetOrigin() + flat * TUNNEL_AHEAD + Vector(0, TUNNEL_MID + pitch * TUNNEL_SLOPE, 0);
-		if (!Replication.IsServer())
-		{
-			// MP client: the server digs it (and sends it to everyone)
-			SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
-			if (pc)
-				pc.MUD_RequestVoxelTunnel(mid);
-			return;
-		}
-		if (Ensure())
-			s_Inst.DoTunnel(mid);
+			flat = MUD_Dig.Facing(player);
+		float lim = Math.Min(drop, TUNNEL_DOWN_MAX) / TUNNEL_SLOPE;
+		float pitch = Math.Clamp(look[1], -lim, lim);
+		return player.GetOrigin() + flat * TUNNEL_AHEAD + Vector(0, TUNNEL_MID + pitch * TUNNEL_SLOPE, 0);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Server, both tunnel RPCs: the capsule middle is not lower than the steepest allowed click from these feet
+	//! (TUNNEL_LAG for the server's feet lagging the client's)
+	static bool TunnelDownOk(vector mid, vector feet)
+	{
+		return mid[1] >= feet[1] + TUNNEL_MID - TUNNEL_DOWN_MAX - TUNNEL_LAG;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -965,6 +1229,15 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Test kit 10 s line (2026-10-17): ops in m_aOps - server: every op; client: the ops applied. -1 = no probe yet
+	static int OpCount()
+	{
+		if (!s_Inst)
+			return -1;
+		return s_Inst.m_aOps.Count();
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! MP client (MUD_WorldGroundEntity.RpcDo_VoxelOp, JIP batches): hold the op until every older one is in
 	static void Receive(string text)
 	{
@@ -977,11 +1250,44 @@ class MUD_VoxelProbe
 		if (!MUD_TrenchPlan.IsInt(head))
 			return;
 		int seq = head.ToInt();
+		int last;
+		string rows;
+		if (RangeOf(text, last, rows))
+		{
+			// J2: placeholder for rut ops seq..last (the snapshot tiles hold them). It REPLACES a real rut op held in
+			// that range (a broadcast between connect and the ask): run here without the earlier ruts it would make
+			// other brick rows than the server logged. Ops already applied are skipped.
+			int start = seq;
+			if (start < s_iNextSeq)
+				start = s_iNextSeq;
+			if (start > last)
+				return;
+			DropHeld(start, last);
+			if (s_mPending.Count() >= HeldCap())
+			{
+				s_bLost = true;
+				return;
+			}
+			s_mPending.Insert(start, string.Format("%1|R|%2|", start, last) + rows);
+			return;
+		}
 		if (seq < s_iNextSeq || s_mPending.Contains(seq))
 			return;     // already applied / held (a JIP batch and a broadcast can both carry it)
-		if (s_mPending.Count() >= 20000)
-			return;     // never drained: do not grow without end
+		if (s_mPending.Count() >= HeldCap())
+		{
+			s_bLost = true;     // J1: dropped, so asked again from s_iNextSeq once there is room (Drain)
+			return;
+		}
 		s_mPending.Insert(seq, text);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MP client: ops held out of order at most (past it Receive drops and Drain asks again)
+	protected static int HeldCap()
+	{
+		if (MUD_TestKit.JipTestCap() > 0)
+			return MUD_TestKit.JipTestCap();     // test kit: J1 shows with ~500 ops
+		return HELD_CAP;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -991,7 +1297,17 @@ class MUD_VoxelProbe
 		array<string> texts = {};
 		batch.Split("#", texts, true);
 		foreach (string t : texts)
-			Receive(t);
+		{
+			string tag;
+			if (t.Length() >= 2)
+				tag = t.Substring(0, 2);
+			if (tag == "S|")
+				ReceiveSnapHead(t);
+			else if (tag == "T|")
+				ReceiveSnapTile(t);
+			else
+				Receive(t);
+		}
 		Print(string.Format("MUD voxel probe: JIP batch in, %1 ops, next seq %2, %3 held", texts.Count(), s_iNextSeq, s_mPending.Count()), LogLevel.NORMAL);
 	}
 
@@ -1004,22 +1320,55 @@ class MUD_VoxelProbe
 		int budget = DRAIN_MS;
 		if (Joining())
 			budget = JOIN_MS;
+		if (!SnapGate())
+			return;
 		while (s_mPending.Contains(s_iNextSeq))
 		{
 			if (System.GetTickCount(t0) >= budget)
 				return;     // the rest next frame
 			string text = s_mPending.Get(s_iNextSeq);
+			// J2: a real rut op inside a coming snapshot waits for its placeholder (Receive swaps it in) - treated as a
+			// gap below, so J1 asks again if it never comes
+			if (s_iSnapS > 0 && s_iNextSeq <= s_iSnapS && IsRutText(text))
+				break;
 			s_mPending.Remove(s_iNextSeq);
-			s_iNextSeq++;
-			MUD_VoxelOp op = Decode(text);
-			if (op)
-				s_Inst.Submit(op);
+			s_iGapAt = 0;     // J1: a gap that filled is not 'old' when the next one shows
+			int last;
+			string rows;
+			if (RangeOf(text, last, rows))
+			{
+				// J2: rut ops the snapshot tiles hold - only the brick rows they made, at their seq
+				s_Inst.RangeRows(rows);
+				s_iSnapSkipped += last - s_iNextSeq + 1;
+				DropHeld(s_iNextSeq + 1, last);
+				s_iNextSeq = last + 1;
+			}
 			else
-				Print("MUD voxel probe: bad op text from the server: " + text, LogLevel.ERROR);
+			{
+				s_iNextSeq++;
+				MUD_VoxelOp op = Decode(text);
+				if (op)
+					s_Inst.Submit(op);
+				else
+					Print("MUD voxel probe: bad op text from the server: " + text, LogLevel.ERROR);
+			}
+			if (!SnapGate())
+				return;
 		}
 		if (s_mPending.IsEmpty())
 		{
 			s_iGapAt = 0;
+			if (s_bLost)
+				AskFrom("ops were dropped at the held cap");
+			return;
+		}
+		if (s_bLost && s_mPending.Count() >= HeldCap())
+		{
+			// J1: full of newer ops while the next one was dropped - nothing can drain. Start again from s_iNextSeq.
+			int cleared = s_mPending.Count();
+			s_mPending.Clear();
+			s_iGapAt = 0;
+			AskFrom(string.Format("held cap full without seq %1, %2 newer ones cleared", s_iNextSeq, cleared));
 			return;
 		}
 		if (s_iGapAt == 0)
@@ -1029,6 +1378,9 @@ class MUD_VoxelProbe
 			s_bToldGap = true;
 			Print(string.Format("MUD voxel probe: waiting 10 s for op seq %1 (%2 newer ones held) - JIP asked %3", s_iNextSeq, s_mPending.Count(), s_bAskedJip), LogLevel.WARNING);
 		}
+		// J1 safety net: a gap that stays (an op lost any other way) asks again, at most every RESEND_WAIT_MS
+		if (s_bAskedJip && System.GetTickCount(s_iGapAt) > RESEND_WAIT_MS && System.GetTickCount(s_iAskAt) > RESEND_WAIT_MS)
+			AskFrom(string.Format("seq %1 missing for %2 s", s_iNextSeq, RESEND_WAIT_MS / 1000));
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1037,40 +1389,732 @@ class MUD_VoxelProbe
 	{
 		if (s_bAskedJip || RplSession.Mode() == RplMode.None)
 			return;
-		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
-		if (!pc)
-			return;     // next frame
-		s_bAskedJip = true;
-		pc.MUD_RequestVoxelJip();
-		Print(string.Format("MUD voxel probe: asked the server for the voxel op log (next seq %1, %2 held)", s_iNextSeq, s_mPending.Count()), LogLevel.NORMAL);
+		if (AskFrom("first ask (late join / ops made before the ground was up)"))
+			s_bAskedJip = true;
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Server: every op made so far, as JIP messages of at most JIP_CHARS (one longer op goes alone). Returns ops.
-	static int JipBatches(array<string> batches)
+	//! MP client (J1): ask the server for every op from s_iNextSeq on. False = not now (no controller yet, or asked
+	//! < 1 s ago - the server takes one ask per second); the caller tries again next frame.
+	protected static bool AskFrom(string why)
 	{
-		if (!s_Inst)
-			return 0;
-		string cur;
-		int n;
-		foreach (MUD_VoxelOp op : s_Inst.m_aOps)
+		if (RplSession.Mode() == RplMode.None)
+			return false;
+		if (s_iAskAt != 0 && System.GetTickCount(s_iAskAt) < 1000)
+			return false;
+		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
+		if (!pc)
+			return false;
+		s_bLost = false;
+		s_iAskAt = System.GetTickCount();
+		s_iAsks++;
+		pc.MUD_RequestVoxelJip(s_iNextSeq);
+		Print(string.Format("MUD voxel probe: asked the server for the op log from seq %1 (%2 held, ask %3) - %4", s_iNextSeq, s_mPending.Count(), s_iAsks, why), LogLevel.NORMAL);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Server (J1, MUD_VoxelNet.c): send player pid every op from seq 'from' on, JIP_MSGS_PER_FRAME messages per
+	//! frame (JipSendTick). A new ask replaces that player's running send.
+	static void ServerJipAsk(int pid, int from)
+	{
+		if (from < 1)
+			from = 1;
+		s_mJipFrom.Set(pid, from);
+		int newest = -1;
+		if (s_Inst)
+			newest = s_Inst.m_iSeq;
+		Print(string.Format("MUD voxel probe: player %1 asked for the op log from seq %2 - server at seq %3, %4 messages per frame", pid, from, newest, JIP_MSGS_PER_FRAME), LogLevel.NORMAL);
+		// J2: a first ask gets a new snapshot; a later ask (J1, a lost op) from <= its S resumes it (placeholders
+		// again; tiles not sent twice - reliable, in order), past S gets real ops as before
+		MUD_JipSnap had = s_mSnap.Get(pid);
+		if (from > 1 && had && from <= had.m_iS)
+			had.m_bDone = false;
+		if (from == 1 && JIP_SNAPSHOT && s_Inst && s_Inst.m_iSeq > 0)
 		{
-			if (op.m_sText.IsEmpty())
-				continue;
+			int t0 = System.GetTickCount();
+			MUD_JipSnap snap = s_Inst.MakeSnap();
+			s_mSnap.Set(pid, snap);
+			int bytes;
+			foreach (string part : snap.m_aTiles)
+				bytes += part.Length();
+			Print(string.Format("MUD voxel probe: player %1 snapshot at seq %2: %3 rut tiles in %4 parts, %5 bytes, built in %6 ms",
+				pid, snap.m_iS, s_Inst.m_mRutTiles.Count(), snap.m_aTiles.Count(), bytes, System.GetTickCount(t0)), LogLevel.NORMAL);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Server (J1): the next JIP_MSGS_PER_FRAME messages to each asking player, oldest ops first
+	protected void JipSendTick()
+	{
+		if (s_mJipFrom.IsEmpty())
+			return;
+		int newest = 0;
+		if (!m_aOps.IsEmpty())
+			newest = m_aOps[m_aOps.Count() - 1].m_iSeq;
+		array<int> pids = {};
+		array<int> nexts = {};
+		array<int> gone = {};
+		for (int j = 0; j < s_mJipFrom.Count(); j++)
+		{
+			int pid = s_mJipFrom.GetKey(j);
+			int from = s_mJipFrom.GetElement(j);
+			int next = -1;     // -1 = done (player left or everything sent)
+			SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerManager().GetPlayerController(pid));
+			if (pc)
+			{
+				array<string> batches = {};
+				MUD_JipSnap snap = s_mSnap.Get(pid);
+				if (snap && snap.m_bDone)
+					snap = null;
+				if (snap)
+				{
+					next = SnapBatches(snap, from, JIP_MSGS_PER_FRAME, batches);
+					if (next > snap.m_iS && snap.m_iTile >= snap.m_aTiles.Count())
+					{
+						Print(string.Format("MUD voxel probe: player %1 snapshot sent (seq %2, %3 tile parts), live ops next", pid, snap.m_iS, snap.m_aTiles.Count()), LogLevel.NORMAL);
+						snap.m_bDone = true;
+						snap.m_aTiles.Clear();
+						snap.m_iTile = 0;
+						snap = null;
+					}
+				}
+				else
+					next = JipBatches(from, JIP_MSGS_PER_FRAME, batches);
+				foreach (string b : batches)
+					pc.MUD_SendVoxelJip(b);
+				if (!snap && next > newest)
+				{
+					Print(string.Format("MUD voxel probe: player %1 op log sent up to seq %2", pid, newest), LogLevel.NORMAL);
+					next = -1;
+				}
+			}
+			else
+				gone.Insert(pid);
+			pids.Insert(pid);
+			nexts.Insert(next);
+		}
+		for (int k = 0; k < pids.Count(); k++)
+		{
+			if (nexts[k] < 0)
+				s_mJipFrom.Remove(pids[k]);
+			else
+				s_mJipFrom.Set(pids[k], nexts[k]);
+		}
+		foreach (int g : gone)
+			s_mSnap.Remove(g);     // player left: its snapshot goes (a rejoin asks from seq 1 = a new one)
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Server: ops from seq 'from' on as JIP messages of at most JIP_CHARS (one longer op goes alone), at most
+	//! maxMsgs messages. Returns the seq after the last op put in (> the newest seq = all sent).
+	protected int JipBatches(int from, int maxMsgs, array<string> batches)
+	{
+		int n = m_aOps.Count();
+		int i = from - 1;     // m_aOps is in seq order, seq 1 first: start near, then step to the first seq >= from
+		if (i < 0)
+			i = 0;
+		if (i > n)
+			i = n;
+		while (i > 0 && m_aOps[i - 1].m_iSeq >= from)
+			i--;
+		while (i < n && m_aOps[i].m_iSeq < from)
+			i++;
+		string cur;
+		int next = from;
+		while (i < n)
+		{
+			MUD_VoxelOp op = m_aOps[i];
 			if (!cur.IsEmpty() && cur.Length() + op.m_sText.Length() + 1 > JIP_CHARS)
 			{
 				batches.Insert(cur);
 				cur = "";
+				if (batches.Count() >= maxMsgs)
+					return next;     // this op goes first next frame
 			}
+			next = op.m_iSeq + 1;
+			i++;
+			if (op.m_sText.IsEmpty())
+				continue;
 			if (cur.IsEmpty())
 				cur = op.m_sText;
 			else
 				cur = cur + "#" + op.m_sText;
-			n++;
 		}
 		if (!cur.IsEmpty())
 			batches.Insert(cur);
-		return n;
+		return next;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 server: op entry at m_aOps[i] for a snapshot up to seq s: a voxel op as sent; a rut op as a placeholder - a
+	//! run of rut ops that made no rows as one "a|R|b", a rut op that made rows alone as "a|R|a|rows". iNext = the
+	//! index after it.
+	protected string SnapEntry(int i, int s, out int iNext)
+	{
+		MUD_VoxelOp op = m_aOps[i];
+		iNext = i + 1;
+		if (op.m_iKind != 4)
+			return op.m_sText;
+		if (!op.m_sRows.IsEmpty())
+			return string.Format("%1|R|%1|", op.m_iSeq) + op.m_sRows;
+		int last = op.m_iSeq;
+		while (iNext < m_aOps.Count())
+		{
+			MUD_VoxelOp o = m_aOps[iNext];
+			if (o.m_iSeq > s || o.m_iSeq != last + 1 || o.m_iKind != 4 || !o.m_sRows.IsEmpty())
+				break;
+			last = o.m_iSeq;
+			iNext++;
+		}
+		return string.Format("%1|R|%2", op.m_iSeq, last);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 server: the next messages of a snapshot send from seq 'from': head first, then the ops <= S (SnapEntry,
+	//! JIP_CHARS per message), then the tile parts, at most maxMsgs messages. Returns the seq after the last op put in
+	//! (> S = every op <= S sent; the caller checks the tiles).
+	protected int SnapBatches(MUD_JipSnap snap, int from, int maxMsgs, array<string> batches)
+	{
+		string cur;
+		if (!snap.m_bHead)
+		{
+			cur = string.Format("S|%1|%2", snap.m_iS, snap.m_aTiles.Count());
+			snap.m_bHead = true;
+		}
+		int next = from;
+		if (from <= snap.m_iS)
+		{
+			int n = m_aOps.Count();
+			int i = from - 1;
+			if (i < 0)
+				i = 0;
+			if (i > n)
+				i = n;
+			while (i > 0 && m_aOps[i - 1].m_iSeq >= from)
+				i--;
+			while (i < n && m_aOps[i].m_iSeq < from)
+				i++;
+			while (i < n && m_aOps[i].m_iSeq <= snap.m_iS)
+			{
+				int iNext;
+				string e = SnapEntry(i, snap.m_iS, iNext);
+				if (!cur.IsEmpty() && cur.Length() + e.Length() + 1 > JIP_CHARS)
+				{
+					batches.Insert(cur);
+					cur = "";
+					if (batches.Count() >= maxMsgs)
+						return next;     // this entry goes first next frame
+				}
+				next = m_aOps[iNext - 1].m_iSeq + 1;
+				i = iNext;
+				if (e.IsEmpty())
+					continue;
+				if (cur.IsEmpty())
+					cur = e;
+				else
+					cur = cur + "#" + e;
+			}
+			next = snap.m_iS + 1;
+		}
+		if (!cur.IsEmpty())
+			batches.Insert(cur);
+		while (snap.m_iTile < snap.m_aTiles.Count() && batches.Count() < maxMsgs)
+		{
+			batches.Insert(snap.m_aTiles[snap.m_iTile]);
+			snap.m_iTile++;
+		}
+		return next;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 server: a snapshot of now (seq m_iSeq) - the rut tiles as text parts
+	protected MUD_JipSnap MakeSnap()
+	{
+		MUD_JipSnap snap = new MUD_JipSnap();
+		snap.m_iS = m_iSeq;
+		SnapTiles(snap.m_iS, snap.m_aTiles);
+		return snap;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: every rut tile (all-none ones too: a tile's existence is part of the state) as parts "T|s|i|tile/tile..."
+	//! of at most SNAP_CHARS (one longer tile goes alone)
+	protected void SnapTiles(int s, array<string> parts)
+	{
+		string cur;
+		foreach (int key, MUD_RutTile tile : m_mRutTiles)
+		{
+			string tt = TileText(key, tile);
+			if (!cur.IsEmpty() && cur.Length() + tt.Length() + 1 > SNAP_CHARS)
+			{
+				parts.Insert(string.Format("T|%1|%2|", s, parts.Count()) + cur);
+				cur = "";
+			}
+			if (cur.IsEmpty())
+				cur = tt;
+			else
+				cur = cur + "/" + tt;
+		}
+		if (!cur.IsEmpty())
+			parts.Insert(string.Format("T|%1|%2|", s, parts.Count()) + cur);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: "key:" + the 256 samples in order, comma separated: "n<count>" = a run of FLOOR_NONE, else the floor in
+	//! whole cm (absolute y, Stage 1 rounding) as the change from the floor before it in the tile (the first from 0).
+	//! Trailing none samples are left out. Build 3 Stage 3: then ";" + the ridge samples the same way (left out when
+	//! the tile has no ridge: "key:<floor>" as before).
+	protected static string TileText(int key, MUD_RutTile tile)
+	{
+		string s = key.ToString() + ":" + RunText(tile, false);
+		string rg = RunText(tile, true);
+		if (!rg.IsEmpty())
+			s = s + ";" + rg;
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: one sample list of a tile as TileText's tokens (ridge false = m_aFloor, true = m_aRidge); "" = all none
+	protected static string RunText(MUD_RutTile tile, bool ridge)
+	{
+		string s = "";
+		bool first = true;
+		int prev = 0;
+		int none = 0;
+		for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
+		{
+			float v = tile.m_aFloor[f];
+			if (ridge)
+				v = tile.m_aRidge[f];
+			if (v >= FLOOR_NONE * 0.5)
+			{
+				none++;
+				continue;
+			}
+			string tok;
+			if (none > 0)
+			{
+				tok = "n" + none.ToString() + ",";
+				none = 0;
+			}
+			int cm = Math.Round(v * 100);
+			int d = cm - prev;
+			prev = cm;
+			tok = tok + d.ToString();
+			if (first)
+				s = s + tok;
+			else
+				s = s + "," + tok;
+			first = false;
+		}
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: tile part "T|s|i|tile/tile..." into 'into' (a tile already there is replaced). False = malformed or not
+	//! from snapshot s (what parsed before the fault stays).
+	protected static bool ParseTilePart(string part, int s, map<int, ref MUD_RutTile> into)
+	{
+		array<string> f = {};
+		part.Split("|", f, false);
+		if (f.Count() != 4 || f[0] != "T" || !MUD_TrenchPlan.IsInt(f[1]) || f[1].ToInt() != s)
+			return false;
+		array<string> tiles = {};
+		f[3].Split("/", tiles, true);
+		array<string> kd = {};
+		array<string> toks = {};
+		foreach (string t : tiles)
+		{
+			kd.Clear();
+			t.Split(":", kd, false);
+			if (kd.Count() != 2 || !MUD_TrenchPlan.IsInt(kd[0]))
+				return false;
+			MUD_RutTile tile = new MUD_RutTile();
+			for (int z = 0; z < MUD_RutTile.SIZE_F; z++)
+			{
+				tile.m_aFloor[z] = FLOOR_NONE;
+				tile.m_aRidge[z] = FLOOR_NONE;
+			}
+			// Build 3 Stage 3: "<floor>;<ridge>" (no ';' = no ridge)
+			string fl = kd[1];
+			string rl = "";
+			int semi = fl.IndexOf(";");
+			if (semi >= 0)
+			{
+				rl = fl.Substring(semi + 1, fl.Length() - semi - 1);
+				fl = fl.Substring(0, semi);
+				if (rl.IsEmpty() || rl.IndexOf(";") >= 0)
+					return false;
+			}
+			if (!ParseRuns(fl, tile, false, toks))
+				return false;
+			if (!rl.IsEmpty() && !ParseRuns(rl, tile, true, toks))
+				return false;
+			into.Set(kd[0].ToInt(), tile);
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: RunText's tokens into tile (ridge false = m_aFloor, true = m_aRidge). toks = scratch. False = malformed.
+	protected static bool ParseRuns(string text, MUD_RutTile tile, bool ridge, array<string> toks)
+	{
+		toks.Clear();
+		text.Split(",", toks, true);
+		int at = 0;
+		int prev = 0;
+		foreach (string tok : toks)
+		{
+			if (tok.Substring(0, 1) == "n")
+			{
+				string cnt = tok.Substring(1, tok.Length() - 1);
+				if (!MUD_TrenchPlan.IsInt(cnt) || cnt.ToInt() < 1)
+					return false;
+				at += cnt.ToInt();
+				continue;
+			}
+			if (!MUD_TrenchPlan.IsInt(tok) || at >= MUD_RutTile.SIZE_F)
+				return false;
+			int cm = prev + tok.ToInt();
+			prev = cm;
+			float v = cm;
+			if (ridge)
+				tile.m_aRidge[at] = v / 100.0;     // = GrowRidges' Math.Round(y * 100) / 100.0 (same float)
+			else
+				tile.m_aFloor[at] = v / 100.0;     // = CarveFloor's Math.Round(y * 100) / 100.0 (same float)
+			at++;
+		}
+		return at <= MUD_RutTile.SIZE_F;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: text is a rut placeholder "a|R|b" / "a|R|b|rows" -> true, last = b, rows (may be empty)
+	protected static bool RangeOf(string text, out int last, out string rows)
+	{
+		last = 0;
+		rows = "";
+		int bar = text.IndexOf("|");
+		if (bar < 1 || text.Length() < bar + 3 || text.Substring(bar + 1, 2) != "R|")
+			return false;
+		array<string> f = {};
+		text.Split("|", f, false);
+		if (f.Count() < 3 || f.Count() > 4 || !MUD_TrenchPlan.IsInt(f[0]) || !MUD_TrenchPlan.IsInt(f[2]))
+			return false;
+		last = f[2].ToInt();
+		if (last < f[0].ToInt())
+			return false;
+		if (f.Count() == 4)
+			rows = f[3];
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2: op text "seq|4|..." (a real rut op)
+	protected static bool IsRutText(string text)
+	{
+		int bar = text.IndexOf("|");
+		return bar > 0 && text.Length() >= bar + 3 && text.Substring(bar + 1, 2) == "4|";
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: held ops a..b go (a placeholder covered them)
+	protected static void DropHeld(int a, int b)
+	{
+		if (b < a || s_mPending.IsEmpty())
+			return;
+		if (b - a + 1 <= s_mPending.Count())
+		{
+			for (int q = a; q <= b; q++)
+				s_mPending.Remove(q);
+			return;
+		}
+		array<int> drop = {};
+		foreach (int k, string t : s_mPending)
+		{
+			if (k >= a && k <= b)
+				drop.Insert(k);
+		}
+		foreach (int dk : drop)
+			s_mPending.Remove(dk);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: snapshot head "S|s|parts"
+	protected static void ReceiveSnapHead(string t)
+	{
+		array<string> f = {};
+		t.Split("|", f, false);
+		if (f.Count() != 3 || !MUD_TrenchPlan.IsInt(f[1]) || !MUD_TrenchPlan.IsInt(f[2]))
+		{
+			Print("MUD voxel probe: bad snapshot head from the server: " + t, LogLevel.ERROR);
+			return;
+		}
+		int s = f[1].ToInt();
+		int n = f[2].ToInt();
+		if (s < 1 || n < 0 || n > 200000)
+			return;
+		if (s == s_iSnapS)
+			return;     // the same snapshot again
+		if (s_iNextSeq > s + 1)
+		{
+			Print(string.Format("MUD voxel probe: snapshot at seq %1 ignored - ops up to seq %2 already applied", s, s_iNextSeq - 1), LogLevel.WARNING);
+			return;
+		}
+		s_iSnapS = s;
+		s_aSnapParts.Clear();
+		for (int i = 0; i < n; i++)
+			s_aSnapParts.Insert("");
+		s_iSnapGot = 0;
+		s_iSnapWaitAt = 0;
+		s_bToldSnap = false;
+		s_iSnapRows = 0;
+		s_iSnapSkipped = 0;
+		Print(string.Format("MUD voxel probe: snapshot coming - ops up to seq %1 (rut ops as placeholders), then %2 rut tile parts", s, n), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: one tile part "T|s|i|..." (kept as text until SnapGate loads them all)
+	protected static void ReceiveSnapTile(string t)
+	{
+		array<string> f = {};
+		t.Split("|", f, false);
+		if (f.Count() != 4 || !MUD_TrenchPlan.IsInt(f[1]) || !MUD_TrenchPlan.IsInt(f[2]))
+		{
+			Print("MUD voxel probe: bad snapshot tile part from the server", LogLevel.ERROR);
+			return;
+		}
+		int s = f[1].ToInt();
+		int i = f[2].ToInt();
+		if (s != s_iSnapS || i < 0 || i >= s_aSnapParts.Count())
+		{
+			Print(string.Format("MUD voxel probe: snapshot tile part %1 of seq %2 dropped (expecting seq %3, %4 parts)", i, s, s_iSnapS, s_aSnapParts.Count()), LogLevel.WARNING);
+			return;
+		}
+		if (!s_aSnapParts[i].IsEmpty())
+			return;
+		s_aSnapParts.Set(i, t);
+		s_iSnapGot++;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: true = ops may go on. Once every op <= the snapshot seq is in, its rut tiles load first (every part
+	//! must be here; reliable messages in order, so a wait is logged once after 10 s, not asked again).
+	protected static bool SnapGate()
+	{
+		if (s_iSnapS <= 0 || s_iNextSeq <= s_iSnapS)
+			return true;
+		if (s_iSnapGot < s_aSnapParts.Count())
+		{
+			if (s_iSnapWaitAt == 0)
+				s_iSnapWaitAt = System.GetTickCount();
+			else if (!s_bToldSnap && System.GetTickCount(s_iSnapWaitAt) > 10000)
+			{
+				s_bToldSnap = true;
+				Print(string.Format("MUD voxel probe: waiting 10 s for snapshot tiles of seq %1 (%2 of %3 parts here)", s_iSnapS, s_iSnapGot, s_aSnapParts.Count()), LogLevel.WARNING);
+			}
+			return false;
+		}
+		s_Inst.LoadSnap();
+		s_iSnapS = 0;
+		s_aSnapParts.Clear();
+		s_iSnapGot = 0;
+		s_iSnapWaitAt = 0;
+		s_bToldSnap = false;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: the snapshot's rut tiles replace ours (every op <= S is in: craters / trenches / fills cleared their
+	//! floor on the server before S, so the tiles come after them), then the patches and bricks over them redraw
+	protected void LoadSnap()
+	{
+		int t0 = System.GetTickCount();
+		// every tile key before or after: its patches redraw
+		set<int> keys = new set<int>();
+		foreach (int ok, MUD_RutTile ot : m_mRutTiles)
+			keys.Insert(ok);
+		m_mRutTiles.Clear();
+		int bad;
+		foreach (string part : s_aSnapParts)
+		{
+			if (!ParseTilePart(part, s_iSnapS, m_mRutTiles))
+				bad++;
+		}
+		int floorN;
+		int ridgeN;
+		foreach (int key, MUD_RutTile tile : m_mRutTiles)
+		{
+			keys.Insert(key);
+			for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
+			{
+				if (tile.m_aFloor[f] < FLOOR_NONE * 0.5)
+					floorN++;
+				if (tile.m_aRidge[f] < FLOOR_NONE * 0.5)
+					ridgeN++;
+			}
+		}
+		OpenBatch(t0, s_iSnapS);
+		int queued;
+		foreach (int dk : keys)
+		{
+			int bi = KeyBi(dk);
+			int bk = KeyBk(dk);
+			MUD_WorldGroundEntity.FloorDirty(bi * FSUB - 1, bi * FSUB + FSUB, bk * FSUB - 1, bk * FSUB + FSUB);
+			MUD_VoxelColumn col = m_mCols.Get(dk);
+			if (col)
+				queued += QueueCol(col);
+		}
+		Print(string.Format("MUD voxel probe: snapshot loaded at seq %1: %2 rut tiles (%3 floor, %4 ridge samples), %5 bad parts, %6 rut ops skipped, %7 rows from them, %8 bricks queued, %9 ms",
+			s_iSnapS, m_mRutTiles.Count(), floorN, ridgeN, bad, s_iSnapSkipped, s_iSnapRows, queued, System.GetTickCount(t0)), LogLevel.NORMAL);
+		if (bad > 0)
+			Print("MUD voxel probe: snapshot tile parts did not parse - ruts on this machine differ from the server's", LogLevel.ERROR);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 joiner: the brick rows a skipped rut op made on the server ("colkey,bj;..."), made here at its seq
+	protected void RangeRows(string rows)
+	{
+		if (rows.IsEmpty())
+			return;
+		array<string> rs = {};
+		rows.Split(";", rs, true);
+		array<string> kv = {};
+		foreach (string r : rs)
+		{
+			kv.Clear();
+			r.Split(",", kv, false);
+			if (kv.Count() != 2 || !MUD_TrenchPlan.IsInt(kv[0]) || !MUD_TrenchPlan.IsInt(kv[1]))
+			{
+				Print("MUD voxel probe: bad rut placeholder rows from the server: " + rows, LogLevel.ERROR);
+				return;
+			}
+			MUD_VoxelColumn col = m_mCols.Get(kv[0].ToInt());
+			if (!col)
+			{
+				Print(string.Format("MUD voxel probe: rut placeholder row %1 for a column this machine does not have (op log differs?)", r), LogLevel.ERROR);
+				continue;
+			}
+			if (!m_bOpen)
+				OpenBatch(System.GetTickCount(), s_iNextSeq);
+			Row(col, kv[1].ToInt(), true);
+			s_iSnapRows++;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 test kit, server: SnapSelfTest every SNAP_TEST_MS while the seq moves and rut tiles exist
+	protected void SnapSelfTestTick()
+	{
+		if (m_iSeq == m_iSnapTestSeq || m_mRutTiles.IsEmpty())
+			return;
+		if (m_iSnapTestAt != 0 && System.GetTickCount(m_iSnapTestAt) < SNAP_TEST_MS)
+			return;
+		m_iSnapTestAt = System.GetTickCount();
+		m_iSnapTestSeq = m_iSeq;
+		SnapSelfTest();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! J2 test kit, server: builds the snapshot of now, parses it into a fresh tile map and compares every sample with
+	//! the live tiles; sizes vs the rut op log; checks the op stream (voxel ops + placeholders) covers seq 1..S once.
+	protected void SnapSelfTest()
+	{
+		int s = m_iSeq;
+		int t0 = System.GetTickCount();
+		array<string> parts = {};
+		SnapTiles(s, parts);
+		int buildMs = System.GetTickCount(t0);
+		int t1 = System.GetTickCount();
+		map<int, ref MUD_RutTile> back = new map<int, ref MUD_RutTile>();
+		int badParts;
+		int tileBytes;
+		foreach (string part : parts)
+		{
+			tileBytes += part.Length();
+			if (!ParseTilePart(part, s, back))
+				badParts++;
+		}
+		int parseMs = System.GetTickCount(t1);
+		int compared;
+		int floorN;
+		int ridgeN;
+		int bad;
+		int missing;
+		foreach (int key, MUD_RutTile tile : m_mRutTiles)
+		{
+			MUD_RutTile bt = back.Get(key);
+			if (!bt)
+			{
+				missing++;
+				continue;
+			}
+			for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
+			{
+				compared++;
+				if (tile.m_aFloor[f] < FLOOR_NONE * 0.5)
+					floorN++;
+				if (tile.m_aRidge[f] < FLOOR_NONE * 0.5)
+					ridgeN++;
+				// a sample counts once when its floor or its ridge (Build 3 Stage 3) differs
+				if (tile.m_aFloor[f] != bt.m_aFloor[f] || tile.m_aRidge[f] != bt.m_aRidge[f])
+					bad++;
+			}
+		}
+		int extra = back.Count() - (m_mRutTiles.Count() - missing);
+		Print(string.Format("MUD snapshot self-test: seq %1, %2 tiles, %3 samples (%4 floor, %5 ridge), %6 mismatched, %7 missing, %8 extra, %9 bad parts",
+			s, m_mRutTiles.Count(), compared, floorN, ridgeN, bad, missing, extra, badParts), LogLevel.NORMAL);
+		// sizes: the rut op log vs the tiles; the op stream a joiner gets up to s, and its seq cover
+		int rutOps;
+		int rutBytes;
+		int rowOps;
+		int rowsN;
+		int logBytes;
+		foreach (MUD_VoxelOp op : m_aOps)
+		{
+			if (op.m_iSeq > s)
+				break;
+			logBytes += op.m_sText.Length() + 1;
+			if (op.m_iKind != 4)
+				continue;
+			rutOps++;
+			rutBytes += op.m_sText.Length() + 1;
+			if (!op.m_sRows.IsEmpty())
+			{
+				rowOps++;
+				array<string> rr = {};
+				op.m_sRows.Split(";", rr, true);
+				rowsN += rr.Count();
+			}
+		}
+		int streamBytes;
+		int entries;
+		int gaps;
+		int want = 1;
+		int i;
+		while (i < m_aOps.Count() && m_aOps[i].m_iSeq <= s)
+		{
+			int iNext;
+			string e = SnapEntry(i, s, iNext);
+			i = iNext;
+			entries++;
+			streamBytes += e.Length() + 1;
+			int bar = e.IndexOf("|");
+			int a = e.Substring(0, bar).ToInt();
+			int last;
+			string rows;
+			if (!RangeOf(e, last, rows))
+				last = a;
+			if (a != want)
+				gaps++;
+			want = last + 1;
+		}
+		if (want != s + 1)
+			gaps++;
+		Print(string.Format("MUD snapshot self-test: tiles %1 bytes in %2 parts (build %3 ms, parse %4 ms) vs rut op log %5 bytes (%6 rut ops, %7 made rows, %8 rows)",
+			tileBytes, parts.Count(), buildMs, parseMs, rutBytes, rutOps, rowOps, rowsN), LogLevel.NORMAL);
+		Print(string.Format("MUD snapshot self-test: joiner op stream to seq %1 = %2 bytes in %3 entries (full op log %4 bytes), %5 seq gaps",
+			s, streamBytes, entries, logBytes, gaps), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1085,6 +2129,18 @@ class MUD_VoxelProbe
 		s_bAskedJip = false;
 		s_iGapAt = 0;
 		s_bToldGap = false;
+		s_bLost = false;
+		s_iAskAt = 0;
+		s_iAsks = 0;
+		s_mJipFrom.Clear();
+		s_mSnap.Clear();
+		s_iSnapS = 0;
+		s_aSnapParts.Clear();
+		s_iSnapGot = 0;
+		s_iSnapWaitAt = 0;
+		s_bToldSnap = false;
+		s_iSnapRows = 0;
+		s_iSnapSkipped = 0;
 		s_aTracks.Clear();
 	}
 
@@ -1101,6 +2157,11 @@ class MUD_VoxelProbe
 		int ncz;
 		skin.GetGrid(m_fX0, m_fZ0, ncx, ncz);
 		m_fCell = skin.GetCell();
+		// U1 sea guard: world data, so the same on every machine (logged here: 1-MP compares server and client lines)
+		BaseWorld seaWorld = GetGame().GetWorld();
+		if (seaWorld && seaWorld.IsOcean())
+			m_fSeaY = seaWorld.GetOceanBaseHeight() + SEA_GAP;
+		Print(string.Format("MUD voxel probe: tunnel floor %1 m, sea guard y %2 (ocean %3)", TUNNEL_FLOOR, m_fSeaY, seaWorld && seaWorld.IsOcean()), LogLevel.NORMAL);
 		if (Math.AbsFloat(m_fCell * 2 - BRICK) > 0.001)
 		{
 			Print(string.Format("MUD voxel probe: skin cell %1 m - bricks need 2 m cells, off", m_fCell), LogLevel.ERROR);
@@ -1457,6 +2518,26 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Test kit (2026-10-17): sample li, lk, gj of col now d -> into this op's field hash. Column key, sample index and
+	//! the value in cm, mixed (one non-linear step) and summed mod DISP_HASH_M; every product stays under 2^31.
+	protected void FieldHashAdd(MUD_VoxelColumn col, int li, int lk, int gj, float d)
+	{
+		int ck = ColKey(col.m_iBi, col.m_iBk) % DISP_HASH_M;
+		int si = ((gj * SUB + lk) * SUB + li) % DISP_HASH_M;
+		if (si < 0)
+			si += DISP_HASH_M;
+		int cmRaw = Math.Round(d * 100);
+		int cm = cmRaw % DISP_HASH_M;
+		if (cm < 0)
+			cm += DISP_HASH_M;
+		int hv = (ck * 31 + si) % DISP_HASH_M;
+		hv = (hv * 1009 + cm) % DISP_HASH_M;
+		hv = (hv * (hv % 2003 + 1)) % DISP_HASH_M;
+		m_iFieldHash = (m_iFieldHash + hv) % DISP_HASH_M;
+		m_iFieldHashN++;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Sample li, lk, gj of col (global gi, gk) from old to d. A missing row is made only when the change matters for
 	//! a mesh (a sign change, or a value near 0); else the seeded field stays. Marks the changed box.
 	protected void Put(MUD_VoxelColumn col, int li, int lk, int gi, int gj, int gk, float old, float d)
@@ -1473,6 +2554,8 @@ class MUD_VoxelProbe
 		}
 		int pi = (lk * SUB + gj - bj * SUB) * SUB + li;
 		b.m_aD[pi] = d;
+		if (MUD_TestKit.TEST_KIT)
+			FieldHashAdd(col, li, lk, gj, d);
 		// a raise (fill) drops a look cut still waiting there (RUT_LOOK): it would draw under the new top
 		if (b.m_bHasV && d > old)
 			b.m_aV[pi] = V_NONE;
@@ -1691,6 +2774,15 @@ class MUD_VoxelProbe
 		col.m_mRows.Insert(bj, b);
 		m_iBricks++;
 		m_iBatchMade++;
+		if (m_bRowLog)
+		{
+			// J2: a rut op made this row - a joiner that skips the op makes it at the same seq (MUD_VoxelOp.m_sRows)
+			string rl = string.Format("%1,%2", ColKey(col.m_iBi, col.m_iBk), bj);
+			if (m_sRowLog.IsEmpty())
+				m_sRowLog = rl;
+			else
+				m_sRowLog = m_sRowLog + ";" + rl;
+		}
 		m_aShow.Insert(b);
 		Queue(b);
 		return b;
@@ -1761,13 +2853,86 @@ class MUD_VoxelProbe
 
 	//------------------------------------------------------------------------------------------------
 	//! Server: logs the blast as an op. True = taken as voxels; false = the caller digs the heightfield crater.
-	protected bool DoBlast(vector wp, float depth)
+	//! C2: a hit on dug ground (not under a roof) digs from what is there down to max(depth, min(cap, now + gain x
+	//! depth)), as MUD_WorldGroundEntity.Crater - so repeated hits settle at the cap. C6: the outline goes in the op
+	//! (m_fB = stretch, m_iPiece = lobe share x 1000000 + turn2 deg x 1000 + turn3 deg, CraterShape).
+	protected bool DoBlast(vector wp, float depth, float cap, float gain, float stretch, float lobeW, float turn2, float turn3)
 	{
+		float dig = depth;
+		float now = 0;
+		if (!RoofOver(wp))
+		{
+			float undug;
+			if (MUD_WorldGroundEntity.UndugY(wp[0], wp[2], undug))
+				now = Math.Max(0, undug - wp[1]);
+			if (now > 0.05)
+			{
+				float target = Math.Max(depth, Math.Min(cap, now + gain * depth));
+				dig = target - now;
+				// at the cap: no op (the 0.15 m minimum below made every shell dig on, WB 2026-10-17: 1.99 -> 2.48 m past cap 2.38)
+				if (dig < 0.05)
+				{
+					Print(string.Format("MUD voxel probe: crater on dug ground %1 m deep: at the cap %2, no dig", now, cap), LogLevel.NORMAL);
+					return true;
+				}
+			}
+		}
 		MUD_VoxelOp op = new MUD_VoxelOp();
 		op.m_iKind = 0;
 		op.m_vWp = wp;
-		op.m_fDepth = Math.Clamp(depth, 0.15, MAX_DEPTH);
+		op.m_fDepth = Math.Clamp(dig, 0.15, MAX_DEPTH);
+		op.m_fB = Math.Clamp(stretch, 0, 0.5);
+		int lobe = Math.Round(lobeW * 99);
+		lobe = Math.ClampInt(lobe, 0, 99);
+		int t2 = Math.Round(turn2 * Math.RAD2DEG);
+		int t3 = Math.Round(turn3 * Math.RAD2DEG);
+		t2 = Math.ClampInt(t2, 0, 359);
+		t3 = Math.ClampInt(t3, 0, 359);
+		op.m_iPiece = lobe * 1000000 + t2 * 1000 + t3;
+		if (now > 0.05)
+			Print(string.Format("MUD voxel probe: crater on dug ground %1 m deep: digs %2 m (charge %3, cap %4)", now, op.m_fDepth, depth, cap), LogLevel.NORMAL);
 		return Issue(op);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C6: op.m_iPiece of a crater back into the outline's lobe share (0..1) and turns (radians). 0 / negative = round.
+	protected static void CraterShape(int piece, out float lobeW, out float turn2, out float turn3)
+	{
+		if (piece < 0)
+			piece = 0;
+		int lobe = piece / 1000000;
+		int rest = piece - lobe * 1000000;
+		int t2 = rest / 1000;
+		int t3 = rest - t2 * 1000;
+		lobeW = lobe / 99.0;
+		turn2 = t2 * Math.DEG2RAD;
+		turn3 = t3 * Math.DEG2RAD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C4: the hit is under a roof (a tunnel): ROOF_MIN or more under the undug ground and solid field from ROOF_GAP up to
+	//! ROOF_REACH above it, in the nearest sample column. Reads the field, so the same on every machine. A wall hit whose
+	//! nearest column is inside the wall counts as a roof too (a chamber, not a hole to the sky).
+	protected bool RoofOver(vector wp)
+	{
+		int gi = Math.Round((wp[0] - m_fX0) / CELL);
+		int gk = Math.Round((wp[2] - m_fZ0) / CELL);
+		MUD_VoxelColumn col = ColAt(gi, gk);
+		if (!col)
+			return false;     // fresh ground: nothing dug, no tunnel
+		int li = gi - col.m_iBi * SUB;
+		int lk = gk - col.m_iBk * SUB;
+		int n = lk * SUB + li;
+		if (col.m_aUndug[n] - wp[1] < ROOF_MIN)
+			return false;
+		int gj0 = Math.Ceil((wp[1] + ROOF_GAP) / CELL);
+		int gj1 = Math.Floor((wp[1] + ROOF_REACH) / CELL);
+		for (int gj = gj0; gj <= gj1; gj++)
+		{
+			if (Value(col, li, lk, gj) > 0)
+				return true;
+		}
+		return false;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1806,6 +2971,77 @@ class MUD_VoxelProbe
 		}
 		op.m_sPlan = plan;
 		Issue(op);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Test kit Stage 3 (2026-10-17, J1 test): server, MUD_TestKit.FakeRutOps() kind-4 rut ops, once, FAKE_RUT_WAIT s
+	//! after the probe is up, at most FAKE_RUT_PER_FRAME a frame, through DoRutOp / Issue (seq, broadcast, op log).
+	//! One op = a 2 m straight track (4 RUT_STEP segments, y = ground) in a 20 x 20 grid 3 m apart, 10 m off the first
+	//! player (none: settings fake_rut_x / z). Ops past 400 go over the same cells again (deeper to the cap, then no change).
+	protected void FakeRutTick(float time)
+	{
+		if (s_iFakeN >= MUD_TestKit.FakeRutOps())
+			return;
+		if (s_fFakeAt < 0)
+		{
+			s_fFakeAt = time + MUD_TestKit.FAKE_RUT_WAIT;
+			Print(string.Format("MUD fake ruts: %1 ops in %2 s", MUD_TestKit.FakeRutOps(), MUD_TestKit.FAKE_RUT_WAIT), LogLevel.NORMAL);
+			return;
+		}
+		if (time < s_fFakeAt)
+			return;
+		if (s_iFakeN == 0)
+		{
+			vector o = Vector(MUD_TestKit.FakeRutX(), 0, MUD_TestKit.FakeRutZ());
+			string spot = "fixed spot fake_rut_x / z";
+			PlayerManager pm = GetGame().GetPlayerManager();
+			if (pm)
+			{
+				array<int> ids = {};
+				pm.GetPlayers(ids);
+				foreach (int id : ids)
+				{
+					IEntity ent = pm.GetPlayerControlledEntity(id);
+					if (!ent)
+						continue;
+					o = ent.GetOrigin() + Vector(10, 0, 10);
+					spot = string.Format("10 m off player %1", id);
+					break;
+				}
+			}
+			s_vFakeO = o;
+			s_iFakeSeq0 = m_iSeq;
+			Print(string.Format("MUD fake ruts: start - %1 ops at %2 (%3), next seq %4, %5 per frame",
+				MUD_TestKit.FakeRutOps(), o, spot, m_iSeq + 1, MUD_TestKit.FAKE_RUT_PER_FRAME), LogLevel.NORMAL);
+		}
+		MUD_VoxelRutTrack t = new MUD_VoxelRutTrack();
+		t.m_fStep = MUD_TestKit.FAKE_RUT_STEP;
+		t.m_fCap = MUD_TestKit.FAKE_RUT_CAP;
+		BaseWorld world = GetGame().GetWorld();
+		int made;
+		while (made < MUD_TestKit.FAKE_RUT_PER_FRAME && s_iFakeN < MUD_TestKit.FakeRutOps())
+		{
+			int cell = s_iFakeN % 400;
+			int col = cell % 20;     // int maths on its own line: a float on the left makes Enforce read '%' as float
+			int row = cell / 20;
+			float x0 = s_vFakeO[0] + col * 3;
+			float z = s_vFakeO[2] + row * 3;
+			array<vector> sa = {};
+			array<vector> sb = {};
+			for (int s = 0; s < 4; s++)
+			{
+				float xa = x0 + s * RUT_STEP;
+				float xb = xa + RUT_STEP;
+				sa.Insert(Vector(xa, world.GetSurfaceY(xa, z), z));
+				sb.Insert(Vector(xb, world.GetSurfaceY(xb, z), z));
+			}
+			DoRutOp(t, sa, sb, 4);
+			s_iFakeN++;
+			made++;
+		}
+		if (s_iFakeN >= MUD_TestKit.FakeRutOps())
+			Print(string.Format("MUD fake ruts: end - %1 tried, %2 issued (seq %3 .. %4)",
+				s_iFakeN, m_iSeq - s_iFakeSeq0, s_iFakeSeq0 + 1, m_iSeq), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2142,7 +3378,7 @@ class MUD_VoxelProbe
 			return PrepareRut(op);
 		if (op.m_iKind <= 1)
 		{
-			float reach = Reach(op.m_fDepth);
+			float reach = Reach(op.m_fDepth, op.m_fB);
 			if (op.m_iKind == 1)
 				reach = op.m_fDepth + CELL;
 			op.m_vLo = op.m_vWp - Vector(reach, 0, reach);
@@ -2161,9 +3397,11 @@ class MUD_VoxelProbe
 		if (op.m_iPiece >= lay.Count())
 			return false;
 		op.m_Lay = lay;
-		float margin = op.m_fDepth * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + CELL;
+		float margin = op.m_fDepth * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + TRENCH_PAD + CELL;
 		if (op.m_iKind == 3)
-			margin = MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + CELL;
+			margin = MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + TRENCH_PAD + CELL;
+		else if (PARAPET && op.m_iPiece >= 0)
+			margin = Math.Max(margin, ParapetStart(lay) + PARA_RISE * 2 + PARA_TOP + CELL);
 		float x0 = 100000000;
 		float z0 = 100000000;
 		float x1 = -100000000;
@@ -2221,6 +3459,11 @@ class MUD_VoxelProbe
 			z1 = Math.Max(z1, Math.Max(a[2], b[2]));
 		}
 		float m = RUT_R + CELL;
+		if (op.m_iKind == 4 && DISPLACE_RUTS && RUT_REPOSE_ITERS > 0)
+			m += 2 * FCELL;     // Build 3 Stage 2: the repose relax writes up to 2 floor samples past the cut
+		// Build 3 Stage 3: ridges reach RUT_R + GAP + W sideways (u < 1 keeps them off the track past a segment end)
+		if (op.m_iKind == 4 && DISPLACE_RUTS && RUT_FIELD && RUT_RIDGES)
+			m = Math.Max(m, RUT_R + RUT_RIDGE_GAP + RUT_RIDGE_W + CELL);
 		if (op.m_iKind == 5)
 			m = op.m_fDepth + CELL;
 		op.m_vLo = Vector(x0 - m, 0, z0 - m);
@@ -2252,13 +3495,47 @@ class MUD_VoxelProbe
 		else if (op.m_iKind == 5)
 			AheadCells(op);
 		else if (op.m_iKind == 1)
+		{
 			CarveTunnel(op);
+			if (TUNNEL_DARK && !m_bHeadless)
+				TunnelDark(op.m_vWp);
+		}
 		else if (op.m_iKind == 2)
 			CutTrench(op);
 		else if (op.m_iKind == 3)
 			FillTrench(op);
 		else
 			Carve(op);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A new batch (bricks queued from now go live together at the next GoLive), first op seq firstSeq
+	protected void OpenBatch(int t0, int firstSeq)
+	{
+		m_bOpen = true;
+		m_iBatchT0 = t0;
+		m_iBatchOps = 0;
+		m_iBatchMade = 0;
+		m_iBatchBuilt = 0;
+		m_iBatchLook = 0;
+		m_iBatchMeshOnly = 0;
+		m_iBatchSkipped = 0;
+		m_iBatchMs = 0;
+		m_iBatchFrames = 0;
+		m_iBatchWorst = 0;
+		m_iBatchWorstSub = 0;
+		m_iBatchVerts = 0;
+		m_iBatchGatherMs = 0;
+		m_iBatchPolyMs = 0;
+		m_iBatchScanned = 0;
+		m_iBatchFullMs = 0;
+		m_iBatchBandMs = 0;
+		m_iBatchFirstSeq = firstSeq;
+		m_iBatchSplit = 0;
+		m_iBatchSplitV = 0;
+		m_iBatchFold = 0;
+		m_iBatchDispOvf = 0;
+		m_iBatchSoil = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2291,42 +3568,25 @@ class MUD_VoxelProbe
 			Print(string.Format("MUD voxel probe: op kind %1 at %2 meets voxel ground -> sheet and voxels", op.m_iKind, op.m_vWp), LogLevel.NORMAL);
 		}
 		if (!m_bOpen)
-		{
-			m_bOpen = true;
-			m_iBatchT0 = t0;
-			m_iBatchOps = 0;
-			m_iBatchMade = 0;
-			m_iBatchBuilt = 0;
-			m_iBatchLook = 0;
-			m_iBatchMeshOnly = 0;
-			m_iBatchSkipped = 0;
-			m_iBatchMs = 0;
-			m_iBatchFrames = 0;
-			m_iBatchWorst = 0;
-			m_iBatchWorstSub = 0;
-			m_iBatchVerts = 0;
-			m_iBatchGatherMs = 0;
-			m_iBatchPolyMs = 0;
-			m_iBatchScanned = 0;
-			m_iBatchFullMs = 0;
-			m_iBatchBandMs = 0;
-			m_iBatchFirstSeq = op.m_iSeq;
-			m_iBatchSplit = 0;
-			m_iBatchSplitV = 0;
-			m_iBatchFold = 0;
-			m_iBatchDispOvf = 0;
-			m_iBatchSoil = 0;
-		}
+			OpenBatch(t0, op.m_iSeq);
 		m_iBatchOps++;
+		// J2: the rows a rut op makes go with it (snapshot placeholders); m_sRowLog is read back before m_aOps.Insert
+		m_bRowLog = op.m_iKind == 4;
+		m_sRowLog = "";
 		if (op.m_iKind <= 3)
 		{
 			float mudR = 0;
 			if (op.m_iKind == 0)
-				mudR = Math.Max(0.75, op.m_fDepth * 2.2);     // = Carve's crest
+				mudR = CraterCrest(op.m_fDepth);     // = Carve's crest
 			m_aMudLo.Insert(op.m_vLo);
 			m_aMudHi.Insert(op.m_vHi);
 			m_aMudWp.Insert(op.m_vWp);
 			m_aMudR.Insert(mudR);
+			m_aMudKind.Insert(op.m_iKind);
+			float lift = 0;
+			if (op.m_iKind == 3)
+				lift = Math.Max(0, op.m_fDepth - op.m_fB);
+			m_aMudLift.Insert(lift);
 		}
 		int made0 = m_iBatchMade;
 		int fieldCols0 = m_mCols.Count();
@@ -2390,6 +3650,8 @@ class MUD_VoxelProbe
 		m_aClrI.Clear();
 		m_aClrK.Clear();
 		m_iDispHash = 0;
+		m_iFieldHash = 0;
+		m_iFieldHashN = 0;
 		m_iDispOpW = 0;
 		m_iDispOpC = 0;
 		m_iFieldDirty = 0;
@@ -2408,6 +3670,10 @@ class MUD_VoxelProbe
 		m_iOpKind = -1;
 		if (DISPLACE_RUTS)
 			DispOpDone(op);
+		// test kit: every machine logs the same field hash per seq when their FEEL fields agree (Tools/compare_op_hashes.py).
+		// RUT_FIELD rut ops change no samples (the disp hash covers them): no line
+		if (MUD_TestKit.TEST_KIT && m_iFieldHashN > 0)
+			Print(string.Format("MUD field hash seq %1 kind %2: %3 (%4 samples)", op.m_iSeq, op.m_iKind, m_iFieldHash, m_iFieldHashN), LogLevel.NORMAL);
 		if (m_bChanged)
 		{
 			m_bQueueLook = op.m_iKind == 6;
@@ -2471,10 +3737,14 @@ class MUD_VoxelProbe
 			m_bQueueLook = false;
 			m_aOpLook.Clear();
 		}
+		if (op.m_iKind == 4)
+			op.m_sRows = m_sRowLog;
+		m_bRowLog = false;
+		m_sRowLog = "";
 		m_aOps.Insert(op);
 
 		string label = "blast";
-		string what = string.Format("depth %1 crest %2 m", op.m_fDepth, Math.Max(0.75, op.m_fDepth * 2.2));
+		string what = string.Format("depth %1 crest %2 m, stretch %3", op.m_fDepth, CraterCrest(op.m_fDepth), op.m_fB);
 		vector wp = op.m_vWp;
 		if (op.m_iKind == 1)
 		{
@@ -2661,26 +3931,39 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Rim (raises the surface by a bump, as the heightfield rim) then a bowl: half ellipsoid under the blast point,
-	//! above it a funnel that only widens upward (run 2026-10-13 00:24: a full ellipsoid undercut walls into bridges).
-	//! Never deeper than FLOOR under the undug ground, never in hard columns. depth already clamped.
+	//! Build 1 crater (2026-10-17). C1: the heightfield's cosine bowl as a vertical-distance field (Tools/
+	//! crater_slope_voxel.py CraterCos: every wall <= 44 deg, ~25 % narrower than the old ellipsoid): the rim raises the
+	//! ground by H out to the crest, falling over the rim width; inside the crest the bowl cuts to wp - depth at the
+	//! middle (cannot undercut: no funnel needed). C6: the outline stretched by angle (op m_fB, CraterShape; only
+	//! widens). C3: the change fades to nothing within CRATER_FADE of hard columns (roads, kept ground). C4: under a
+	//! roof (RoofOver) a sphere r = depth instead. Never deeper than FLOOR under the undug ground, never in hard columns.
 	protected void Carve(MUD_VoxelOp op)
 	{
 		vector wp = op.m_vWp;
 		float depth = op.m_fDepth;
-		float crest = Math.Max(0.75, depth * 2.2);
-		float rimH = depth * 0.2;
-		float rimW = Math.Max(0.5, depth);
-		float inner = crest * 0.8;
+		if (RoofOver(wp))
+		{
+			CarveSphere(op);
+			return;
+		}
+		float rimH = depth * CRATER_RIM_SHARE;
+		float crest = CraterCrest(depth);
+		float rimW = CraterRimW(depth);
 		float outer = crest + rimW;
-		int gi0 = Math.Floor((wp[0] - outer - m_fX0) / CELL);
-		int gi1 = Math.Ceil((wp[0] + outer - m_fX0) / CELL);
-		int gk0 = Math.Floor((wp[2] - outer - m_fZ0) / CELL);
-		int gk1 = Math.Ceil((wp[2] + outer - m_fZ0) / CELL);
+		float stretch = op.m_fB;
+		float lobeW;
+		float turn2;
+		float turn3;
+		CraterShape(op.m_iPiece, lobeW, turn2, turn3);
+		float reach = outer * (1 + stretch);
+		int gi0 = Math.Floor((wp[0] - reach - m_fX0) / CELL);
+		int gi1 = Math.Ceil((wp[0] + reach - m_fX0) / CELL);
+		int gk0 = Math.Floor((wp[2] - reach - m_fZ0) / CELL);
+		int gk1 = Math.Ceil((wp[2] + reach - m_fZ0) / CELL);
 		int gj0 = Math.Floor((wp[1] - depth - 1) / CELL);
-		// up to everything a hit FLOOR down can have above it (ground + rims): a funnel cut short leaves a roof
-		int gj1 = Math.Ceil((wp[1] + FLOOR + rimH + 1.5) / CELL);
-		float rad = Math.Min(crest, depth);
+		// up to everything a hit TUNNEL_FLOOR down (a shaft bottom, U1) can have above it (ground + rims): the bowl cut opens it all
+		int gj1 = Math.Ceil((wp[1] + TUNNEL_FLOOR + rimH + 1.5) / CELL);
+		int fadeN = Math.Ceil(CRATER_FADE / CELL);
 		for (int gk = gk0; gk <= gk1; gk++)
 		{
 			for (int gi = gi0; gi <= gi1; gi++)
@@ -2696,33 +3979,133 @@ class MUD_VoxelProbe
 				float dx = m_fX0 + gi * CELL - wp[0];
 				float dz = m_fZ0 + gk * CELL - wp[2];
 				float rr = Math.Sqrt(dx * dx + dz * dz);
-				float bump = 0;
-				if (rr > inner && rr < outer)
-					bump = rimH * Math.Sin(Math.PI * (rr - inner) / (outer - inner));
+				if (rr >= reach)
+					continue;
+				if (stretch > 0)
+				{
+					float ang = Math.Atan2(dz, dx);
+					rr /= 1 + stretch * (lobeW * (0.5 + 0.5 * Math.Cos(2 * (ang - turn2)))
+						+ (1 - lobeW) * (0.5 + 0.5 * Math.Cos(3 * (ang - turn3))));
+				}
+				if (rr >= outer)
+					continue;
+				float bump = rimH;
+				if (rr > crest)
+					bump = rimH * (1 + Math.Cos(Math.PI * (rr - crest) / rimW)) * 0.5;
+				bool bowl = rr < crest;
+				float bowlY = wp[1] + rimH - (depth + rimH) * (1 + Math.Cos(Math.PI * rr / crest)) * 0.5;
+				float fade = CraterFade(gi, gk, fadeN);
+				if (fade <= 0)
+					continue;
 				float floorY = col.m_aUndug[n] - FLOOR;
+				// U1: the column's top solid sample in range; air under it is a buried hole (tunnel) the rim must not fill
+				// (MEASURED: 81 mm over a 5 m tunnel refilled 44 tunnel samples through the rim, 0 with this)
+				int topJ = gj0 - 1;
+				for (int tj = gj1; tj >= gj0; tj--)
+				{
+					if (Value(col, li, lk, tj) > 0)
+					{
+						topJ = tj;
+						break;
+					}
+				}
 				for (int gj = gj0; gj <= gj1; gj++)
 				{
 					float y = gj * CELL;
 					float old = Value(col, li, lk, gj);
-					float d = old + bump;
-					float up = y - wp[1];
-					float s;
-					if (up <= 0)
-					{
-						float ex = dx / crest;
-						float ey = up / depth;
-						float ez = dz / crest;
-						s = (Math.Sqrt(ex * ex + ey * ey + ez * ez) - 1) * rad;
-					}
-					else
-					{
-						// = the ellipsoid at up 0 (rr = crest there), radius grows FUNNEL per metre up
-						s = (rr - crest - FUNNEL * up) * rad / crest;
-					}
+					float rimB = bump;
+					if (gj < topJ && old < 0)
+						rimB = 0;
+					float d = old + rimB;
+					if (bowl && bowlY - y < d)
+						d = bowlY - y;
+					if (fade < 1)
+						d = old + (d - old) * fade;
+					d = Math.Max(d, Math.Min(old, floorY - y));     // U1: no NEW air below the floor (older air stays)
+					Put(col, li, lk, gi, gj, gk, old, Nudge(d));
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C3: 0 on a hard sample, smoothstep up to 1 at CRATER_FADE from the nearest one (searched fadeN samples around).
+	//! Columns not converted read Hard / Kept from the skin, as Convert does - the same on every machine.
+	protected float CraterFade(int gi, int gk, int fadeN)
+	{
+		float best = CRATER_FADE;
+		for (int k = gk - fadeN; k <= gk + fadeN; k++)
+		{
+			for (int i = gi - fadeN; i <= gi + fadeN; i++)
+			{
+				int di = i - gi;
+				int dk = k - gk;
+				int q = di * di + dk * dk;
+				float dd = Math.Sqrt(q) * CELL;
+				if (dd >= best)
+					continue;
+				if (HardSample(i, k))
+					best = dd;
+			}
+		}
+		float t = Math.Clamp(best / CRATER_FADE, 0, 1);
+		return t * t * (3 - 2 * t);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Sample gi, gk is hard (Convert's rule): from its column when converted, else from the skin
+	protected bool HardSample(int gi, int gk)
+	{
+		MUD_VoxelColumn col = ColAt(gi, gk);
+		if (col)
+		{
+			int li = gi - col.m_iBi * SUB;
+			int lk = gk - col.m_iBk * SUB;
+			return col.m_aHard[lk * SUB + li] != 0;
+		}
+		float x = m_fX0 + gi * CELL;
+		float z = m_fZ0 + gk * CELL;
+		return Kept(x, z) || Hard(x, z);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C4: a blast under a roof carves a sphere r = depth around the hit (a chamber; TUNNEL_FLOOR + sea guard kept (U1), no rim, hard columns
+	//! skipped). MEASURED offline (Tools/improve_checks.py blast): 0 columns opened to the sky for RPG .. 81 mm sizes.
+	protected void CarveSphere(MUD_VoxelOp op)
+	{
+		vector wp = op.m_vWp;
+		float r = op.m_fDepth;
+		int gi0 = Math.Floor((wp[0] - r - m_fX0) / CELL);
+		int gi1 = Math.Ceil((wp[0] + r - m_fX0) / CELL);
+		int gk0 = Math.Floor((wp[2] - r - m_fZ0) / CELL);
+		int gk1 = Math.Ceil((wp[2] + r - m_fZ0) / CELL);
+		int gj0 = Math.Floor((wp[1] - r) / CELL);
+		int gj1 = Math.Ceil((wp[1] + r) / CELL);
+		for (int gk = gk0; gk <= gk1; gk++)
+		{
+			for (int gi = gi0; gi <= gi1; gi++)
+			{
+				MUD_VoxelColumn col = ColAt(gi, gk);
+				if (!col)
+					continue;
+				int li = gi - col.m_iBi * SUB;
+				int lk = gk - col.m_iBk * SUB;
+				int n = lk * SUB + li;
+				if (col.m_aHard[n] != 0)
+					continue;
+				float dx = m_fX0 + gi * CELL - wp[0];
+				float dz = m_fZ0 + gk * CELL - wp[2];
+				float floorY = DeepFloor(col.m_aUndug[n]);     // U1: only under a roof, so the tunnel floor (FLOOR 3 + new clamp = no chamber in a 5 m tunnel)
+				for (int gj = gj0; gj <= gj1; gj++)
+				{
+					float y = gj * CELL;
+					float dy = y - wp[1];
+					float s = Math.Sqrt(dx * dx + dy * dy + dz * dz) - r;
+					float old = Value(col, li, lk, gj);
+					float d = old;
 					if (s < d)
 						d = s;
-					if (floorY - y > d)
-						d = floorY - y;
+					d = Math.Max(d, Math.Min(old, floorY - y));     // U1: no NEW air below the floor (older air stays)
 					Put(col, li, lk, gi, gj, gk, old, Nudge(d));
 				}
 			}
@@ -2891,6 +4274,7 @@ class MUD_VoxelProbe
 		float r = RUT_R;
 		map<int, float> best = new map<int, float>();      // floor sample key -> strongest profile (fall)
 		map<int, float> atY = new map<int, float>();       // wheel height there
+		map<int, int> bestSeg = new map<int, int>();       // Build 3 Stage 3: the segment that gave 'best'
 		if (op.m_aSegA.IsEmpty())
 			return;
 		vector a0 = op.m_aSegA[0];
@@ -2940,69 +4324,62 @@ class MUD_VoxelProbe
 						continue;
 					best.Set(key, fall);
 					atY.Set(key, a[1] + (b[1] - a[1]) * u);
+					bestSeg.Set(key, s);
 				}
 			}
 		}
 		int written = 0;
+		array<int> wrote = {};      // keys the cut wrote (Build 3 Stage 2: the relax works round them)
+		// Build 3 Stage 3: deepest cut per segment, before the relax (the proto's maxcut, per segment: a stretch the cut
+		// skipped - hard ground, road edge - pushes up no ridge beside it)
+		array<float> segCut = {};
+		for (int sc = 0; sc < op.m_aSegA.Count(); sc++)
+			segCut.Insert(0);
 		foreach (int ck, float cf : best)
 		{
 			int cfi = ck % RUT_KEY_W - RUT_KEY_OFF + m_iFloorI0;
 			int cfk = ck / RUT_KEY_W - RUT_KEY_OFF + m_iFloorK0;
-			// the nearest 0.5 m sample column: hard check, carved cells, changed box
-			int cgi = Math.Round(cfi * 0.5);
-			int cgk = Math.Round(cfk * 0.5);
-			MUD_VoxelColumn col = ColAt(cgi, cgk);
-			if (!col && !RUT_FIELD)
-				continue;
-			if (col)
-			{
-				if (col.m_aHard[(cgk - col.m_iBk * SUB) * SUB + cgi - col.m_iBi * SUB] != 0)
-					continue;
-			}
-			else if (Kept(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL) || Hard(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL))
-				continue;   // RUT FIELD, no column: Convert's hard rule (kept within 0.5 m OR hard), skin hole map = same
-				            // on every machine. Hard alone cut ruts up to the asphalt / concrete edge (user 2026-10-15)
-			int fbi = FloorDiv(cfi, FSUB);
-			int fbk = FloorDiv(cfk, FSUB);
-			MUD_VoxelColumn fcol = m_mCols.Get(ColKey(fbi, fbk));
-			if (!fcol && !RUT_FIELD)
-				continue;
-			MUD_RutTile ftile = m_mRutTiles.Get(ColKey(fbi, fbk));
 			float wheelY = atY.Get(ck);
 			float fieldY = 0;
 			float undug = 0;
-			bool vox = col != null && FieldSurfAt(cfi, cfk, wheelY, fieldY);
-			if (vox)
-				undug = UndugAt(cfi, cfk);
-			else
-			{
-				// RUT FIELD plain ground (no column, or one FieldSurfAt can't read): the undug ground, deterministic
-				// on every machine (not m_aH: it comes by net and can lag)
-				if (!RUT_FIELD)
-					continue;
-				if (!MUD_WorldGroundEntity.UndugY(m_fX0 + cfi * FCELL, m_fZ0 + cfk * FCELL, undug))
-					continue;
-				fieldY = undug;
-			}
+			int cgi = 0;
+			int cgk = 0;
+			if (!FloorBase(cfi, cfk, wheelY, fieldY, undug, cgi, cgk))
+				continue;
+			int fbi = FloorDiv(cfi, FSUB);
+			int fbk = FloorDiv(cfk, FSUB);
+			MUD_RutTile ftile = m_mRutTiles.Get(ColKey(fbi, fbk));
 			int fn = (cfk - fbk * FSUB) * FSUB + cfi - fbi * FSUB;
 			float surf = fieldY;
 			if (ftile && ftile.m_aFloor[fn] < surf)
 				surf = ftile.m_aFloor[fn];    // the rut so far: else ruts never deepen
 			if (Math.AbsFloat(surf - wheelY) > RUT_ON)
 				continue;
-			float floorY = surf - op.m_fDepth * cf;
 			float capY = undug - op.m_fB * cf;
+			float cut = op.m_fDepth * cf;
+			float left = RUT_SHARE * (surf - capY);     // R4: the first passes cut most, later ones less
+			if (left > cut)
+				cut = left;
+			float floorY = surf - cut;
 			if (floorY < capY)
 				floorY = capY;
 			float deepY = undug - FLOOR;
 			if (floorY < deepY)
 				floorY = deepY;
+			// J2 (Build 2 stage 1, 2026-10-17): whole cm, the same float a joiner gets from the cm snapshot
+			floorY = Math.Round(floorY * 100) / 100.0;
 			if (floorY >= surf)
 				continue;   // already at its deepest
+			int cs = bestSeg.Get(ck);
+			if (surf - floorY > segCut[cs])
+				segCut[cs] = surf - floorY;
 			if (!ftile)
 				ftile = RutTileMake(fbi, fbk);
 			ftile.m_aFloor[fn] = floorY;    // under surf, so under the old floor too: the min
+			if (ftile.m_aRidge[fn] < FLOOR_NONE * 0.5)
+				RidgeGone(ftile, fn, ColKey(fbi, fbk));     // Build 3 Stage 3: the draw max would hide the cut
 			FloorChanged(cfi, cfk);
+			wrote.Insert(ck);
 			written++;
 			m_iDispOpW++;
 			int rv = Math.Round(floorY * 1000);
@@ -3014,9 +4391,236 @@ class MUD_VoxelProbe
 			MarkBox(cgi, gjLo, cgk);
 			MarkBox(cgi, gjHi, cgk);
 		}
+		int relaxed = 0;
+		if (RUT_REPOSE_ITERS > 0)
+			relaxed = RelaxFloor(wrote, atY);
+		int ridged = 0;
+		if (RUT_RIDGES && RUT_FIELD)
+			ridged = GrowRidges(op, segCut);
 		m_iDispCarved += m_aOpCarved.Count();
 		if (OP_LOG)
-			Print(string.Format("MUD rut floor: %1 samples, %2 carved cells, %3 ms", written, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+			Print(string.Format("MUD rut floor: %1 samples, %2 relaxed, %3 ridged, %4 carved cells, %5 ms", written, relaxed, ridged, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! DISPLACED RUTS: may a rut op cut floor sample fi, fk? False = skip it (hard / kept, no column with the field
+	//! off, no surface). fieldY = the ground there without the rut floor (voxel top near nearY, or the undug ground on
+	//! plain RUT FIELD ground), undug = the undug ground, cgi / cgk = the nearest 0.5 m sample column (hard check,
+	//! carved cells, changed box). CarveFloor's cut and its repose relax share this rule.
+	protected bool FloorBase(int fi, int fk, float nearY, out float fieldY, out float undug, out int cgi, out int cgk)
+	{
+		fieldY = 0;
+		undug = 0;
+		cgi = Math.Round(fi * 0.5);
+		cgk = Math.Round(fk * 0.5);
+		MUD_VoxelColumn col = ColAt(cgi, cgk);
+		if (!col && !RUT_FIELD)
+			return false;
+		if (col)
+		{
+			if (col.m_aHard[(cgk - col.m_iBk * SUB) * SUB + cgi - col.m_iBi * SUB] != 0)
+				return false;
+		}
+		else if (Kept(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL) || Hard(m_fX0 + cgi * CELL, m_fZ0 + cgk * CELL))
+			return false;   // RUT FIELD, no column: Convert's hard rule (kept within 0.5 m OR hard), skin hole map = same
+			                // on every machine. Hard alone cut ruts up to the asphalt / concrete edge (user 2026-10-15)
+		if (!RUT_FIELD && !m_mCols.Contains(ColKey(FloorDiv(fi, FSUB), FloorDiv(fk, FSUB))))
+			return false;
+		if (col && FieldSurfAt(fi, fk, nearY, fieldY))
+		{
+			undug = UndugAt(fi, fk);
+			return true;
+		}
+		// RUT FIELD plain ground (no column, or one FieldSurfAt can't read): the undug ground, deterministic on every
+		// machine (not m_aH: it comes by net and can lag)
+		if (!RUT_FIELD)
+			return false;
+		if (!MUD_WorldGroundEntity.UndugY(m_fX0 + fi * FCELL, m_fZ0 + fk * FCELL, undug))
+			return false;
+		fieldY = undug;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 2 (SCM-lite, Tools/scm_lite_proto.py relax): angle-of-repose relax after CarveFloor's cut. Over
+	//! the samples the cut wrote + 1 ring, in SORTED key order (the order changes the result: every machine must
+	//! match), RUT_REPOSE_ITERS times: where the rut depth drops more than RUT_REPOSE_TAN x FCELL to a 4-neighbour,
+	//! half the excess moves from the high sample to the low one (volume kept, except where the cm / FLOOR clamps
+	//! cut it). Depth = under the ground without the
+	//! rut (FloorBase fieldY), so hillsides and crater walls never move by themselves. The low side RISES (a floor
+	//! goes up, or back to none at the ground), the high side may get a new floor (the rut widens, up to 2 samples
+	//! past the cut: PrepareRut's box). Hard / kept samples stay out (FloorBase). Then whole cm (J2), never under
+	//! undug - FLOOR. Reads / writes the floor inside a kind 4 op only (J2: joiners take the result from the tiles).
+	//! Returns the samples it wrote.
+	protected int RelaxFloor(array<int> wrote, map<int, float> atY)
+	{
+		if (wrote.IsEmpty())
+			return 0;
+		wrote.Sort();
+		int keyMax = RUT_KEY_OFF * 2;
+		map<int, int> at = new map<int, int>();     // key -> index in the p arrays, -1 = stays out
+		array<int> pKey = {};
+		array<float> pD = {};       // rut depth: surface - ground without the rut (<= 0)
+		array<float> pBase = {};    // ground without the rut (FloorBase fieldY)
+		array<float> pDeep = {};    // undug - FLOOR
+		array<int> pGi = {};
+		array<int> pGk = {};
+		array<int> pMoved = {};
+		// pass 0: the written samples with their own wheel height (FieldSurfAt picks the surface near it), pass 1: the
+		// samples up to 2 round them with the first (sorted) written neighbour's wheel height
+		for (int ph = 0; ph < 2; ph++)
+		{
+			int reach = ph * 2;
+			foreach (int wk : wrote)
+			{
+				float nearY = atY.Get(wk);
+				int wri = wk % RUT_KEY_W;
+				int wrk = wk / RUT_KEY_W;
+				for (int dk = -reach; dk <= reach; dk++)
+				{
+					for (int di = -reach; di <= reach; di++)
+					{
+						int ri = wri + di;
+						int rk = wrk + dk;
+						if (ri < 0 || ri >= keyMax || rk < 0 || rk >= keyMax)
+							continue;
+						int nk = rk * RUT_KEY_W + ri;
+						if (at.Contains(nk))
+							continue;
+						int fi = ri - RUT_KEY_OFF + m_iFloorI0;
+						int fk = rk - RUT_KEY_OFF + m_iFloorK0;
+						float fieldY = 0;
+						float undug = 0;
+						int cgi = 0;
+						int cgk = 0;
+						if (!FloorBase(fi, fk, nearY, fieldY, undug, cgi, cgk))
+						{
+							at.Insert(nk, -1);
+							continue;
+						}
+						float h = FloorSample(fi, fk);
+						if (h > fieldY)
+							h = fieldY;
+						at.Insert(nk, pKey.Count());
+						pKey.Insert(nk);
+						pD.Insert(h - fieldY);
+						pBase.Insert(fieldY);
+						pDeep.Insert(undug - FLOOR);
+						pGi.Insert(cgi);
+						pGk.Insert(cgk);
+						pMoved.Insert(0);
+					}
+				}
+			}
+		}
+		// the relax order: written + 1 ring (8 round), sorted
+		set<int> ringSeen = new set<int>();
+		array<int> ring = {};
+		foreach (int wk2 : wrote)
+		{
+			for (int dk2 = -1; dk2 <= 1; dk2++)
+			{
+				for (int di2 = -1; di2 <= 1; di2++)
+				{
+					int rkey = wk2 + dk2 * RUT_KEY_W + di2;
+					if (ringSeen.Contains(rkey) || !at.Contains(rkey))
+						continue;
+					ringSeen.Insert(rkey);
+					if (at.Get(rkey) >= 0)
+						ring.Insert(rkey);
+				}
+			}
+		}
+		ring.Sort();
+		// 4 neighbours in the proto's NB4 order (dk, di) = (0, 1), (1, 0), (0, -1), (-1, 0). A key off the key range is
+		// never in 'at' (RUT_KEY_W > keyMax, so +-1 never wraps into a real key)
+		array<int> nbOff = {};
+		nbOff.Insert(1);
+		nbOff.Insert(RUT_KEY_W);
+		nbOff.Insert(-1);
+		nbOff.Insert(-RUT_KEY_W);
+		float lim = RUT_REPOSE_TAN * FCELL;
+		for (int it = 0; it < RUT_REPOSE_ITERS; it++)
+		{
+			foreach (int ak : ring)
+			{
+				int ia = at.Get(ak);
+				for (int nb = 0; nb < 4; nb++)
+				{
+					int bk = ak + nbOff[nb];
+					if (!at.Contains(bk))
+						continue;
+					int ib = at.Get(bk);
+					if (ib < 0)
+						continue;
+					float dh = pD[ia] - pD[ib];
+					if (dh <= lim)
+						continue;
+					float move = (dh - lim) * 0.5;
+					pD[ia] = pD[ia] - move;
+					pD[ib] = pD[ib] + move;
+					pMoved[ia] = 1;
+					pMoved[ib] = 1;
+				}
+			}
+		}
+		// write back: whole cm, never under undug - FLOOR; back at the ground = no floor
+		int wroteN = 0;
+		for (int p = 0; p < pKey.Count(); p++)
+		{
+			if (pMoved[p] == 0)
+				continue;
+			int pk = pKey[p];
+			int pfi = pk % RUT_KEY_W - RUT_KEY_OFF + m_iFloorI0;
+			int pfk = pk / RUT_KEY_W - RUT_KEY_OFF + m_iFloorK0;
+			float baseY = pBase[p];
+			float d = pD[p];
+			if (d > 0)
+				d = 0;
+			float newY = baseY + d;
+			if (newY < pDeep[p])
+				newY = pDeep[p];
+			newY = Math.Round(newY * 100) / 100.0;
+			float storeY = newY;
+			if (newY >= baseY)
+				storeY = FLOOR_NONE;
+			float oldY = FloorSample(pfi, pfk);
+			if (storeY == oldY)
+				continue;
+			int pbi = FloorDiv(pfi, FSUB);
+			int pbk = FloorDiv(pfk, FSUB);
+			MUD_RutTile ptile = m_mRutTiles.Get(ColKey(pbi, pbk));
+			if (!ptile)
+				ptile = RutTileMake(pbi, pbk);
+			int pn = (pfk - pbk * FSUB) * FSUB + pfi - pbi * FSUB;
+			ptile.m_aFloor[pn] = storeY;
+			if (ptile.m_aRidge[pn] < FLOOR_NONE * 0.5)
+				RidgeGone(ptile, pn, ColKey(pbi, pbk));     // Build 3 Stage 3: a widened rut takes the ridge away
+			FloorChanged(pfi, pfk);
+			wroteN++;
+			m_iDispOpW++;
+			int prv = 7919;     // back to none: hashed as ClearFloor's
+			if (storeY < FLOOR_NONE * 0.5)
+				prv = Math.Round(storeY * 1000);
+			m_iDispHash = (m_iDispHash + (prv * (pn + 1) + ColKey(pbi, pbk)) % DISP_HASH_M) % DISP_HASH_M;
+			if (!RUT_FIELD && newY < baseY - CARVE_TOL)
+				MarkCarved(pGi[p], pGk[p]);
+			// bricks from the lowest of old / new up to the highest of ground / old (a raised floor redraws too)
+			float botY = newY;
+			float topY = baseY;
+			if (oldY < FLOOR_NONE * 0.5)
+			{
+				if (oldY < botY)
+					botY = oldY;
+				if (oldY > topY)
+					topY = oldY;
+			}
+			int pjLo = Math.Floor(botY / CELL);
+			int pjHi = Math.Ceil(topY / CELL);
+			MarkBox(pGi[p], pjLo, pGk[p]);
+			MarkBox(pGi[p], pjHi, pGk[p]);
+		}
+		return wroteN;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3029,6 +4633,190 @@ class MUD_VoxelProbe
 		if (!tile)
 			return FLOOR_NONE;
 		return tile.m_aFloor[(fk - bk * FSUB) * FSUB + fi - bi * FSUB];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3: ridge top (world y) at global floor sample fi, fk; FLOOR_NONE = none (or no tile)
+	protected float RidgeSample(int fi, int fk)
+	{
+		int bi = FloorDiv(fi, FSUB);
+		int bk = FloorDiv(fk, FSUB);
+		MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+		if (!tile)
+			return FLOOR_NONE;
+		return tile.m_aRidge[(fk - bk * FSUB) * FSUB + fi - bi * FSUB];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3: tile sample n (tile key key) loses its ridge - hashed (RUT_RIDGE_GONE). The caller marks it
+	//! changed (FloorChanged).
+	protected void RidgeGone(MUD_RutTile tile, int n, int key)
+	{
+		tile.m_aRidge[n] = FLOOR_NONE;
+		m_iDispHash = (m_iDispHash + (RUT_RIDGE_GONE * (n + 1) + key) % DISP_HASH_M) % DISP_HASH_M;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3: a voxel column holds one of the 4 sample columns round floor sample fi, fk (FieldSurfAt's
+	//! corners) - no ridge there (ridges are plain RUT FIELD ground only: no bricks, no Displace, no rows)
+	protected bool ColRound(int fi, int fk)
+	{
+		int gi = FloorDiv(fi, 2);
+		int gk = FloorDiv(fk, 2);
+		return ColAt(gi, gk) != null || ColAt(gi + 1, gk) != null || ColAt(gi, gk + 1) != null || ColAt(gi + 1, gk + 1) != null;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3 (Tools/scm_lite_proto.py ridge(), blend "add", vol_r = RUT_R, rclr): bulldozed ridges after
+	//! CarveFloor's cut + relax. Band samples RUT_R + RUT_RIDGE_GAP <= d < that + RUT_RIDGE_W from a segment, 0 <= u < 1
+	//! (as the cut), the strongest rise over the segments: h x sin(pi (d - RUT_R - GAP) / W), h = B x segCut[s] x pi / 3
+	//! x RUT_R / W (segCut = CarveFloor's deepest cut per segment; the proto has one track = one maxcut).
+	//! Only on plain RUT FIELD ground: no voxel column round the sample (ColRound), FloorBase ok (hard /
+	//! kept stay out), no floor there after the cut + relax, the wheel within RUT_ON of the ground (as the cut). SORTED
+	//! keys. The ridge grows each op: min(undug + RUT_RIDGE_MAX, max(old, undug) + rise), whole cm (J2 snapshot). Reads
+	//! / writes the tiles inside a kind 4 op only (J2: joiners take the result from the tiles). No MarkBox / Row (no
+	//! bricks there): the heightfield patches draw it (FloorChanged). Returns the samples it wrote.
+	protected int GrowRidges(MUD_VoxelOp op, array<float> segCut)
+	{
+		float rIn = RUT_R + RUT_RIDGE_GAP;
+		float rOut = rIn + RUT_RIDGE_W;
+		map<int, float> rise = new map<int, float>();      // floor sample key -> strongest rise
+		map<int, float> atY = new map<int, float>();       // wheel height there
+		for (int s = 0; s < op.m_aSegA.Count(); s++)
+		{
+			vector a = op.m_aSegA[s];
+			vector b = op.m_aSegB[s];
+			float abx = b[0] - a[0];
+			float abz = b[2] - a[2];
+			float len2 = abx * abx + abz * abz;
+			if (len2 < 0.000001 || segCut[s] <= 0)
+				continue;
+			float h = RUT_RIDGE_B * segCut[s] * Math.PI / 3 * RUT_R / RUT_RIDGE_W;
+			int fi0 = Math.Floor((Math.Min(a[0], b[0]) - rOut - m_fX0) / FCELL);
+			int fi1 = Math.Ceil((Math.Max(a[0], b[0]) + rOut - m_fX0) / FCELL);
+			int fk0 = Math.Floor((Math.Min(a[2], b[2]) - rOut - m_fZ0) / FCELL);
+			int fk1 = Math.Ceil((Math.Max(a[2], b[2]) + rOut - m_fZ0) / FCELL);
+			for (int fk = fk0; fk <= fk1; fk++)
+			{
+				for (int fi = fi0; fi <= fi1; fi++)
+				{
+					float px = m_fX0 + fi * FCELL;
+					float pz = m_fZ0 + fk * FCELL;
+					float u = ((px - a[0]) * abx + (pz - a[2]) * abz) / len2;
+					if (u < 0 || u >= 1)
+						continue;
+					float qx = a[0] + abx * u - px;
+					float qz = a[2] + abz * u - pz;
+					float dist = Math.Sqrt(qx * qx + qz * qz);
+					if (dist < rIn || dist >= rOut)
+						continue;
+					int ri = fi - m_iFloorI0 + RUT_KEY_OFF;
+					int rk = fk - m_iFloorK0 + RUT_KEY_OFF;
+					if (ri < 0 || ri >= RUT_KEY_OFF * 2 || rk < 0 || rk >= RUT_KEY_OFF * 2)
+						continue;   // over 256 m from the first segment: the keys would overlap
+					float up = h * Math.Sin(Math.PI * (dist - rIn) / RUT_RIDGE_W);
+					int key = rk * RUT_KEY_W + ri;
+					if (rise.Contains(key) && up <= rise.Get(key))
+						continue;
+					rise.Set(key, up);
+					atY.Set(key, a[1] + (b[1] - a[1]) * u);
+				}
+			}
+		}
+		array<int> keys = {};
+		foreach (int rkey, float rv0 : rise)
+			keys.Insert(rkey);
+		keys.Sort();
+		int wroteN = 0;
+		foreach (int ck : keys)
+		{
+			int cfi = ck % RUT_KEY_W - RUT_KEY_OFF + m_iFloorI0;
+			int cfk = ck / RUT_KEY_W - RUT_KEY_OFF + m_iFloorK0;
+			if (FloorSample(cfi, cfk) < FLOOR_NONE * 0.5)
+				continue;   // in the rut (cut or relaxed): no ridge
+			if (ColRound(cfi, cfk))
+				continue;
+			float wheelY = atY.Get(ck);
+			float fieldY = 0;
+			float undug = 0;
+			int cgi = 0;
+			int cgk = 0;
+			if (!FloorBase(cfi, cfk, wheelY, fieldY, undug, cgi, cgk))
+				continue;
+			if (Math.AbsFloat(undug - wheelY) > RUT_ON)
+				continue;   // as the cut: a wheel far over this ground (bridge, roof) does not push it up
+			int rbi = FloorDiv(cfi, FSUB);
+			int rbk = FloorDiv(cfk, FSUB);
+			MUD_RutTile rtile = m_mRutTiles.Get(ColKey(rbi, rbk));
+			int rn = (cfk - rbk * FSUB) * FSUB + cfi - rbi * FSUB;
+			float oldY = FLOOR_NONE;
+			if (rtile)
+				oldY = rtile.m_aRidge[rn];
+			float fromY = undug;
+			if (oldY < FLOOR_NONE * 0.5 && oldY > fromY)
+				fromY = oldY;
+			float newY = fromY + rise.Get(ck);
+			if (newY > undug + RUT_RIDGE_MAX)
+				newY = undug + RUT_RIDGE_MAX;
+			newY = Math.Round(newY * 100) / 100.0;     // J2: whole cm, the same float a joiner gets
+			if (newY <= undug || newY == oldY)
+				continue;
+			if (!rtile)
+				rtile = RutTileMake(rbi, rbk);
+			rtile.m_aRidge[rn] = newY;
+			FloorChanged(cfi, cfk);
+			wroteN++;
+			m_iDispOpW++;
+			int rv = Math.Round(newY * 1000);
+			m_iDispHash = (m_iDispHash + ((rv + RUT_RIDGE_SALT) * (rn + 1) + ColKey(rbi, rbk)) % DISP_HASH_M) % DISP_HASH_M;
+		}
+		return wroteN;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3 (WorldGround Heights): the rut field top at world x, z - bilinear over the 4 floor samples round
+	//! it, each corner its floor, else its ridge, else ownY; FLOOR_NONE = no corner has a ridge (Heights then keeps the
+	//! floor-only FloorAtW result exactly).
+	protected float FieldTopW(float x, float z, float ownY)
+	{
+		float fx = (x - m_fX0) / FCELL;
+		float fz = (z - m_fZ0) / FCELL;
+		int ix = Math.Floor(fx);
+		int iz = Math.Floor(fz);
+		float tx = fx - ix;
+		float tz = fz - iz;
+		float t00 = ownY;
+		float t10 = ownY;
+		float t01 = ownY;
+		float t11 = ownY;
+		int ridges = TopSample(ix, iz, t00) + TopSample(ix + 1, iz, t10) + TopSample(ix, iz + 1, t01) + TopSample(ix + 1, iz + 1, t11);
+		if (ridges == 0)
+			return FLOOR_NONE;
+		return (t00 * (1 - tx) + t10 * tx) * (1 - tz) + (t01 * (1 - tx) + t11 * tx) * tz;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FieldTopW corner: floor sample fi, fk's floor (y = it, returns 0), else its ridge (y = it, returns 1), else y
+	//! untouched (returns 0)
+	protected int TopSample(int fi, int fk, inout float y)
+	{
+		int bi = FloorDiv(fi, FSUB);
+		int bk = FloorDiv(fk, FSUB);
+		MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+		if (!tile)
+			return 0;
+		int n = (fk - bk * FSUB) * FSUB + fi - bi * FSUB;
+		if (tile.m_aFloor[n] < FLOOR_NONE * 0.5)
+		{
+			y = tile.m_aFloor[n];
+			return 0;
+		}
+		if (tile.m_aRidge[n] < FLOOR_NONE * 0.5)
+		{
+			y = tile.m_aRidge[n];
+			return 1;
+		}
+		return 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3074,6 +4862,25 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3 (heightfield side): ridge top (world y) at global fine vertex gx, gz (one grid, as FieldFloor).
+	//! FLOOR_NONE = none, or ridges / the field are off.
+	static float FieldRidge(int gx, int gz)
+	{
+		if (!RUT_RIDGES || !RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return FLOOR_NONE;
+		return s_Inst.RidgeSample(gx, gz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 3: rut floor or ridge at world x, z, bilinear (FieldTopW); FLOOR_NONE = none
+	static float FieldTopAt(float x, float z, float ownY)
+	{
+		if (!RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return FLOOR_NONE;
+		return s_Inst.FieldTopW(x, z, ownY);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! RUT FIELD: a floor tile reaches global fine vertices [gx0..gx1] x [gz0..gz1] (a patch that must draw it)
 	static bool FieldInBox(int gx0, int gx1, int gz0, int gz1)
 	{
@@ -3100,7 +4907,10 @@ class MUD_VoxelProbe
 	{
 		MUD_RutTile tile = new MUD_RutTile();
 		for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
+		{
 			tile.m_aFloor[f] = FLOOR_NONE;
+			tile.m_aRidge[f] = FLOOR_NONE;
+		}
 		m_mRutTiles.Insert(ColKey(bi, bk), tile);
 		return tile;
 	}
@@ -3212,6 +5022,12 @@ class MUD_VoxelProbe
 							m_iDispHash = (m_iDispHash + (7919 * (cn + 1) + ColKey(bi, bk)) % DISP_HASH_M) % DISP_HASH_M;
 						}
 						tile.m_aFloor[cn] = FLOOR_NONE;
+						if (tile.m_aRidge[cn] < FLOOR_NONE * 0.5)
+						{
+							FloorChanged(fi, fk);     // Build 3 Stage 3: the ridge goes with the floor
+							m_iDispOpC++;
+							RidgeGone(tile, cn, ColKey(bi, bk));
+						}
 					}
 				}
 			}
@@ -3243,7 +5059,15 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Tunnel dig: vertical capsule (segment mid +- TUNNEL_HALF, radius m_fDepth), never under FLOOR
+	//! U1: the deepest a tunnel / C4 sphere may dig in a column with undug ground undug: TUNNEL_FLOOR under it, never
+	//! under the sea guard (ground near the sea: shallower, or nothing)
+	protected float DeepFloor(float undug)
+	{
+		return Math.Max(undug - TUNNEL_FLOOR, m_fSeaY);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Tunnel dig: vertical capsule (segment mid +- TUNNEL_HALF, radius m_fDepth), never under DeepFloor (U1)
 	protected void CarveTunnel(MUD_VoxelOp op)
 	{
 		vector mid = op.m_vWp;
@@ -3269,7 +5093,7 @@ class MUD_VoxelProbe
 					continue;
 				float dx = m_fX0 + gi * CELL - mid[0];
 				float dz = m_fZ0 + gk * CELL - mid[2];
-				float floorY = col.m_aUndug[n] - FLOOR;
+				float floorY = DeepFloor(col.m_aUndug[n]);
 				for (int gj = gj0; gj <= gj1; gj++)
 				{
 					float y = gj * CELL;
@@ -3280,12 +5104,168 @@ class MUD_VoxelProbe
 					float d = old;
 					if (s < d)
 						d = s;
-					if (floorY - y > d)
-						d = floorY - y;
+					d = Math.Max(d, Math.Min(old, floorY - y));     // U1: no NEW air below the floor (older air stays)
 					Put(col, li, lk, gi, gj, gk, old, Nudge(d));
 				}
 			}
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Tunnel darkness (client / host, after CarveTunnel): one MudTunnelProbe per TUNNEL_DARK_STEP grid cell the capsule
+	//! touches, centred on the cell (user shots 2026-10-17: one probe at the FIRST dig of a cell left later, lower digs'
+	//! floors under the 3 m box = outdoor ambient = day-bright pocket; log 19:09 run: 7 of 56 roofed digs). Box 5 x 3 x 5
+	//! on a 2 m grid: every capsule point lies in a probed cell. BoxRoofed reads the field, so the open entry gets none.
+	protected void TunnelDark(vector mid)
+	{
+		float reach = TUNNEL_HALF + TUNNEL_R;
+		int di0 = Math.Round((mid[0] - TUNNEL_R) / TUNNEL_DARK_STEP);
+		int di1 = Math.Round((mid[0] + TUNNEL_R) / TUNNEL_DARK_STEP);
+		int dj0 = Math.Round((mid[1] - reach) / TUNNEL_DARK_STEP_Y);
+		int dj1 = Math.Round((mid[1] + reach) / TUNNEL_DARK_STEP_Y);
+		int dk0 = Math.Round((mid[2] - TUNNEL_R) / TUNNEL_DARK_STEP);
+		int dk1 = Math.Round((mid[2] + TUNNEL_R) / TUNNEL_DARK_STEP);
+		for (int di = di0; di <= di1; di++)
+		{
+			for (int dj = dj0; dj <= dj1; dj++)
+			{
+				for (int dk = dk0; dk <= dk1; dk++)
+					TunnelDarkCell(mid, di, dj, dk);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! One probe at the centre of grid cell (di, dj, dk), once; a cell not yet roofed is not marked (a later dig retries).
+	//! Depth level from the dig's column at the cell's height: one level per metre, TUNNEL_DARK_D1 .. level 4 (darkest)
+	//! from 4 m (user 2026-10-17: 'total darkness below 4 m'; path-distance levels v157 dropped).
+	protected void TunnelDarkCell(vector mid, int di, int dj, int dk)
+	{
+		string key = string.Format("%1 %2 %3", di, dj, dk);
+		if (m_mDark.Contains(key))
+			return;
+		vector c = Vector(di * TUNNEL_DARK_STEP, dj * TUNNEL_DARK_STEP_Y, dk * TUNNEL_DARK_STEP);
+		float minTop;
+		if (!BoxRoofed(c, minTop))
+			return;
+		m_mDark.Insert(key, 1);
+		float depth = TunnelDepth(Vector(mid[0], c[1], mid[2]));
+		int level = Math.Floor((depth - TUNNEL_DARK_D1) / TUNNEL_DARK_BAND) + 1;
+		level = Math.ClampInt(level, 0, 4);
+		ResourceName prefab = TunnelProbeLevel(level);
+		Resource res = Resource.Load(prefab);
+		if (!res || !res.IsValid())
+		{
+			Print("MUD tunnel dark: prefab not loaded " + prefab, LogLevel.WARNING);
+			return;
+		}
+		EntitySpawnParams params = new EntitySpawnParams();
+		params.TransformMode = ETransformMode.WORLD;
+		params.Transform[0] = vector.Right;
+		params.Transform[1] = vector.Up;
+		params.Transform[2] = vector.Forward;
+		params.Transform[3] = c;
+		IEntity ent = GetGame().SpawnEntityPrefabLocal(res, GetGame().GetWorld(), params);
+		Print(string.Format("MUD tunnel dark: probe %1 at %2 depth %3 level %4 (%5 cells)", ent != null, c, depth, level, m_mDark.Count()), LogLevel.NORMAL);
+		if (TUNNEL_LID)
+			TunnelLid(Vector(c[0], minTop - TUNNEL_LID_SINK, c[2]));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Sun-shadow lid probe: one up-facing MAT_DIRT square, TUNNEL_LID_HALF each way round org (winding as Tri: front =
+	//! Cross(b - a, c - a) = up)
+	protected void TunnelLid(vector org)
+	{
+		int numVerts[] = {4};
+		int numIndices[] = {6};
+		string materials[] = {MAT_DIRT};
+		Resource res = MeshObject.Create(1, numVerts, numIndices, materials, 0);
+		if (!res || !res.GetResource())
+		{
+			Print("MUD tunnel lid: MeshObject.Create failed", LogLevel.ERROR);
+			return;
+		}
+		// MeshObject takes static arrays (array<T> = compile error)
+		float h = TUNNEL_LID_HALF;
+		vector verts[4];
+		verts[0] = Vector(-h, 0, -h);
+		verts[1] = Vector(h, 0, -h);
+		verts[2] = Vector(-h, 0, h);
+		verts[3] = Vector(h, 0, h);
+		float uvs[] = {0, 0, 1, 0, 0, 1, 1, 1};
+		int idx[] = {0, 2, 1, 1, 2, 3};
+		MeshObject mesh = res.GetResource().ToMeshObject();
+		// indices first: UpdateVerts rebuilds normals from the triangle list
+		mesh.UpdateIndices(0, idx);
+		mesh.UpdateVerts(0, verts, uvs);
+		EntitySpawnParams params = new EntitySpawnParams();
+		params.TransformMode = ETransformMode.WORLD;
+		params.Transform[0] = vector.Right;
+		params.Transform[1] = vector.Up;
+		params.Transform[2] = vector.Forward;
+		params.Transform[3] = org;
+		IEntity ent = GetGame().SpawnEntity(GenericEntity, GetGame().GetWorld(), params);
+		if (!ent)
+			return;
+		ent.SetObject(mesh, "");
+		ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
+		Print(string.Format("MUD vcflags: lid %1 (8 = NOSHADOW)", ent.SetVComponentFlags(0)), LogLevel.NORMAL);
+		m_aLidRes.Insert(res);
+		Print(string.Format("MUD tunnel lid: at %1 (%2 lids)", org, m_aLidRes.Count()), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Tunnel darkness: the probe box round mid is all under ground - the ground top (voxel column top, else our
+	//! heightfield, trenches included) at 9 points TUNNEL_DARK_HALF apart is TUNNEL_DARK_ROOF or more above mid;
+	//! minTop = the lowest of them
+	protected bool BoxRoofed(vector mid, out float minTop)
+	{
+		minTop = 1000000;
+		for (int a = -1; a <= 1; a++)
+		{
+			for (int c = -1; c <= 1; c++)
+			{
+				float x = mid[0] + a * TUNNEL_DARK_HALF;
+				float z = mid[2] + c * TUNNEL_DARK_HALF;
+				int gi = Math.Round((x - m_fX0) / CELL);
+				int gk = Math.Round((z - m_fZ0) / CELL);
+				float top;
+				if (!ColSurf(gi, gk, top) && !MUD_WorldGroundEntity.SurfaceY(x, z, top))
+					return false;
+				if (top < mid[1] + TUNNEL_DARK_ROOF)
+					return false;
+				minTop = Math.Min(minTop, top);
+			}
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Tunnel darkness: probe prefab for level 0 (shallow) .. 4 (darkest)
+	protected static ResourceName TunnelProbeLevel(int level)
+	{
+		if (level == 1)
+			return TUNNEL_PROBE_1;
+		if (level == 2)
+			return TUNNEL_PROBE_2;
+		if (level == 3)
+			return TUNNEL_PROBE_3;
+		if (level == 4)
+			return TUNNEL_PROBE_4;
+		return TUNNEL_PROBE;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Tunnel darkness: feet depth (capsule middle - TUNNEL_MID) under the undug ground of the nearest column (0: none)
+	protected float TunnelDepth(vector mid)
+	{
+		int gi = Math.Round((mid[0] - m_fX0) / CELL);
+		int gk = Math.Round((mid[2] - m_fZ0) / CELL);
+		MUD_VoxelColumn col = ColAt(gi, gk);
+		if (!col)
+			return 0;
+		int n = (gk - col.m_iBk * SUB) * SUB + gi - col.m_iBi * SUB;
+		return col.m_aUndug[n] - (mid[1] - TUNNEL_MID);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3339,7 +5319,7 @@ class MUD_VoxelProbe
 					{
 						if (owner >= 0)
 							continue;   // another piece's column: its own swings
-						float od = lay.OutsideDist(p, x, z);
+						float od = Math.Max(0, lay.OutsideDist(p, x, z) - TRENCH_PAD);     // T1: within the pad = floor
 						if (od >= run)
 							continue;
 						w = depth - od / MUD_TrenchPlan.SLOPE_RUN;
@@ -3348,7 +5328,11 @@ class MUD_VoxelProbe
 						want = w;
 				}
 				if (want < 0)
+				{
+					if (PARAPET && op.m_iPiece >= 0)
+						Parapet(op, col, li, lk, gi, gk, x, z, depth);
 					continue;
+				}
 				float g = col.m_aUndug[n];
 				float bottom = Math.Max(g - want, g - FLOOR);
 				int jb = Math.Floor(bottom / CELL) - 1;
@@ -3361,6 +5345,58 @@ class MUD_VoxelProbe
 						Put(col, li, lk, gi, gj, gk, old, Nudge(s));
 				}
 			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 6: side distance (MUD_TrenchLayout.SideDist) where the parapet starts: past the pad, the sloped wall of
+	//! the plan's full depth and PARA_BERM - later swings of the plan never cut it
+	protected static float ParapetStart(MUD_TrenchLayout lay)
+	{
+		return TRENCH_PAD + lay.Layers() * MUD_TrenchPlan.LAYER * MUD_TrenchPlan.SLOPE_RUN + PARA_BERM;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 6 (op 2, piece >= 0): raises sample column li, lk of col (world x, z) into the spoil parapet beside the
+	//! op's piece - both sides, nothing past the chain's ends; the nearest piece builds it (none where another
+	//! piece's shape or wall is nearer). Height from depth (this swing, m): grows swing by swing. Only raises, and
+	//! only a column no op dug (density only, no rut floor - J2, as FillTrench).
+	protected void Parapet(MUD_VoxelOp op, MUD_VoxelColumn col, int li, int lk, int gi, int gk, float x, float z, float depth)
+	{
+		MUD_TrenchLayout lay = op.m_Lay;
+		float sd = lay.SideDist(op.m_iPiece, x, z);
+		if (sd < 0)
+			return;
+		float u = sd - ParapetStart(lay);
+		float width = PARA_RISE * 2 + PARA_TOP;
+		if (u <= 0 || u >= width)
+			return;
+		for (int p = 0; p < lay.Count(); p++)
+		{
+			if (p != op.m_iPiece && lay.OutsideDist(p, x, z) < sd - 0.001)
+				return;
+		}
+		float t = 1;
+		if (u < PARA_RISE)
+			t = u / PARA_RISE;
+		else if (u > PARA_RISE + PARA_TOP)
+			t = (width - u) / PARA_RISE;
+		float h = Math.Min(PARA_MAX, depth * PARA_K) * t * t * (3 - 2 * t);
+		if (h < 0.005)
+			return;
+		if (ColumnDepth(col, li, lk, false) > 0.01)
+			return;     // dug (crater, rut cut, another hole): leave it
+		int n = lk * SUB + li;
+		float g = col.m_aUndug[n];
+		float target = g + h;
+		int jb = Math.Floor((g - FLOOR) / CELL) - 1;
+		int jt = Math.Ceil(target / CELL) + 1;
+		for (int gj = jb; gj <= jt; gj++)
+		{
+			float old = Value(col, li, lk, gj);
+			float s = target - gj * CELL;
+			if (s > old + 0.0005)
+				Put(col, li, lk, gi, gj, gk, old, Nudge(s));
 		}
 	}
 
@@ -3400,11 +5436,11 @@ class MUD_VoxelProbe
 				{
 					float od = margin;
 					for (int p = 0; p < lay.Count(); p++)
-						od = Math.Min(od, lay.OutsideDist(p, x, z));
+						od = Math.Min(od, Math.Max(0, lay.OutsideDist(p, x, z) - TRENCH_PAD));     // T1: as CutTrench
 					if (od >= margin)
 						continue;
 					float wall = Math.Max(0, holeDepth - od / MUD_TrenchPlan.SLOPE_RUN);
-					if (ColumnDepth(col, li, lk) > wall + 0.01)
+					if (ColumnDepth(col, li, lk, false) > wall + 0.01)
 						fillTo = newDepth + od / MUD_TrenchPlan.SLOPE_RUN;
 					else
 						fillTo = Math.Max(0, newDepth - od / MUD_TrenchPlan.SLOPE_RUN);
@@ -3427,8 +5463,9 @@ class MUD_VoxelProbe
 
 	//------------------------------------------------------------------------------------------------
 	//! How far sample column li, lk of col lies under its undug ground now: the top crossing from solid to air (a cave
-	//! under it does not count). Negative = above (LIFT, a rim, a berm).
-	protected float ColumnDepth(MUD_VoxelColumn col, int li, int lk)
+	//! under it does not count). Negative = above (LIFT, a rim, a berm). withFloor false = density only, no rut floor
+	//! (FillTrench: a joiner replays fills before the rut snapshot exists, so the fill must not read it - J2)
+	protected float ColumnDepth(MUD_VoxelColumn col, int li, int lk, bool withFloor)
 	{
 		int n = lk * SUB + li;
 		int rTop = -1000000;
@@ -3441,7 +5478,11 @@ class MUD_VoxelProbe
 				rBot = bj;
 		}
 		if (rTop < rBot)
-			return col.m_aUndug[n] - FloorMin(col, li, lk, col.m_aTop[n]);     // no rows: the seed
+		{
+			if (!withFloor)
+				return col.m_aUndug[n] - col.m_aTop[n];     // no rows: the seed
+			return col.m_aUndug[n] - FloorMin(col, li, lk, col.m_aTop[n]);
+		}
 		float y = rBot * BRICK;
 		for (int gj = rTop * SUB + SUB; gj >= rBot * SUB; gj--)
 		{
@@ -3454,6 +5495,8 @@ class MUD_VoxelProbe
 				y += CELL * d / (d - du);
 			break;
 		}
+		if (!withFloor)
+			return col.m_aUndug[n] - y;
 		return col.m_aUndug[n] - FloorMin(col, li, lk, y);
 	}
 
@@ -3539,7 +5582,7 @@ class MUD_VoxelProbe
 					bool onSheet = MUD_MudSheet.SheetDepth(x, z, dep);
 					if (!onSheet && col)
 					{
-						dep = ColumnDepth(col, gi - col.m_iBi * SUB, gk - col.m_iBk * SUB);
+						dep = ColumnDepth(col, gi - col.m_iBi * SUB, gk - col.m_iBk * SUB, true);
 					}
 					else if (!onSheet)
 					{
@@ -3730,10 +5773,23 @@ class MUD_VoxelProbe
 		for (int mI = 0; mI < m_aMudLo.Count(); mI++)
 			MUD_MudSheet.GroundChanged(m_aMudLo[mI], m_aMudHi[mI], m_aMudWp[mI], m_aMudR[mI]);
 		MUD_MudSheet.FlushNow();     // DIG NOW: all this go-live's digs in one pass
+		// Build 2 Stage 5: things on the ground follow (bricks + bodies are live now; m_mSurf cleared above)
+		for (int fI = 0; fI < m_aMudLo.Count(); fI++)
+			MUD_GroundFollow.Changed(m_aMudLo[fI], m_aMudHi[fI], m_aMudKind[fI], m_aMudLift[fI]);
+		if (CRATER_DECAL && !m_bHeadless)
+		{
+			for (int dI = 0; dI < m_aMudLo.Count(); dI++)
+			{
+				if (m_aMudKind[dI] == 0)
+					CraterDecal(m_aMudWp[dI], m_aMudR[dI]);
+			}
+		}
 		m_aMudLo.Clear();
 		m_aMudHi.Clear();
 		m_aMudWp.Clear();
 		m_aMudR.Clear();
+		m_aMudKind.Clear();
+		m_aMudLift.Clear();
 		m_iDispSplit += m_iBatchSplit;
 		m_iDispSplitV += m_iBatchSplitV;
 		m_iDispFold += m_iBatchFold;
@@ -3746,6 +5802,45 @@ class MUD_VoxelProbe
 			+ string.Format(" (%1 kept their body, %2 look-only builds skipped)", m_iBatchMeshOnly, m_iBatchSkipped)
 			+ string.Format(" | scan: gather %1 ms, poly %2 ms, %3 samples scanned, checks %4 (%5 bad), checked full %6 ms vs band %7 ms", m_iBatchGatherMs, m_iBatchPolyMs,
 			m_iBatchScanned, m_iScanChecked, m_iScanBad, m_iBatchFullMs, m_iBatchBandMs) + DispBatch(), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Crater decal probe (GoLive, client / host): the vanilla mortar decal on every entity under the crater - traces
+	//! down at its middle and 4 points 0.6 x crest out (a crater spans up to 4 bricks), one decal per entity hit
+	protected void CraterDecal(vector wp, float crest)
+	{
+		ChimeraWorld world = ChimeraWorld.CastFrom(GetGame().GetWorld());
+		if (!world || crest <= 0)
+			return;
+		if (!m_DecalTrace)
+			m_DecalTrace = new TraceParam();
+		array<IEntity> done = {};
+		float rr = crest * 0.6;
+		float angle = Math.RandomFloat(0, 360);
+		for (int i = 0; i < 5; i++)
+		{
+			vector p = wp;
+			if (i == 1)
+				p[0] = p[0] + rr;
+			else if (i == 2)
+				p[0] = p[0] - rr;
+			else if (i == 3)
+				p[2] = p[2] + rr;
+			else if (i == 4)
+				p[2] = p[2] - rr;
+			m_DecalTrace.Start = p + Vector(0, 3, 0);
+			m_DecalTrace.End = p - Vector(0, crest + 4, 0);
+			m_DecalTrace.Flags = TraceFlags.ENTS | TraceFlags.WORLD;
+			m_DecalTrace.TraceEnt = null;
+			float f = world.TraceMove(m_DecalTrace, null);
+			IEntity hit = m_DecalTrace.TraceEnt;
+			if (!hit || f >= 1 || done.Contains(hit))
+				continue;
+			done.Insert(hit);
+			Decal d = world.CreateDecal(hit, wp + Vector(0, 2, 0), "0 -1 0", 0, crest + 6, angle, crest * DECAL_SIZE, 1, DECAL_MAT, DECAL_LIFE, 0xFFFFFFFF);
+			Print(string.Format("MUD decal: crater %1 crest %2 point %3 hit %4 at y %5 -> decal %6", wp, crest.ToString(-1, 2), i,
+				hit.ClassName(), (m_DecalTrace.Start[1] + (m_DecalTrace.End[1] - m_DecalTrace.Start[1]) * f).ToString(-1, 2), d != null), LogLevel.NORMAL);
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3788,7 +5883,7 @@ class MUD_VoxelProbe
 	{
 		if (n == DSW_LOG && DISP_LOG_ALWAYS)
 			return true;
-		if (n == DSW_HASH && DISP_HASH_ALWAYS)
+		if (n == DSW_HASH && (DISP_HASH_ALWAYS || MUD_TestKit.TEST_KIT))
 			return true;
 #ifdef ENABLE_DIAG
 		if (!s_bDispMenu)
@@ -3933,6 +6028,22 @@ class MUD_VoxelProbe
 					}
 					m_aDispFloorP.Insert(p);
 					m_aDispFloorC.Insert(c);
+					if (m_aDispFloorP.Count() >= DISP_FLOOR_MAX)
+						return;
+				}
+				// Build 3 Stage 3: ridge samples, cyan
+				for (int rn = 0; rn < MUD_RutTile.SIZE_F; rn++)
+				{
+					float ry = tile.m_aRidge[rn];
+					if (ry > FLOOR_NONE * 0.5)
+						continue;
+					int rfi = bi * FSUB + rn % FSUB;
+					int rfk = bk * FSUB + rn / FSUB;
+					vector rp = Vector(m_fX0 + rfi * FCELL, ry, m_fZ0 + rfk * FCELL);
+					if (vector.DistanceSqXZ(rp, o) > rr * rr)
+						continue;
+					m_aDispFloorP.Insert(rp);
+					m_aDispFloorC.Insert(ARGB(255, 0, 220, 255));
 					if (m_aDispFloorP.Count() >= DISP_FLOOR_MAX)
 						return;
 				}
@@ -4993,6 +7104,64 @@ class MUD_VoxelProbe
 		return s_Inst.Carved(cx, cz);
 	}
 
+	//! Build 2 Stage 5 (MUD_GroundFollow): voxel ground top at x, z WITHOUT the rut floor (J2: the same on a joiner
+	//! that replays ops before the rut snapshot), not cached. False = a corner column is not converted (no op there).
+	static bool TopAt(float x, float z, out float y)
+	{
+		if (!s_Inst)
+			return false;
+		float gx = (x - s_Inst.m_fX0) / CELL;
+		float gz = (z - s_Inst.m_fZ0) / CELL;
+		int gi = Math.Floor(gx);
+		int gk = Math.Floor(gz);
+		float fx = gx - gi;
+		float fz = gz - gk;
+		float h00;
+		float h10;
+		float h01;
+		float h11;
+		if (!s_Inst.ColTop(gi, gk, h00) || !s_Inst.ColTop(gi + 1, gk, h10) || !s_Inst.ColTop(gi, gk + 1, h01) || !s_Inst.ColTop(gi + 1, gk + 1, h11))
+			return false;
+		y = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TopAt: ColSurf's top of the solid without the rut floor and without the m_mSurf cache
+	protected bool ColTop(int gi, int gk, out float h)
+	{
+		h = -9999;
+		MUD_VoxelColumn col = ColAt(gi, gk);
+		if (!col)
+			return false;
+		int li = gi - col.m_iBi * SUB;
+		int lk = gk - col.m_iBk * SUB;
+		int n = lk * SUB + li;
+		float undug = col.m_aUndug[n];
+		if (col.m_aHard[n] != 0)
+		{
+			h = undug;
+			return true;
+		}
+		int j1 = Math.Ceil((undug + 2) / CELL);
+		int j0 = Math.Floor((undug - TUNNEL_FLOOR - 1) / CELL);
+		float prev = Value(col, li, lk, j1);
+		if (prev > 0)
+			return false;
+		for (int j = j1 - 1; j >= j0; j--)
+		{
+			float v = Value(col, li, lk, j);
+			if (v > 0)
+			{
+				h = j * CELL + v / (v - prev) * CELL;
+				return true;
+			}
+			prev = v;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! DIG NOW: voxel ground top at x, z (see SurfaceAtI)
 	static bool SurfaceAt(float x, float z, out float y)
 	{
@@ -5045,7 +7214,7 @@ class MUD_VoxelProbe
 			return true;
 		}
 		int j1 = Math.Ceil((undug + 2) / CELL);
-		int j0 = Math.Floor((undug - FLOOR - 1) / CELL);
+		int j0 = Math.Floor((undug - TUNNEL_FLOOR - 1) / CELL);     // U1: an open shaft can reach TUNNEL_FLOOR
 		float prev = Value(col, li, lk, j1);
 		if (prev <= 0)
 		{
@@ -5073,6 +7242,25 @@ class MUD_VoxelProbe
 		int li = Math.ClampInt(Math.Round(x / CELL), -1, SUB);
 		int lk = Math.ClampInt(Math.Round(z / CELL), -1, SUB);
 		return m_Gb.m_aTop[(lk + 1) * GN + li + 1] - m_vBOrg[1];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 6 grass test: brick-local point p lies within GRASS_TOL of the seeded ground, bilinear between the gathered
+	//! sample columns (a quad corner sits between them; the nearest column is off by the slope on sloped ground)
+	protected bool OnGround(vector p)
+	{
+		float fx = p[0] / CELL;
+		float fz = p[2] / CELL;
+		int i0 = Math.ClampInt(Math.Floor(fx), -1, SUB - 1);
+		int k0 = Math.ClampInt(Math.Floor(fz), -1, SUB - 1);
+		float tx = Math.Clamp(fx - i0, 0, 1);
+		float tz = Math.Clamp(fz - k0, 0, 1);
+		int r0 = (k0 + 1) * GN + i0 + 1;
+		int r1 = r0 + GN;
+		float a = m_Gb.m_aTop[r0] + (m_Gb.m_aTop[r0 + 1] - m_Gb.m_aTop[r0]) * tx;
+		float c = m_Gb.m_aTop[r1] + (m_Gb.m_aTop[r1 + 1] - m_Gb.m_aTop[r1]) * tx;
+		float g = a + (c - a) * tz - m_vBOrg[1];
+		return Math.AbsFloat(p[1] - g) < GRASS_TOL;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -5176,7 +7364,7 @@ class MUD_VoxelProbe
 		// sliver of the carved cell open; the part over the heightfield sits LIFT above it
 		if (!EmitAt(p0) && !EmitAt(p1) && !EmitAt(p2) && !EmitAt(p3))
 			return;     // not carved: the heightfield shows there (with its ruts)
-		bool top = proj == 0 && n[1] > 0.7 * n.Length() && mid[1] > GroundLocal(mid[0], mid[2]) - 0.15;
+		bool top = proj == 0 && n[1] > 0.7 * n.Length() && OnGround(p0) && OnGround(p1) && OnGround(p2) && OnGround(p3);
 		// no grass under a mud-zone sheet tile: the sheet draws its own top look there (user 2026-10-15)
 		if (top && MUD_MudZoneEntity.SheetCovers(m_vBOrg[0] + mid[0], m_vBOrg[2] + mid[2]))
 			top = false;
@@ -5437,7 +7625,51 @@ class MUD_VoxelProbe
 			return ent;
 		ent.SetObject(res.GetResource().ToMeshObject(), "");
 		ent.Update();
+		if (s_iVcLog < 3)
+		{
+			s_iVcLog++;
+			Print(string.Format("MUD vcflags: brick %1 (8 = NOSHADOW)", ent.SetVComponentFlags(0)), LogLevel.NORMAL);
+		}
 		return ent;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Wall material of the built buffers: MAT_DARK_1..3 when the whole brick mesh is under ground (lowest ground top at
+	//! 9 points over the brick, ColSurf else our heightfield, minus the highest vertex >= DARK_ROOF_1), else MAT_DIRT
+	protected ResourceName DirtMat()
+	{
+		if (!DARK_MAT || m_iV == 0)
+			return MAT_DIRT;
+		vector p0 = m_Vb.m_aV[0];
+		float hiY = p0[1];
+		for (int v = 1; v < m_iV; v++)
+		{
+			vector p = m_Vb.m_aV[v];
+			hiY = Math.Max(hiY, p[1]);
+		}
+		hiY += m_vBOrg[1];
+		float roof = 1000000;
+		for (int a = 0; a <= 2; a++)
+		{
+			for (int c = 0; c <= 2; c++)
+			{
+				float x = m_vBOrg[0] + a * BRICK * 0.5;
+				float z = m_vBOrg[2] + c * BRICK * 0.5;
+				int gi = Math.Round((x - m_fX0) / CELL);
+				int gk = Math.Round((z - m_fZ0) / CELL);
+				float top;
+				if (!ColSurf(gi, gk, top) && !MUD_WorldGroundEntity.SurfaceY(x, z, top))
+					return MAT_DIRT;
+				roof = Math.Min(roof, top - hiY);
+			}
+		}
+		if (roof >= DARK_ROOF_3)
+			return MAT_DARK_3;
+		if (roof >= DARK_ROOF_2)
+			return MAT_DARK_2;
+		if (roof >= DARK_ROOF_1)
+			return MAT_DARK_1;
+		return MAT_DIRT;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -5445,18 +7677,19 @@ class MUD_VoxelProbe
 	protected Resource MakeRes()
 	{
 		Resource res;
+		ResourceName dirt = DirtMat();
 		if (m_iTop > 0 && m_iDirt > 0)
 		{
 			int nv2[] = {m_iV, m_iV};
 			int ni2[] = {m_iTop, m_iDirt};
-			string mats2[] = {MAT_TOP, MAT_DIRT};
+			string mats2[] = {MAT_TOP, dirt};
 			res = MeshObject.Create(2, nv2, ni2, mats2, 0);
 		}
 		else
 		{
 			int nv1[] = {m_iV};
 			int ni1[] = {m_iTop + m_iDirt};
-			string mats1[] = {MAT_DIRT};
+			string mats1[] = {dirt};
 			if (m_iTop > 0)
 				mats1[0] = MAT_TOP;
 			res = MeshObject.Create(1, nv1, ni1, mats1, 0);

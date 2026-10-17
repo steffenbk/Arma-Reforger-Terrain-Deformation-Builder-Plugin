@@ -101,7 +101,8 @@ there is dug yet. Walking on, a swing mostly re-cuts the last capsule, so the ne
 So the rate starts at 1000 ms and gets tuned in 1-WB, as a feel choice.
 
 ## 5. Session checks (add to 1-WB / 1-MP)
-All at the 5 m default (repeat at 10 m only when that step is taken):
+All at the 5 m default (repeat at 10 m only when that step is taken). UPDATE 2026-10-17 (user): TUNNEL_FLOOR is now
+10 m and the slope is the player's choice (X in shovel TUNNEL mode, 19-54 deg): run these at 10 m.
 - Dig down at full pitch to 5 m. Walk back out with no jump: pass.
 - Dig level for 20 m at ~4.5 m deep. Feet start vs end within 0.2 m.
 - Mortar and RPG into the ground above a 5 m tunnel: no break-in, no refill inside.

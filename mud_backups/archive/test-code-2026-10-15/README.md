@@ -13,7 +13,7 @@ the matching `*_snippets.c.legacy` file, recompile.
 | MUD_FrameLog.c | per-frame CSV ($profile/MUD_framelog_*.csv) during a robot run | JoltProbe / StutterRobot only |
 | MUD_ServerLog.c | server timing log while a player drives (was off: MUD_SERVER_LOG_ON false); modded Vehicle | none (self-contained) |
 | MUD_EngineProbes.c | papers plan Step G engine probes (domes, emat on 2 sections, collider patching) | WorldGround EOnFrame `MUD_EngineProbes.Tick` (MUD_WorldGround_snippets) |
-| MUD_RadiusProbe.c | does WheelSetRadiusState move the body? ("radius ruts" idea); modded SCR_CharacterControllerComponent | none (self-contained, ON switch) |
+| MUD_RadiusProbe.c (COPIED BACK to Scripts/Game/Mud 2026-10-17 for Build 3 Stage 9) | does WheelSetRadiusState move the body? ("radius ruts" idea); modded SCR_CharacterControllerComponent | none (self-contained, ON switch) |
 | MUD_HoleCensus.c | "THROWAWAY TEST": lists terrain hole cells; entity, not placed in any layer | none |
 | MUD_GetOutFallback.c.off | already disabled before the archive | none |
 | MUD_WorldGround_snippets.c.legacy | the two Tick lines + ProbeGround() cut from MUD_WorldGround.c | - |
@@ -28,3 +28,6 @@ Left in place on purpose:
 - MUD_VoxelProbe.c / MUD_VoxelNet.c: named "probe" but this IS the shipped voxel system.
 
 The MP robot test setup in project CLAUDE.md needs JoltProbe + StutterRobot + FrameLog back.
+
+2026-10-17: MUD_JoltProbe.c, MUD_StutterRobot.c, MUD_FrameLog.c COPIED back to Scripts/Game/Mud (Build 0 test kit,
+behind MUD_TestKit.TEST_KIT) with the JoltProbe Tick line + ProbeGround(). The .legacy files here stay as the archive.

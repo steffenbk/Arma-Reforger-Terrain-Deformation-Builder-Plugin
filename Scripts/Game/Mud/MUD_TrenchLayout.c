@@ -381,6 +381,31 @@ class MUD_TrenchLayout
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 6 (parapet, 2026-10-17): how far world (x, z) lies outside piece index's SIDE wall, -1 when it
+	//! is not beside the piece (along the centre line past its span - past the chain's ends, or beside another piece).
+	//! A segment's last piece before a corner also takes its corner disc, so a bend's outer side has no gap.
+	float SideDist(int index, float px, float pz)
+	{
+		MUD_TrenchPiece piece = m_aPieces[index];
+		MUD_TrenchSeg seg = m_aSegs[piece.m_iSeg];
+		float x;
+		float side;
+		OnSeg(seg, px, pz, x, side);
+		float d = -1;
+		if (x >= piece.m_fX0 && x <= piece.m_fX1)
+			d = Math.Max(0, Math.AbsFloat(side) - m_fHalf);
+		if (HasDisc(index))
+		{
+			float ex = px - seg.m_vEnd[0];
+			float ez = pz - seg.m_vEnd[2];
+			float dd = Math.Max(0, Math.Sqrt(ex * ex + ez * ez) - m_fHalf);
+			if (d < 0 || dd < d)
+				d = dd;
+		}
+		return d;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	protected bool HasDisc(int index)
 	{
 		MUD_TrenchPiece piece = m_aPieces[index];

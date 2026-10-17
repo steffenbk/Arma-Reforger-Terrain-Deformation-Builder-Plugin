@@ -1,0 +1,7 @@
+MatPBRBasic {
+ Color 0.88 0.781 0.683 1
+ DiffuseIBL 0.25 0.25 0.25 1
+ SpecularIBL 0.25 0.25 0.25 1
+ BCRMap "{72D059DB76507057}Assets/_SharedData/Soil/Soil_01_BCR.edds"
+ NMOMap "{4A08E249AF2722C9}Assets/_SharedData/Soil/Soil_01_NMO.edds"
+}

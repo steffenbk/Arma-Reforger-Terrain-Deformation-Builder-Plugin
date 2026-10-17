@@ -29,10 +29,11 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 ## Lane 2 - before any public test (release switches)
 | Item | State today |
 |---|---|
-| Ground debug off | flip before release: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0). It also gates the 10 s 'MUD patches' / 'MUD world' lines (Stats) |
+| Ground debug off | flip before release: `Prefabs/Mud/MudWorldGround.et` has `m_bDebug 1` (CODE; script default is 0). It also gates the 10 s 'MUD patches' / 'MUD world' lines (Stats) - since 2026-10-17 MUD_TestKit.TEST_KIT turns Stats on too (not SeamCheck / CheckNew) |
 | Trench DEBUG_INSTANT | false in MUD_TrenchSite.c:19 (CODE) - user wants it kept as a test option |
 | Client instant dig (review F6) | flip before release: `MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG` true (testing) -> false; server then refuses Ctrl+F instant dig and logs it (2026-10-16) |
-| Debug tunnel key T (plan 2026-10-16, not built yet) | flip before release: `MUD_VoxelProbe.TUNNEL_DEBUG_T` true -> false (T digs with no tool; tunnels then need the shovel mode). User 2026-10-16: keep T on for testing |
+| Debug tunnel key T (built 2026-10-17, U1 stage 2a) | flip before release: `MUD_VoxelProbe.TUNNEL_DEBUG_T` true -> false (T digs with no tool; tunnels then need the shovel mode). User 2026-10-16: keep T on for testing |
+| Build 0 test kit | flip before release: `MUD_TestKit.TEST_KIT` true -> false (Scripts/Game/Mud/MUD_TestKit.c; 10 s Stats lines without m_bDebug, op hashes, robot) (2026-10-17) |
 | Per-op log lines (review F5) | flip before release: `MUD_VoxelProbe.OP_LOG` true -> false ('MUD voxel probe' op line, 'MUD rut field', 'MUD rut floor'; ~4/s per vehicle) (2026-10-16) |
 | JIP ask cap | in code: JIP_MAX_ASKS 10 (MUD_WorldGround.c) - check it still applies to voxel JIP |
 | Per-player trench-site cap | DROPPED 2026-10-15 (user: no per-player limit). Only MAX_SITES 20 server-wide |
@@ -51,6 +52,15 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- Tunnel darkness (user 2026-10-17 'put a pin in it'): off via MUD_VoxelProbe TUNNEL_DARK / DARK_MAT false. Resume
+  notes: docs/features/trenches-tunnels/README.md (ambient-on-walls cause proven, graded IBL materials untested).
+- Crater size + look fine-tune (user 2026-10-17: "we will fine tune this at a later point"): old big preset stays for
+  the server stress test; options tried: middle 0.8 / 0.45, mix 1.1 / 0.5 (MUD_WorldGround DepthPerKg / TntPower).
+- Server-owner crater preset option (user 2026-10-17): a server setting (config / mission header / attribute) to pick
+  the explosion deformation preset - big (today), mix, middle, realistic. Safe for MP only if the size is rolled on
+  the server and carried in the op (voxel craters: yes, VoxelCrater -> op depth). CHECK FIRST: any crater path a
+  client computes from its own attributes (heightfield crater when Blast returns false) would fork - it must read the
+  server's choice (replicated) instead.
 - Skip a patch COLLIDER rebuild when the ground moved less than a tolerance since the LAST BUILT collider (mesh
   still rebuilds). Idea from Box2D 'contact recycling' (box2d.org/posts/2026/10/contact-recycling, user 2026-10-16):
   compare against the cached build, never update the cache on a skip (else drift). Must be the same rule on every
@@ -95,3 +105,17 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - Vehicle blast craters, explosives with no crater, mud on vehicles, dust / spray, crater stamps, other maps,
   persistence, heal ruts (F3) - all from the old list.
 - Archive MUD_GroundEntity (old test-map system) and MUD_TerrainOffProbe (old map layer still uses it).
+- Craters on roads / asphalt / concrete (user 2026-10-17). Blocked: roads are kept terrain (no skin holes), script
+  cannot hole terrain at runtime. Options: A fake (scorch decal + debris, no dig); B re-run mud_holes.py with roads
+  holed - open: RoadEntity mesh floats over the hole, navmesh rebuilds empty on holes (AI drives roads), ruts would
+  start on roads unless a 'crater only' kept flag. Concrete pads that are prefabs would float over a crater.
+- Crater decal + blast smoke (user 2026-10-17, "deal with this later"). Decal probe (MUD_VoxelProbe CRATER_DECAL,
+  now false) MEASURED WB 16:10: 8 craters, the ENTS|WORLD trace hit the hidden GenericTerrainEntity at the old ground
+  y every time and CreateDecal on it returned null. Next try: trace ENTS only / our brick entities, then CreateDecal.
+  Smoke spawns at the old surface above the crater: a 0.3 s crater delay was tried and looked bad (removed). Idea: a
+  second short dust puff at the crater floor.
+- Tunnels always lit however deep (user 2026-10-17). Vanilla has Prefabs/Structures/Core/ProbeEnvCave_base.et
+  (GameEnvironmentProbeEntity, InteriorProbe 1, LVReflectionBrightness -8, LVDiffuseBrightness -5) + ProbeVolume
+  (VolumeEntity) for interiors. Idea: client spawns a cave probe + volume per tunnel. Unproven: runtime spawn, volume
+  size from script. IN WORK 2026-10-17: probe built (MudTunnelProbe.et + TunnelDark, next-steps table); volume size
+  cannot be set from script (ProbeVolume has no methods) - fixed 4 m box in the prefab. Waiting for the WB look test.

@@ -14,6 +14,7 @@ class MUD_Dig
 	static const ResourceName HELPER = "{01EE55B2D1E71522}Prefabs/Mud/MudDigHelper.et";
 	static const float REACH = 1.0;         // dig this far in front of the soldier's feet (m)
 	static const float MIN_GAP_MS = 1000;   // server: at most one swing per player this often
+	static const float SHOVEL_TUNNEL_MS = 1000; // server: at most one TUNNEL swing per player this often (U1 stage 2; tune in 1-WB)
 	// free dig square: one trench section, 1 x 1 m (user 2026-10-10 00:30; the sloped walls reach past
 	// it), middle FREE_REACH in front, snapped to the 0.25 m grid, turned in 45 deg steps, so squares
 	// dug next to each other line up (user 00:21)
@@ -24,12 +25,14 @@ class MUD_Dig
 
 	// shovel modes, R cycles them (user 2026-10-10 00:30, like the sandbag mode): OFF = no ghost, no
 	// free dig; DIG = green square, 'Dig' sinks it a layer; FILL = square, 'Fill' raises it a layer
-	// (user 00:45, was all at once); PLAN = trench plan mode (MUD_TrenchPlanner)
+	// (user 00:45, was all at once); TUNNEL = each swing digs one tunnel capsule where the player looks (U1 stage 2,
+	// user 2026-10-16: tunnels need a shovel; MUD_VoxelProbe.TunnelAim); PLAN = trench plan mode (MUD_TrenchPlanner)
 	static const int MODE_OFF = 0;
 	static const int MODE_DIG = 1;
 	static const int MODE_FILL = 2;
-	static const int MODE_PLAN = 3;
-	static const int MODE_COUNT = 4;
+	static const int MODE_TUNNEL = 3;
+	static const int MODE_PLAN = 4;
+	static const int MODE_COUNT = 5;
 	protected static int s_iMode;
 
 	protected static IEntity s_Helper;
@@ -43,7 +46,7 @@ class MUD_Dig
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Local: R with the shovel in hand: off -> Dig -> Fill -> Plan -> off
+	//! Local: R with the shovel in hand: off -> Dig -> Fill -> Tunnel -> Plan -> off
 	static void NextMode()
 	{
 		SetMode((s_iMode + 1) % MODE_COUNT);
@@ -73,7 +76,9 @@ class MUD_Dig
 		if (mode == MODE_DIG)
 			SCR_HintManagerComponent.ShowCustomHint("Shovel: DIG\nThe green square sinks 0.25 m per swing (max 2.5 m).\nR: fill mode", "Free dig", 4, true);
 		else if (mode == MODE_FILL)
-			SCR_HintManagerComponent.ShowCustomHint("Shovel: FILL\nThe square rises 0.25 m per swing.\nR: plan a trench", "Free dig", 4, true);
+			SCR_HintManagerComponent.ShowCustomHint("Shovel: FILL\nThe square rises 0.25 m per swing.\nR: tunnel mode", "Free dig", 4, true);
+		else if (mode == MODE_TUNNEL)
+			SCR_HintManagerComponent.ShowCustomHint("Shovel: TUNNEL\nEach swing digs ahead where you look (look down / up for a ramp).\nSlope " + MUD_VoxelProbe.TunnelSteepText() + "\nX: change slope. R: plan a trench", "Free dig", 5, true);
 		else
 			SCR_HintManagerComponent.ShowCustomHint("Shovel: off\nR: dig mode", "Free dig", 2, true);
 	}
@@ -117,7 +122,7 @@ class MUD_Dig
 		vector dp = DigPoint(c);
 		MUD_TrenchSiteComponent site;
 		int piece;
-		if (s_iMode == MODE_OFF || s_iMode == MODE_PLAN || !MUD_WorldGroundEntity.IsOver(dp) || MUD_TrenchSiteComponent.FindPiece(dp, site, piece))
+		if (s_iMode == MODE_OFF || s_iMode == MODE_PLAN || s_iMode == MODE_TUNNEL || !MUD_WorldGroundEntity.IsOver(dp) || MUD_TrenchSiteComponent.FindPiece(dp, site, piece))
 		{
 			HideFreeGhost();
 			return;
@@ -268,9 +273,15 @@ class MUD_DigAction : SCR_ScriptedUserAction
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Over an unfinished trench piece: 'Dig trench (layers dug / layers)'; fill mode: 'Fill'
+	//! Tunnel mode: 'Dig tunnel' (anywhere); over an unfinished trench piece: 'Dig trench (layers dug / layers)';
+	//! fill mode: 'Fill'
 	override bool GetActionNameScript(out string outName)
 	{
+		if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+		{
+			outName = "Dig tunnel";
+			return true;
+		}
 		MUD_TrenchSiteComponent site;
 		int piece;
 		if (MUD_TrenchSiteComponent.FindPiece(GetOwner().GetOrigin(), site, piece))
@@ -323,6 +334,14 @@ class MUD_DigAction : SCR_ScriptedUserAction
 			return;
 
 		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
+		// tunnel mode (U1 stage 2): one capsule where the player looks, the server checks the tool and the aim
+		if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+		{
+			vector mid;
+			if (pc && MUD_VoxelProbe.TunnelAimLocal(pUserEntity, mid))
+				pc.MUD_RequestShovelTunnel(mid);
+			return;
+		}
 		if (pc)
 			pc.MUD_RequestDig(MUD_Dig.FreePlan(pUserEntity), MUD_Dig.Mode() == MUD_Dig.MODE_FILL);
 		// the ground under the ghost just changed: lay it on the new floor
@@ -380,6 +399,8 @@ modded class SCR_CampaignBuildingGadgetToolComponent
 		if (MUD_Dig.HoldsShovel(m_CharacterOwner, true))
 		{
 			MUD_Dig.UpdateHelper(m_CharacterOwner);
+			if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+				MUD_VoxelProbe.TunnelSteepInput();
 		}
 		else
 		{
@@ -402,7 +423,7 @@ modded class SCR_CampaignBuildingGadgetToolComponent
 
 	//------------------------------------------------------------------------------------------------
 	//! R (vanilla "GadgetActivate", as CSK_BuildingGadgetTool.c): cycles the shovel modes off -> Dig ->
-	//! Fill -> Plan -> off (user 2026-10-10 00:30). Vanilla deployable placement keeps the key while it is on,
+	//! Fill -> Tunnel (U1 2026-10-17) -> Plan -> off (user 2026-10-10 00:30). Vanilla deployable placement keeps the key while it is on,
 	//! or when the player carries something it can place. (CSK mods the same method for its wall plan
 	//! mode: with both mods loaded the one loaded last wins.)
 	override protected void ActivateAction()

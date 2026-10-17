@@ -1,0 +1,17 @@
+MetaFileClass {
+ Name "{86F679913611B418}Common/Materials/Vehicles/mud_rut.vhcsurf"
+ Configurations {
+  ContactSurfaceResourceClass PC {
+  }
+  ContactSurfaceResourceClass XBOX_ONE : PC {
+  }
+  ContactSurfaceResourceClass XBOX_SERIES : PC {
+  }
+  ContactSurfaceResourceClass PS4 : PC {
+  }
+  ContactSurfaceResourceClass PS5 : PC {
+  }
+  ContactSurfaceResourceClass HEADLESS : PC {
+  }
+ }
+}

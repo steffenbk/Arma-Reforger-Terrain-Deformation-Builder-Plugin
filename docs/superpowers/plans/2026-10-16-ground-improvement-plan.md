@@ -229,6 +229,8 @@ the network policy blocked the source pages).
 - Why: tunnels stay at the depth the player chose; with U1 that is the roof the player chose.
 - CORRECTION (2026-10-16, MEASURED: plan_review_checks.py trace): with TUNNEL_MID 1.25 the feet still sink ~3.5 cm
   per m (3.2 -> 3.53 m over ~9 m). Add a small lift or hold the start depth; check over 20 m.
+- RESOLVED 2026-10-17 (MEASURED, results/2026-10-17-u2-level-dig.md): that 3.5 cm per m was depth under the test
+  ground, which rises 4 cm per m. In absolute height 1.25 stays level (+0.03 / +0.06 m over 20 m); no lift. BUILT.
 
 ### U3 - roof guard + collapse rules (after U1 + U2)
 - From research/2026-10-15-voxel-stability-and-optimisation.md: server dig-time guard (refuse / open a capsule that

@@ -144,3 +144,30 @@ Then report:
 ## When all four stages pass
 - Save a checkpoint: `save "build 0 test kit"`.
 - Give me a short list of what to run: sessions 0-WB, 0-MP and 0-PERF from the plan, with their checklists.
+
+## Amendments S1-S7 (user OK 2026-10-17, local review against da37c47) - these win over the stages above
+- S1 (0b): check out only the files that differ from the plan branch (git diff --name-only), never the whole docs/
+  folder: it would bring back the docs the user deleted on purpose in the working tree.
+- S2 (Stage 1, oldest dirty): there is no per-patch dirty time. Add `float m_fQueuedAt` to MUD_FinePatch, written at
+  the 6 places that set `m_bQueued = true` (MUD_WorldGround.c). m_aDirty also holds asleep and building patches,
+  which Rebuild skips on purpose, so the age is taken over awake, not-building patches only (what the queue really
+  works on). Line: ` | queue N (waiting N), oldest dirty s, ops N`.
+- S3 (Stage 2, field hash): hash at the real write in Put (after its early returns, at `b.m_aD[pi] = d`). Reset next
+  to `m_iDispHash = 0` in Submit; print in Submit after SmoothBox / ClearFloor (SmoothBox also writes through Put),
+  NOT inside DispOpDone (that only runs with DISPLACE_RUTS). Reduce each term mod M before mixing (ColKey reaches
+  ~67 million). With RUT_FIELD a kind-4 rut op changes no voxel samples: print only when samples > 0; ruts are
+  compared by the disp hash.
+- S4 (Stage 2, disp hash): DispOn(DSW_HASH) is true when MUD_TestKit.TEST_KIT (user pick). A per-op hash says
+  equal / different per op, not a count of mismatching samples.
+- S5 (Stage 3, fake ruts): the spot is the first player if one exists, else fixed consts FAKE_RUT_X / FAKE_RUT_Z (a
+  DS in 0-PERF issues the ops before anyone joins). Y from the ground height. Built as a temporary
+  MUD_VoxelRutTrack (m_fStep / m_fCap as a real track) + DoRutOp(kind 4) = the normal Issue path. OP_LOG prints one
+  line per op: fine for 500; for the 21000-op PERF join set OP_LOG false.
+- S6 (Stage 4): the snippets file's 2nd Tick line is MUD_EngineProbes (not in the copy list = compile error). Put
+  back only `MUD_JoltProbe.Tick(...)` (after GroundRescue()) + ProbeGround(). Every field ProbeGround reads still
+  exists. StutterRobot's modded Vehicle sits next to MUD_Wheels' modded Vehicle: watch for name clashes at compile.
+- S7: MUD_WorldGround.c and MUD_VoxelProbe.c are CRLF now: every edit keeps CRLF. CLAUDE.md now has the TESTING
+  RULES (no performance numbers from Workbench).
+- S8 (user 2026-10-17, tests on a dedicated server): FAKE_RUT_OPS / X / Z and JIP_TEST_CAP are defaults; while TEST_KIT
+  every machine reads $profile:MUD_TestKit.txt (written with defaults when missing) - no rebuild per setting.
+  The robot's OnPrepareControls also needs TEST_KIT (else holding Space as a stopped driver starts it in release).
