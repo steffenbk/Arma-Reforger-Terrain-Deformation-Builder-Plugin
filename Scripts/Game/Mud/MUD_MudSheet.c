@@ -243,7 +243,7 @@ class MUD_MudSheet
 	// the coarse skin hole cells and every ground patch mesh LOOK_LIFT_M higher (mesh only, colliders untouched; works
 	// with the sheet off). Skin: 0 at any vertex touching kept terrain or a voxel cell; patch: times its lock. Look at
 	// grass, holed props, road / building edges, patch-skin seam, crater rim, a prone soldier. Remove after the test.
-	static const bool LOOK_LIFT_TEST = true;
+	static const bool LOOK_LIFT_TEST = false;   // off 2026-10-19: grass covers every lifted rut (research/2026-10-19-ruts-invisible.md)
 	static const float LOOK_LIFT_M = 0.16;
 	static const bool SPEED_RADIUS = true;
 	static const float SPEED_RADIUS_K = 320;

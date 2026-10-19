@@ -3,6 +3,13 @@
 Answer to `prompts/2026-10-19-research-sheet-redesign.md`. Research only; no code changed. Builds on
 research/2026-10-19-whole-map-sheet-issues.md. Labels: PROVEN-CODE, MEASURED (log / offline tool), [repo], INFERENCE.
 
+> **TESTED 2026-10-19 (DS, user eyes + research/2026-10-19-ruts-invisible.md): grass covers any lifted rut.** With the
+> sec 6 look lift (0.16 m on skin + patches) the ruts vanished: a 4-6 cm rut floor drawn 0.16 m up is still ~0.11 m above
+> the heightmap, and grass clutter grows on our ground wherever it sits >= 1 mm above the heightmap (mud-gotchas). Sec 5
+> had this backwards: grass does not sit under a lifted ground, it rides on top of it - including every rut, crater
+> floor or pressed area that stays above the heightmap. Any lift route (sheet, umbrella, patch mud channel) must press
+> the lift out where the ground is cut (ruts-invisible fix 2), or ruts stop showing. LOOK_LIFT_TEST is off again.
+
 ## 0. Short answer
 - **Idea A already exists: it is the coarse skin.** `MUD_CoarseSkinEntity` fills every hole cell of Arland with the
   exact 2 m heightmap triangles, in 64 m chunks, built once at load (MEASURED 2026-10-09: 1 396 378 hole cells in

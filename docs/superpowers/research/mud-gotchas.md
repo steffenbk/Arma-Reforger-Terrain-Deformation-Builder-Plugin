@@ -500,3 +500,10 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
 - IDA 2026-10-19 (D9): a skeleton mesh is a MeshObjectAnimatedComponent; its bounds follow the bones ONLY while its own
   flag 0x20 is set, which animation systems set (ProcAnim job when bones moved, doors, Cinematic Tool) - SetBone does
   not. SetBone-moved meshes keep the bind-pose box: use the MeshObject BoundingBox override.
+- PROVEN 2026-10-19 (all 10361 .emat in the Experimental data pak + exe string search): no world-space normal map
+  option. Normal maps use only "UV set 1" / "UV set 2" (UVSrc*); ApplyWorldNormal is a MatPBRBasicGlass refraction
+  flag; no triplanar / world-UV setting. With no custom shaders, smooth tile seams must come from our vertex normals.
+- PROVEN DS 2026-10-19 (look lift test, user eyes + logs: 288 samples cut, trail probe 4-6 cm deep): a ground drawn
+  higher than the collider (TEMP LOOK_LIFT_TEST, 0.16 m on skin + patches) makes ruts INVISIBLE - the rut floor stays
+  above the heightmap, so grass clutter grows in it (clutter rule above), and dirt only starts at FIELD_SOIL_D 0.06.
+  Any drawn lift must drop to ground + floor where the ground is cut (research/2026-10-19-ruts-invisible.md).
