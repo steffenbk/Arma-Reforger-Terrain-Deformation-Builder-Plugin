@@ -381,3 +381,57 @@ Inference (routes differ): run 9 ahead without patch builds ~ 5051 - 171 x 3.8 =
 ms/frame; run 10 = (1683 + 384 + 551) / 16706 = 0.16 ms/frame -> B7 saves ~0.33 ms/frame client (audit guessed 0.3-0.4).
 Rebuild went up because this run made twice the mesh builds (more repeat passes); per build cost is the same.
 Left in ahead: a view 0.10 ms/frame (AheadView without the hide: Contacts, BrakeCap, AheadPoint per wheel).
+
+## Run 11 - REBUILD 5 (all 5 options on) - DS 22:15, sheet OFF, robot 120 s loop
+Logs: PeerPlugin1 logs_2026-10-19_22-15-58, server logs_2026-10-19_22-15-57. Robot run 1 22:17:23-22:19:23, 119 s on
+ours. Compiled ok. Checks: partial 'verts bad' 0 in every line (162 checked); bench 'differ' 0 (client 63 + server 16
+benches). Snaps: 1 (22:19:17, body jump 0.26 m).
+
+Client 'MUD rebuild 5' per 10 s line (12 lines, all on):
+| line | held pf | held builds | same skips | partial n | part verts | part ms | full n | full ms | checked/bad | col builds | merged/build | col tris/build | bench n | old ms | new ms | differ | bench ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 226 | 14 | 0 | 31 | 135 | 14 | 19 | 7 | 3/0 | 25 | 124 | 1463 | 2 | 10 | 8 | 0 | 21 |
+| 2 | 279 | 22 | 6 | 51 | 138 | 25 | 48 | 30 | 5/0 | 41 | 104 | 1601 | 4 | 23 | 20 | 0 | 45 |
+| 3 | 371 | 22 | 34 | 133 | 280 | 76 | 63 | 37 | 13/0 | 54 | 86 | 1723 | 7 | 40 | 36 | 0 | 82 |
+| 4 | 453 | 21 | 55 | 162 | 282 | 93 | 63 | 48 | 16/0 | 42 | 77 | 1785 | 6 | 35 | 31 | 0 | 72 |
+| 5 | 374 | 20 | 48 | 156 | 314 | 87 | 68 | 43 | 15/0 | 34 | 78 | 1778 | 6 | 33 | 32 | 0 | 70 |
+| 6 | 283 | 16 | 49 | 155 | 344 | 99 | 61 | 41 | 15/0 | 34 | 74 | 1789 | 5 | 25 | 25 | 0 | 51 |
+| 7 | 349 | 22 | 53 | 156 | 285 | 83 | 58 | 34 | 15/0 | 33 | 71 | 1836 | 6 | 34 | 32 | 0 | 68 |
+| 8 | 324 | 17 | 63 | 169 | 282 | 84 | 62 | 46 | 16/0 | 33 | 73 | 1834 | 6 | 32 | 28 | 0 | 69 |
+| 9 | 398 | 23 | 63 | 173 | 273 | 97 | 64 | 49 | 17/0 | 36 | 78 | 1815 | 6 | 49 | 43 | 0 | 98 |
+| 10 | 339 | 16 | 60 | 174 | 291 | 96 | 65 | 50 | 17/0 | 37 | 74 | 1819 | 6 | 37 | 32 | 0 | 74 |
+| 11 | 329 | 16 | 58 | 154 | 282 | 78 | 61 | 38 | 15/0 | 31 | 75 | 1776 | 6 | 33 | 30 | 0 | 67 |
+| 12 | 310 | 16 | 61 | 151 | 293 | 94 | 58 | 42 | 15/0 | 36 | 78 | 1827 | 5 | 46 | 46 | 0 | 99 |
+Checksum: checked 3+5+13+16+15+15+15+16+17+17+15+15 = 162.
+Bench sums client: old 397 ms, new 363 ms (-9 %). Server (12 lines): col builds 416, merged ~78 / build, bench old
+117 new 96 ms; no mesh (DS).
+
+Per-build cost, whole log (sum of 10 s lines):
+| client | run 10 (21:31) | run 11 (22:15) |
+|---|---|---|
+| band mesh builds / colliders | 845 / 382 | 1241 / 454 |
+| mesh input ms (run 11: + skipped passes) | 545 | 1450 |
+| mesh core ms / build | 2.00 | 2.02 |
+| mesh reveal+uv / object ms per build | 0.62 / 0.44 | 0.76 / 0.53 |
+| collider core ms / build | 1.85 | 2.18 |
+| collider trimesh ms / build | 2.18 | 2.05 |
+| hot driving 10 s lines: mesh builds / mean ms | 102-112 / 3.80-3.90 | 107-115 / 3.94-4.13 |
+| small mesh skips / 10 s (driving) | 23-62 | 55-63 |
+Run 11 prof parts (24 lines, avg ms/frame): rebuild 0.86 (rb mesh 0.58, rb collider 0.30), ahead 0.27 (a view 0.19),
+vox 0.10, look ruts 0.09. MUD script driving lines 1.72 ms (n=23) - a 2 min nonstop circle, not run 10's 34 s.
+Reading (inference, routes / run lengths differ): no measurable win. Hot-driving build rate and ms per build are the
+same as run 10's hot lines (rebuild ~0.8-1.0 ms/frame both). Same skips (~60 / 10 s) and partial passes still pay
+the fixed input cost (~0.55 ms partial vs ~0.7 full per pass: BandFill, kept copy, skin); the pace only delays
+builds; merge cuts 25 % of collider tris but trimesh ms ~ flat; the new mesher core is ~9 % faster in the bench, not
+visible per build.
+
+## Run 12 - REBUILD 6 (robot A/B switches) - DS 23:21, sheet OFF - ONLY RUN 1 (ON) RAN
+Logs: server logs_2026-10-19_23-21-55, client PeerPlugin1 logs_2026-10-19_23-21-56. Robot run 1 = VIEW_TRIM,
+LOOK_PACE, LAYOUT_SPLIT ON, 23:22:36-23:24:36, 119.8 s, 0 corrections. Runs 2-4 (OFF / ON / OFF) not run, so NO A/B yet.
+Client 23:24:43 line: builds 105 = look 5 + floor 8 + look+floor 16 + height 0 + sweep 76 + other 0 (sum 105), 0.1 s pace 0,
+skips 52, MeshSmall age 104 / big 1. Layout: full 0, slots 71, hits 48, bad 0 (LAYOUT_CHECK clean). Coarse plates 14 /
+full 0, 32 tris per build. Server: coarse 28 / full 0, layout bad 0.
+Client MUD script 0.65-1.38 ms/frame (5 s lines after the stop; idle, not driving - not a perf number).
+Reading: switches work (no layout mismatch, plates used on both sides). Sweep is 72 % of builds. Perf verdict waits for
+the 4-run A/B.
+Bug seen: get out failed 10x in a rut after the run (23:24:37-53), see mud-gotchas 2026-10-19 DS entry (server never hid).

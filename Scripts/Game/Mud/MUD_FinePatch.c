@@ -76,6 +76,12 @@ class MUD_FinePatch
 	// REBUILD 5 (2026-10-19, v240 = before; MUD_WorldGroundEntity RUT_PACE / SAME_SKIP / PARTIAL_IN)
 	bool m_bRutMesh;             // option 1: the mesh dirt came from the rut floor alone (MarkFloorDirty) - RUT_MESH_EVERY pace
 	bool m_bPaceHeld;            // option 1 debug: the old pace would have built it already
+	// REBUILD 6 (2026-10-19): dirt kinds since the last mesh (cleared where m_bLookDirty is cleared after a build)
+	bool m_bHMesh;               // height dirt (MarkDirty own patch, DoVoxCells): LOOK_PACE keeps today's pace; REBUILD_WHY kind 4
+	bool m_bWhyLook;             // REBUILD_WHY: look cut (MarkLookDirty, since >= 0)
+	bool m_bWhySweep;            // REBUILD_WHY: look Sweep (MarkLookDirty, since < 0)
+	bool m_bWhyFloor;            // REBUILD_WHY: server rut floor (MarkFloorDirty)
+	bool m_bFlatFloor;           // COARSE_PLATE: every m_aFloor value equal (ApplyFloor, no depth box)
 	ref array<float> m_aMeshD;   // option 2 / 3: band mesher input D of the last band mesh (with m_aMeshY)
 	ref array<int> m_aMeshSkin;  // option 2 / 3: band mesher m_aSkin of that build
 	int m_iMBx0 = -1;            // option 3: patch-local vertex box whose mesh input changed since that build (-1 = none)
@@ -266,6 +272,8 @@ class MUD_FineBuffers
 	vector m_aUnder[1089];      // groove layer, m_fRevealGap under the surface
 	vector m_aShell[1089];      // bullet slab: collider verts lowered by m_fBulletSlab, facing down
 	vector m_aPlate[1089];      // safety plate: base + floor - m_fPlateGap
+	vector m_aPlateC[25];       // REBUILD 6 COARSE_PLATE: the plate at the 5 x 5 skin corners (flat floor only)
+	int m_aPlateCI[96];         // REBUILD 6 COARSE_PLATE: 2 tris per plate skin cell
 	float m_aUVs[2178];         // surface: same UVs as the skin chunk under it (0..1 per 64 m chunk)
 	float m_aGrooveUVs[2178];   // groove layer: 0..1 per patch
 	int m_aIndices[6144];       // this patch's triangles, diagonal per skin cell

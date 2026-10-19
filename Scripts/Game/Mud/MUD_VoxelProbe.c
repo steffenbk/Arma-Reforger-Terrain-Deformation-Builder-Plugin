@@ -5064,6 +5064,13 @@ class MUD_VoxelProbe
 		int wv = Math.Round(wt.m_aWear[fn] * 100);
 		m_iDispHash = (m_iDispHash + ((wv + WEAR_SALT) * (fn + 1) + ColKey(bi, bk)) % DISP_HASH_M) % DISP_HASH_M;
 		s_iWearAdd++;
+		if (MUD_WorldGroundEntity.PRESS_LIFT)
+		{
+			// pressed lift look test (2026-10-19): the client patch mesh there builds again (look only, no floor read)
+			int wfk = fn / FSUB;
+			int wfi = fn - wfk * FSUB;
+			MUD_WorldGroundEntity.PressWearMark(m_fX0 + (bi * FSUB + wfi) * FCELL, m_fZ0 + (bk * FSUB + wfk) * FCELL);
+		}
 		return true;
 	}
 

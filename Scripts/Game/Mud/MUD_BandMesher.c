@@ -101,6 +101,19 @@ class MUD_BandMesher
 	protected int m_aJ[1089];       // layer of each sample: ceil(Y / 0.5) - 1
 	protected int m_aLastSkin[16];  // m_aSkin the cell table was made for
 	protected bool m_bLayout;
+	// REBUILD 6 LAYOUT_SPLIT (2026-10-19, research/2026-10-19-rebuild-and-bugs-research.md 2.2): kinds / faces / corners
+	// depend only on which skin cells are on - a new m_aSkin with the same on-mask refreshes only m_aCSlot.
+	static bool s_bLayoutSplit = true;     // A/B switch (MUD_StutterRobot sets it per robot run on the client)
+	static const bool LAYOUT_CHECK = true;  // TEMP: every LAYOUT_CHECK_EVERY-th slot refresh also makes the full table, compares
+	static const int LAYOUT_CHECK_EVERY = 10;
+	protected int m_iLastOnMask = -1;
+	protected int m_aCSlotChk[1156];
+	int m_iLayoutFull;       // log (MUD_WorldGround 'MUD rebuild 6'): full tables made
+	int m_iLayoutSlots;      //   slot refreshes only
+	int m_iLayoutHits;       //   nothing changed
+	int m_iLayoutChecks;     //   LAYOUT_CHECK compares
+	int m_iLayoutBad;        //   cells whose slot differed from the full table (must be 0)
+	protected int m_iSlotRuns;
 
 	protected float m_fFine;
 	// Vertex accumulators (Vert / Hor)
@@ -781,24 +794,62 @@ class MUD_BandMesher
 	//! Cell kinds, ghost faces / corners and slots from m_aSkin; kept while m_aSkin does not change
 	protected void Layout()
 	{
-		if (m_bLayout)
+		int onMask = 0;
+		bool same = m_bLayout;
+		for (int k = 0; k < 16; k++)
 		{
-			bool same = true;
-			for (int k = 0; k < 16; k++)
-			{
-				if (m_aLastSkin[k] != m_aSkin[k])
-				{
-					same = false;
-					break;
-				}
-			}
-			if (same)
-				return;
+			if (m_aSkin[k] >= 0)
+				onMask = onMask | (1 << k);
+			if (m_aLastSkin[k] != m_aSkin[k])
+				same = false;
+		}
+		if (same)
+		{
+			m_iLayoutHits++;
+			return;
 		}
 		for (int k2 = 0; k2 < 16; k2++)
 			m_aLastSkin[k2] = m_aSkin[k2];
-		m_bLayout = true;
+		if (s_bLayoutSplit && m_bLayout && onMask == m_iLastOnMask)
+		{
+			// LAYOUT_SPLIT: same on cells - kinds / faces / corners stay, only the on cells' slots change (off cells keep -1)
+			for (int sz = 0; sz < NC; sz++)
+			{
+				int sRow = (sz / SKIN_FINE) * 4;
+				int cRow = (sz + 1) * CW + 1;
+				for (int sx = 0; sx < NC; sx++)
+				{
+					if (m_aKind[cRow + sx] == 1)
+						m_aCSlot[cRow + sx] = m_aSkin[sRow + sx / SKIN_FINE];
+				}
+			}
+			m_iLayoutSlots++;
+			m_iSlotRuns++;
+			if (!LAYOUT_CHECK || m_iSlotRuns < LAYOUT_CHECK_EVERY)
+				return;
+			// TEMP LAYOUT_CHECK: the full table must give the same slots
+			m_iSlotRuns = 0;
+			m_iLayoutChecks++;
+			for (int q = 0; q < CW * CW; q++)
+				m_aCSlotChk[q] = m_aCSlot[q];
+			LayoutFull();
+			for (int q2 = 0; q2 < CW * CW; q2++)
+			{
+				if (m_aCSlotChk[q2] != m_aCSlot[q2])
+					m_iLayoutBad++;
+			}
+			return;
+		}
+		m_iLastOnMask = onMask;
+		m_iLayoutFull++;
+		LayoutFull();
+	}
 
+	//------------------------------------------------------------------------------------------------
+	//! The whole cell table from m_aSkin (Layout's cache miss)
+	protected void LayoutFull()
+	{
+		m_bLayout = true;
 		for (int z = -1; z <= NC; z++)
 		{
 			for (int x = -1; x <= NC; x++)

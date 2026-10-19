@@ -98,6 +98,16 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
 - 2026-10-15 (WB log 20-14-47, 21:13-21:15): get in / out blocked in a voxel rut although 'mud hidden from traces' ran 6x:
   HideFromTraces never covered voxel bricks (MUD_VoxelSubEntity). EVERY new ground entity type must join
   MUD_GroundEntity.HideFromTraces (fix MUD_VoxelProbe.SetTraceHidden, v092 = before; user-tested OK 21:2x).
+- PROVEN DS 2026-10-19 23:35 (logs both sides): on a DS our modded SCR_GetIn/GetOutAction.PerformAction runs on the
+  CLIENT only - the server logged 'PerformActions' + door states 3x but not one 'MUD vehicle access' line (TEMP
+  LogStart prints on every call). So a server-side hide gap is NOT the get out cause (OnMud always-true change v244).
+  Get out still fails once and works on the 2nd try (both DS sessions). Get in tries that did not start never
+  reached the server, and the player ended ~4 m under the ground (server editor log y 33.3, ground ~37.6). Open:
+  when the fall happens (TEMP fall probe in MUD_VehicleAccess, v245 = before).
+- PROVEN DS 2026-10-19 23:41 (fall probe, client log): the fall is a get in that STARTS (IsGettingIn 1) and is then
+  cancelled while our ground is hidden: the soldier is put 4.5 m down in < 0.2 s (y 37.8 -> 33.26, our ground 37.77)
+  and stays under it after the unhide. 1st get in worked, 2nd-4th fell. Fix: MUD_VehicleAccess.Rescue (Teleport back
+  on our ground once traceable; v246 = with it, NOT COMPILED). Why the get in cancels: open.
 - PROVEN in play 2026-10-08 09:26 (Exp 192624, dedicated): open script trimesh on Terrain preset lets bullets pass
   (rim -> next crater). Adding a lowered, downward-facing trimesh copy on EPhysicsLayerPresets.FireGeo stops them.
   FireGeo compiles as an enum value.

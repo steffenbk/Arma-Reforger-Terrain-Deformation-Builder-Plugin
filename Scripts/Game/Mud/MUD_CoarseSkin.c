@@ -638,7 +638,9 @@ class MUD_CoarseSkinEntity : GenericEntity
 								lifts = false;
 						}
 					}
-					if (lifts)
+					if (lifts && MUD_WorldGroundEntity.PRESS_LIFT)
+						y += MUD_WorldGroundEntity.s_fPressLiftM;     // pressed lift (2026-10-19): skin hole cells + MUD_LIFT_M
+					else if (lifts)
 						y += MUD_MudSheet.LOOK_LIFT_M;
 				}
 				m_Buf.m_aVerts[v] = Vector(vx * m_fCell, y, vz * m_fCell);
@@ -744,10 +746,10 @@ class MUD_CoarseSkinEntity : GenericEntity
 				MeshObject mesh = res.GetResource().ToMeshObject();
 				// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 				mesh.UpdateIndices(0, m_Buf.m_aIndices);
-				if (MUD_MudSheet.LOOK_LIFT_TEST)
-					LookLift(rec, true);     // TEMP look lift test: mesh only, put back before the collider
+				if (MUD_MudSheet.LOOK_LIFT_TEST || MUD_WorldGroundEntity.PRESS_LIFT)
+					LookLift(rec, true);     // TEMP look lift test / pressed lift: mesh only, put back before the collider
 				mesh.UpdateVerts(0, m_Buf.m_aVerts, m_Buf.m_aUVs);
-				if (MUD_MudSheet.LOOK_LIFT_TEST)
+				if (MUD_MudSheet.LOOK_LIFT_TEST || MUD_WorldGroundEntity.PRESS_LIFT)
 					LookLift(rec, false);
 				rec.m_Ent.SetObject(mesh, "");
 				rec.m_MeshRes = res;
@@ -835,6 +837,29 @@ class MUD_CoarseSkinEntity : GenericEntity
 	static MUD_CoarseSkinEntity GetInstance()
 	{
 		return s_Inst;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Pressed lift look test (2026-10-19): a preset changed - chunks with a body within r of pos build again
+	//! (their mesh then takes the new MUD_WorldGroundEntity.s_fPressLiftM). Returns chunks rebuilt.
+	static int PressLiftRebuild(vector pos, float r)
+	{
+		if (!s_Inst || !s_Inst.m_bDone)
+			return 0;
+		int n = 0;
+		float span = CELLS * s_Inst.m_fCell;
+		foreach (MUD_SkinChunk rec : s_Inst.m_aRec)
+		{
+			if (!rec || !rec.m_Ent)
+				continue;
+			float dx = rec.m_vOrigin[0] + span * 0.5 - pos[0];
+			float dz = rec.m_vOrigin[2] + span * 0.5 - pos[2];
+			if (dx * dx + dz * dz > (r + span) * (r + span))
+				continue;
+			s_Inst.BuildGeometry(rec);
+			n++;
+		}
+		return n;
 	}
 
 	//------------------------------------------------------------------------------------------------

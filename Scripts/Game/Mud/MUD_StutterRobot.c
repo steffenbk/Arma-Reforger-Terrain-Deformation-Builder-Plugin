@@ -208,6 +208,12 @@ class MUD_StutterRobot
 			s_fOurs = 0;
 			s_fRoad = 0;
 			s_mSurf.Clear();
+			// REBUILD 6 A/B (2026-10-19): odd runs ON, even runs OFF - VIEW_TRIM, LOOK_PACE, LAYOUT_SPLIT on this machine
+			bool abOn = s_iRun - (s_iRun / 2) * 2 == 1;
+			MUD_WorldGroundEntity.VIEW_TRIM = abOn;
+			MUD_WorldGroundEntity.LOOK_PACE = abOn;
+			MUD_BandMesher.s_bLayoutSplit = abOn;
+			Print(string.Format("MUD AB: robot run %1 - VIEW_TRIM %2 LOOK_PACE %3 LAYOUT_SPLIT %4", s_iRun, abOn, abOn, abOn));
 			Print(string.Format("MUD robot START run %1 reverse circle | %2 at %3 | %4", s_iRun, mine.GetID(), mine.GetOrigin(), SurfNoise()));
 			Print("MUD robot nearby run " + s_iRun.ToString() + ": " + Nearby(mine, 30));
 		}
