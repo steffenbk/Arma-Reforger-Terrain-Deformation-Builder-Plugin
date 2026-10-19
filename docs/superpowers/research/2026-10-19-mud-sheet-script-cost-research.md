@@ -454,3 +454,323 @@ The sheet is not worth it if, after top-3 items 1-2:
 - Instancing of spawned same-.xob entities: unresolved (only terrain objects shown to batch). [IDA, partial]
 - 3.2 IsRendered: already proven on our patches (RENDER_GATE waits counted, audit-ground 2026-10-18). [repo]
 - Parts A-C (switches, DS session, WB probes) not run yet.
+
+---
+
+## 15. Round 3 (after the local IDA pass, prompts/2026-10-19-research-after-ida.md)
+
+Inputs: results/2026-10-19-sheet-cost-probes.md (D1-D4 + review), mud-gotchas IDA 2026-10-19 lines, the API dump in
+enfusion-mcp-BK (`data/api/*.json`), the offline wiki / KB copy (`data/wiki/pages.json`, `data/kb/patterns`).
+Labels as before; [IDA] = from the probes doc / gotchas.
+
+Correction first: sec 3.5 (taken from the 2026-10-18 doc) said "vanilla skeletons have 231 bones" citing KB
+character-gear-and-anim-data.md. That number is not in the KB copy (grep 2026-10-19). The only bone counts I can
+verify: wiki "Model Performance" table - Basebody_Male_01 100 bones, Basebody_Male_Head_01 89, Jacket_BDU_M81 49,
+UAZ469 37 [doc]. Max 4 bones per vertex on import [doc: KB resource-manager-blender "Export Skinning"].
+
+### 15.1 Routes re-ranked
+
+| route | was | now | why |
+|---|---|---|---|
+| Engine TrackDecal on our ground | dead | dead | terrain-only [repo IDA 2026-10-15] |
+| Merge tiles for render | dead | dead | render A/B ~0.2 ms [repo] |
+| Drop LimitDrag / soft-wall drag | idea | dead | offline stretch p99 2.8 [repo results 2026-10-19] |
+| ProcAnim on every rut piece | medium | dead for the bulk | every registered ProcAnim runs every frame, no change / visibility test [IDA D2]; fine for <= ~20 live pieces |
+| A1 SLUMP_ONE + A2 DRAG_STRIP | high | high, spec ready (15.5) | offline -85-87 % slump, -64 % drag work; port details from the review |
+| SERVER_LAYER off on the DS | high | high | unchanged; DS-only setting, clients unaffected |
+| IsRendered gate on stored rebuilds | medium | higher | the pattern already works on our patches (MUD_WorldGround.RenderWait counts) [repo, probes doc review 5] |
+| Static rut pieces (.xob) placed from ops | medium | higher | no per-frame cost if static; SpawnEntityPrefab loads nothing with a held Resource [IDA D4]; variant swap or SetBone-once for "pressed" (15.2) |
+| Skinned tile moved by SetBone | long shot | medium | path known: skinned .xob + `GetAnimation()` once, no anim component; bounds via MeshObject `BoundingBox` [IDA D1]; one shared mesh for all tiles; look = bilinear of the bone grid (offline rows exist) - design 15.3 |
+| 1.5 m live script-mesh tiles | medium | medium | unchanged; now competes with 1.5 m skinned tiles (15.3) |
+| Natives purge | medium | medium | unchanged; the bench decides |
+| Coarser synced grid | low | low | look trade (offline) |
+| Lazy far ops / relax bit-exactness | decision | decision | unchanged (sec 2) |
+
+Top 3 local tests now:
+1. **DS, two launches** (test-kit values are read once per machine at start; A1/A2 change synced maths, so DS and all
+   clients must run the same value [repo probes review 2]): launch 1 all off, launch 2 A1 + A2 on; >= 6 runs each
+   (CLAUDE.md). SERVER_LAYER off is a DS-only value: a third, DS-only restart, or ask the user. Bench line in both.
+2. **WB C1 skinned tile**: skinned plane / tile, `GetAnimation()`, SetBone and SetBoneMatrix, BoundingBox off / on,
+   121-bone import, 300 static skinned tiles (counts + `System.MemoryAllocationKB` delta).
+3. **WB C3 + D3 pieces**: 100 / 1000 static pieces of one .xob (draw-call / MeshObject stats), variant swap, spawn vs
+   pool, memory per 1000.
+
+### 15.2 Rut pieces with no per-frame cost
+
+Methods confirmed in the API dump [code: enfusion-classes.json / arma-classes.json] or our scripts [repo]:
+| need | class.method (dump) | also used in our code |
+|---|---|---|
+| spawn a local, not replicated, prefab | `ArmaReforgerScripted.SpawnEntityPrefabLocal(notnull Resource, BaseWorld, EntitySpawnParams)`; `Game.SpawnEntityPrefab(...)` | MUD_Dig.c:227, MUD_GrassCutProbe.c:151 [repo] |
+| hold the prefab / mesh resource | `Resource.GetResource()`, `Resource.IsValid()`; `BaseResourceObject.ToVObject()` | `Resource.Load(...)` MUD_Dig.c:224 [repo] (Load itself is not in the dump) |
+| move a pooled piece | `IEntity.SetTransform(vector mat[4])`, `IEntity.Update()` | - |
+| swap the look | `IEntity.SetObject(VObject, string)` (+ `Update()`: stale bounds otherwise [repo gotchas 2026-10-09]) | sheet / patches |
+| hide / show | `IEntity.ClearFlags / SetFlags (EntityFlags)` | patches (VISIBLE) [repo] |
+| bones | `IEntity.GetAnimation()`, `IEntity.SetBone(TNodeId, vector, vector, float)`, `IEntity.SetBoneMatrix(TNodeId, vector mat[4])`, `Animation.GetBoneIndex(string)` | - |
+| morphs | `Animation.SetMorphState(string, float)` | - |
+| ProcAnim signal | `SignalsManagerComponent.AddOrFindSignal(string, float)`, `SetSignalValue(int, float)` | - |
+| component on / off | `GenericComponent.Activate(IEntity)`, `Deactivate(IEntity)`, `IsActive()` | - |
+| memory delta | (not in the dump) | `System.MemoryAllocationKB()` MUD_CoarseSkin.c:310 [repo] |
+
+Designs (piece = 1.5 m, one per ~3 op segments per track; ~13 pieces/s per truck at 10 m/s [inf]):
+| design | how "pressed" works | script calls per piece | per-frame engine cost | memory per piece beyond the entity |
+|---|---|---|---|---|
+| A. variant swap | 2-3 premade .xob (fresh / pressed / deep); a later pass swaps | place 1 (spawn) or 2 (pooled SetTransform + Update); per pass that changes the level: 2 (SetObject + Update) | none (static) | 0 - mesh shared |
+| B. SetBone once | skinned piece, 4 bones along it: bone y from 4 felt-floor samples (follows the ground) + press depth; set at placement and on a pass, then left alone | place 1-2 + `GetAnimation` 1 + SetBone 4 (+ 4 floor reads); per pass <= 4 SetBone | unchanged bones cost nothing on the script side [IDA D1: same matrix returns early]; whether a skinned entity costs per frame when nothing changes = open (D6) | skeleton instance 0x80 B + 48 B per bone override [IDA D1] + bind-pose copy (assume 48 B per bone) = ~0.5 KB for 4 bones [inf] |
+| C. live ProcAnim pool | 10-20 ProcAnim pieces near each wheel (bulge / press animated by a signal), handed off to A or B when the wheel is > N m past | per change 1 SetSignalValue; handoff 2 | 1 ProcAnim eval per live piece per frame [IDA D2] - bounded by the pool size | as B |
+| D. morph | `SetMorphState` on a morph-target piece | per pass 1 | open: needs an Animation, may evaluate per frame like B | open |
+
+Recommendation [inf]: A for the bulk (2-3 levels), B only where pieces must bend over bumps, C only if the live tyre
+bulge is wanted. Per truck-second: A ~26 calls + level swaps, B ~90 calls (7 per piece) - against the sheet's ~55
+tile builds/s x ~1300-2600 natives = ~70 000-140 000 natives/s (sec 9-10). Memory per 1000 pieces: A ~entity
+overhead only (unmeasured), B +~0.5 MB; for scale, one stored sheet tile keeps its CPU mesh for life (~28 B/vertex x
+~700-1000 vertices, IDA 2026-10-18) + GPU copy, plus 11.2 KB sync data - so 1000 pieces ~ the memory of a few dozen
+sheet tiles [inf]. Count control: global cap + recycle the oldest piece far from every player; prefab view distance /
+LOD Factors on the MeshObject component [doc: wiki "Level Of Detail"].
+Open for the probe: does `Deactivate` on a ProcAnimComponent clear the per-frame bit (`+156 & 4`) - if yes, design C
+pieces can stay ProcAnim and go to sleep instead of a handoff (D5).
+
+### 15.3 Skinned tile by bones: design
+
+Grid options (sheet cells are 0.15 m):
+| option | tile | bones | spacing | evidence for that bone count | look (heights) |
+|---|---|---|---|---|---|
+| a | 3 m | 11 x 11 = 121 | 0.30 m | above the 100 seen in vanilla [doc] | = offline "sync cell 0.30 drawn 0.15": depth -11-14 %, ~12 % wider, cells up to 0.2 m off |
+| b | 3 m | 7 x 7 = 49 | 0.50 m | within | coarser than any offline row - ruts smeared |
+| c | 1.5 m | 11 x 11 = 121 | 0.15 m | above 100 | heights identical to today's sheet (one bone per cell) |
+| d | 1.5 m | 6 x 6 = 36 | 0.30 m | within | as option a |
+Why the offline rows apply: with each vertex weighted to its 4 nearest bones bilinearly, linear blend skinning of
+vertical translations is a bilinear upsample of the bone heights - the "sync cell X, drawn 0.15 bilinear" variants in
+results/2026-10-19-sheet-sync-maths-offline.md [inf, standard skinning maths].
+
+Normals: GPU skinning turns normals with the bone matrices. Translation-only bones keep the bind-pose (flat) normals,
+so a rut would be lit like flat ground. Use `SetBoneMatrix` with a frame from neighbour heights: up = normalize(
+(hW - hE) / 2s, 1, (hS - hN) / 2s), right / forward from cross products - one `Math.Sqrt`-class native + ~20 VM ops per
+bone; neighbours' blended rotations give smooth shading [inf].
+
+Calls per tile change (option c, 121 bones): full set ~121 SetBoneMatrix + ~121-360 natives = ~250-500 native calls,
+no vertex loops, no MeshObject.Create / UpdateVerts / upload; a wheel at 0.1 s changes ~10-30 bones = ~20-90 calls.
+Today's rebuild: ~1300-2600 natives + loops over 441 vertices + the engine part (sec 9) [inf].
+Memory per tile: skeleton instance ~0x80 + 121 x 96 B (override + bind copy) = ~11.7 KB, mesh shared; today each tile
+keeps its own CPU + GPU mesh [IDA 2026-10-18 + D1; inf for the bind copy size].
+
+What a skinned tile cannot do (fixed .xob): texture drag (UVs fixed - the "fluid" cue), per-quad dirt vs top material
+(TOP_LOOK two sections by touched cells), holes for bare / crater cells (only by collapsing bones - scale 0 - or hiding
+the tile), SMOOTH_EDGE cuts. Skirts and the fade are premade (fine).
+
+Live window or stored tiles?
+- Stored tiles: yes - set the bones once at build, then nothing; that is where the count (~460-620 meshes) and the
+  memory are.
+- Live window: the calls are cheap enough, but the dirt material and texture drag would vanish exactly under the
+  player's eyes. Option c (0.15 m bones) keeps heights identical, so a live script-mesh tile (with drag + dirt) and a
+  skinned stored tile meet without a height step - the handoff is the one-time swap lesson 7 allows. Options a / b / d
+  would show a step at that border.
+- Suggested split [inf]: 1.5 m skinned tiles (c) for stored / far ground, 1.5 m script-mesh tiles only in the live
+  window (3.2). If C1 shows 121 bones do not import or render, fall back to d (36 bones) for far tiles only.
+
+Risks C1 must answer: (1) the override shows on screen on a bare entity after `GetAnimation()`; (2) culling with and
+without the `BoundingBox` override when bones move 0.3-0.5 m; (3) does a 121-bone skin import and draw (max bones per
+skeleton / per draw call); (4) does an unchanged skinned entity cost per frame (counts in WB, ms later on the DS); (5)
+memory per tile (`System.MemoryAllocationKB` delta over 300 tiles); (6) SetBoneMatrix rotation gives the right
+shading; (7) whether SetBone needs a following `Update()` on screen (IDA: SetBone marks the entity dirty itself).
+
+### 15.4 Instancing (D3)
+
+Wiki / KB copies (searched 2026-10-19): nothing on instanced or batched drawing of entities that share one mesh.
+Found: Diag Menu > Statistics: "General" (disable / basic / detailed / all), "MeshObject stats" (none / count / mesh /
+faces / verts), "Resource memory stats", "Decal stats"; Render: "CB draw calls min limit", "Shape instancing" (debug
+shapes only [IDA D3]); "Terrain Entity: 1 block = 1 draw call"; LOD Factors on the MeshObject component [doc].
+API dump: no instancing method.
+
+Count test for the local AI (WB, counts only, fixed camera over an empty field):
+1. Baseline: Statistics > General = all, MeshObject stats = count, then = mesh; screenshot.
+2. 100, then 1000 pieces of ONE .xob in view (1 m grid), same screenshots + `System.MemoryAllocationKB()` delta.
+3. 1000 pieces from 10 different .xob (100 each).
+4. 1000 script MeshObjects (unique, e.g. sheet tiles or a 2-tri MeshObject.Create each).
+Read: if a draw-call / batch line in General grows far less for (2) than for (3) and (4), same-.xob entities are
+batched. If General shows no draw-call line, say so - the answer then comes from DS render ms later.
+
+### 15.5 A1 / A2 port spec - UNREVIEWED PLAN CODE
+
+Matches `Tools/mud_sheet_cost_exp.py` variants "slump: 1 pass f0.6, cells within 1 of stamps" and "drag: LimitDrag
+over stamped cells +1 only (per stamp)", with the review points (probes doc review 3-4). Code is Enforce-shaped, not
+compiled. Keep the 64-locals limit in mind: each helper in its own method.
+
+A1 SLUMP_ONE (MUD_MudSync):
+- Collect the stamped cells of the open op in Stamp (cells that passed `TileOf(i, k, true)` and were written), as two
+  int lists (gi, gk) - packed keys overflow int at Arland cell counts [inf: 12.8 km / 0.15 = ~85 000 cells a side].
+- After the op's last stamp the box is known (StepStamp sets m_iJi0 .. m_iJk1 = stamp boxes + 1). Then: SlumpBegin
+  (even grid), then build the mask: seed = stamped cells; mask = seed dilated by 1 over 4 neighbours, computed from a
+  copy (never in place); list = mask cells in row order. The +1 box margin holds the dilation.
+- Ground: only the even cells some mask cell reads (its a0 / a1 x b0 / b1). Others: not read, ok 0.
+- SlumpCells: a cell takes part (`m_aSok = 1`) only if in the mask AND it has a tile AND its 4 even grounds are ok.
+- SlumpPass: 1 pass (`SLUMP_ONE_PASSES`), factor 0.6 (`SLUMP_ONE_K`) instead of MUD_MudSheet.SLUMP (the local sheet
+  slump keeps SLUMP). Flow only between two `m_aSok` cells (the existing checks already do this once Sok includes the
+  mask). Keep `f = Math.Min(drop * k * 0.5, da * 0.25)` and the `0.0002` floor. All flows from the old depths, then
+  added (as now).
+- SlumpWrite, JOB_QUANT, the hash and the sheet restore: unchanged (whole op box).
+
+```c
+// MUD_MudSync - SLUMP_ONE (UNREVIEWED PLAN CODE, research 2026-10-19 sec 15.5)
+static const bool SLUMP_ONE = false;
+static const float SLUMP_ONE_K = 0.6;       // sync slump factor (MUD_MudSheet.SLUMP 0.25 x 3 passes before)
+static const int SLUMP_ONE_PASSES = 1;
+protected ref array<int> m_aStI = {};       // open op: stamped cells, gi
+protected ref array<int> m_aStK = {};       //                         gk
+protected ref array<int> m_aSmSeed = {};    // per box cell: stamped
+protected ref array<int> m_aSm = {};        // per box cell: in the mask (seed dilated by 1)
+protected ref array<int> m_aSmList = {};    // box cell indices of the mask, row order
+protected ref array<int> m_aEgNeed = {};    // per even cell: a mask cell reads it
+
+// StartJob (rut op): m_aStI.Clear(); m_aStK.Clear();
+// Stamp, where a cell is written (next to m_iStatStHit++):
+//     if (SLUMP_ONE) { m_aStI.Insert(i); m_aStK.Insert(k); }      // duplicates are fine
+// StepStamp, after the BOX_MAX test passed: SlumpBegin(); if (SLUMP_ONE) BuildSlumpMask();
+
+protected void BuildSlumpMask()
+{
+	int w = m_iJi1 - m_iJi0 + 1;
+	int h = m_iJk1 - m_iJk0 + 1;
+	int n = w * h;
+	m_aSmSeed.Resize(n);
+	m_aSm.Resize(n);
+	for (int z = 0; z < n; z++)
+	{
+		m_aSmSeed[z] = 0;
+		m_aSm[z] = 0;
+	}
+	int cnt = m_aStI.Count();
+	for (int s = 0; s < cnt; s++)
+	{
+		int c = (m_aStK[s] - m_iJk0) * w + (m_aStI[s] - m_iJi0);
+		m_aSmSeed[c] = 1;
+	}
+	m_aSmList.Clear();
+	for (int k = 0; k < h; k++)
+	{
+		for (int i = 0; i < w; i++)
+		{
+			int c2 = k * w + i;
+			bool on = m_aSmSeed[c2] != 0;
+			if (!on && i > 0 && m_aSmSeed[c2 - 1] != 0)
+				on = true;
+			if (!on && i < w - 1 && m_aSmSeed[c2 + 1] != 0)
+				on = true;
+			if (!on && k > 0 && m_aSmSeed[c2 - w] != 0)
+				on = true;
+			if (!on && k < h - 1 && m_aSmSeed[c2 + w] != 0)
+				on = true;
+			if (on)
+			{
+				m_aSm[c2] = 1;
+				m_aSmList.Insert(c2);
+			}
+		}
+	}
+	MarkEvenNeed(w);
+}
+
+protected void MarkEvenNeed(int w)
+{
+	int ne = m_iEw * m_iEh;
+	m_aEgNeed.Resize(ne);
+	for (int z = 0; z < ne; z++)
+		m_aEgNeed[z] = 0;
+	foreach (int c : m_aSmList)
+	{
+		int i = c % w;
+		int k = c / w;
+		int oi = m_iJi0 + i - m_iEi0;
+		int ok2 = m_iJk0 + k - m_iEk0;
+		int mi = oi % 2;
+		int mk = ok2 % 2;
+		int a0 = (oi - mi) / 2;
+		int b0 = (ok2 - mk) / 2;
+		m_aEgNeed[b0 * m_iEw + a0] = 1;
+		m_aEgNeed[b0 * m_iEw + a0 + mi] = 1;
+		m_aEgNeed[(b0 + mk) * m_iEw + a0] = 1;
+		m_aEgNeed[(b0 + mk) * m_iEw + a0 + mi] = 1;
+	}
+}
+
+// SlumpGroundRow, per even cell e:
+//     if (SLUMP_ONE && m_aEgNeed[e] == 0) { m_aEg[e] = 0; m_aEgOk[e] = 0; continue; }
+// SlumpCells, per box cell c (before the TileOf call):
+//     if (SLUMP_ONE && m_aSm[c] == 0) { m_aSok[c] = 0; m_aSd[c] = 0; continue; }
+// SlumpPass: float kf = MUD_MudSheet.SLUMP; if (SLUMP_ONE) kf = SLUMP_ONE_K;
+//     f = Math.Min(drop * kf * 0.5, da * 0.25);
+//     with SLUMP_ONE loop over m_aSmList (i2 = v % w; k2 = v / w - each on its own int line) instead of every box
+//     cell; zero and apply m_aSdd for list cells only (receivers are Sok cells = list cells).
+// Passes: int passes = SLUMP_PER_OP; if (SLUMP_ONE) passes = SLUMP_ONE_PASSES;  (JOB_PASS end test)
+// Stat: m_iStatSlumpCells += list count x passes.
+```
+
+A2 DRAG_STRIP (MUD_MudSync.Stamp + new LimitDragStrip):
+- Per stamp, mark the cells that pass the geometric test (the offline `ok` set: before `TileOf`) in a scratch over the
+  stamp box + 1 cell each side; dilate by 1 (4 neighbours, from the marks, not in place); sweep 0 over the marked
+  cells in row order (k up, i up), sweep 1 over the same list reversed (= the game's reversed k and i). Per cell the
+  existing LimitDrag body: `TileOf(i, k, false)` null -> skip; interior cells read the tile directly (P1 path), edge
+  cells via `GetI` (no tile = THICK / 0 drag); write through the cell's own tile.
+
+```c
+// MUD_MudSync - DRAG_STRIP (UNREVIEWED PLAN CODE, research 2026-10-19 sec 15.5)
+static const bool DRAG_STRIP = false;
+protected ref array<int> m_aDm = {};        // scratch per cell of the stamp box + 1: 1 = passed the stamp test
+protected ref array<int> m_aDl = {};        // marked + ring, as dw-box indices, row order
+
+// Stamp, before the row loop:
+//     int dw = i1 - i0 + 3;  int dh = k1 - k0 + 3;
+//     if (DRAG_STRIP) { m_aDm.Resize(dw * dh); for (...) m_aDm[z] = 0; }
+// Stamp, right after the geometric test passed (before TileOf):
+//     if (DRAG_STRIP) m_aDm[(k - k0 + 1) * dw + (i - i0 + 1)] = 1;
+// Stamp, end: if (MUD_MudSheet.DRAG_LIM > 0) { if (DRAG_STRIP) LimitDragStrip(i0, k0, dw, dh); else LimitDrag(i0, i1, k0, k1); }
+
+protected void LimitDragStrip(int i0, int k0, int dw, int dh)
+{
+	m_aDl.Clear();
+	for (int y = 0; y < dh; y++)
+	{
+		for (int x = 0; x < dw; x++)
+		{
+			int c = y * dw + x;
+			bool on = m_aDm[c] != 0;
+			if (!on && x > 0 && m_aDm[c - 1] != 0)
+				on = true;
+			if (!on && x < dw - 1 && m_aDm[c + 1] != 0)
+				on = true;
+			if (!on && y > 0 && m_aDm[c - dw] != 0)
+				on = true;
+			if (!on && y < dh - 1 && m_aDm[c + dw] != 0)
+				on = true;
+			if (on)
+				m_aDl.Insert(c);
+		}
+	}
+	int cnt = m_aDl.Count();
+	for (int sweep = 0; sweep < 2; sweep++)
+	{
+		for (int q = 0; q < cnt; q++)
+		{
+			int idx = q;
+			if (sweep == 1)
+				idx = cnt - 1 - q;
+			int c2 = m_aDl[idx];
+			int xx = c2 % dw;
+			int yy = c2 / dw;
+			LimitDragCell(i0 - 1 + xx, k0 - 1 + yy);   // the body of today's LimitDrag inner loop, moved into a method
+		}
+	}
+}
+```
+
+Checks before a game run: the offline tool's two variants are the reference; a quick way to check the port is a
+TEST_KIT self-test that runs one recorded op through old and new paths and prints cells changed / max diff (old vs
+new are expected to differ; DS vs client vs client must not). Hash lines: re-baseline, then client A vs B must match.
+
+### 15.6 Numbers the user needs for the un-park decision
+1. Sync ms per 5 s per truck, client and DS: launch 1 vs launch 2 (A1 + A2) - target about -40 % (sec 8).
+2. DS MUD ms with SERVER_LAYER off vs on.
+3. ns per Math.* native (bench) -> worth doing 3.1 or not.
+4. C1: does a 121-bone skinned tile import, show, cull right with BoundingBox, and what it costs in memory per tile.
+5. C3 / D3: are same-.xob pieces batched; memory per 1000 pieces; spawn vs pool.
+6. The user's eye: pieces + parallax (C3 / C4) vs the sheet.
+With 1-2 in hand, sec 7's budget test can be run; with 4-6, the cheap-look route can be judged against it.
