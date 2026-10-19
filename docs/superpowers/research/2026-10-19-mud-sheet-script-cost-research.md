@@ -135,21 +135,20 @@ If relaxed to "every client applies the same ops, approximately" [inf, all of it
 
 ### 3.3 Cheaper sync maths (keep deterministic, change formulas) - MEDIUM-HIGH chance, small-medium gain per vehicle
 Per point 0.4: allowed if every machine runs the new code.
-- **Drag without LimitDrag.** The limit exists because press drag is full (`dir * drag`) inside the tyre and ridge
-  drag starts at 0 (`w = sin(0)` at `lat = half`) - a step at the wall [repo: Stamp code]. Scale the press drag by
-  the same soft-wall factor `pf` (already computed) and the step is gone; drop the 2-sweep pass. Better still: drag
-  out of the synced layer (section 2). Saves 14-72 ms per 5 s + 2 of the 7 tile arrays in memory / snapshot /
-  hash [inf for the look].
-- **LimitDrag box.** If kept: it walks the axis-aligned box of the segment (`i0..i1 x k0..k1`), the stamp loop only
-  the strip rows (`ri0..ri1`). Walk the strip +1 cell; for a 45-degree segment that is roughly half the cells [inf].
+- **Drag: LimitDrag stays, but over fewer cells.** ~~Scale the press drag by the soft-wall factor and drop
+  LimitDrag~~ - REFUTED offline 2026-10-19 (sec 8): without LimitDrag texture stretch p99 goes 0.40 -> 2.8 with or
+  without the pf scale. What works: LimitDrag over the stamp's own stamped cells +1 (not the whole axis-aligned
+  stamp box) = -64 % drag work, stretch p99 0.48-0.60; once per op = -77 %, p99 up to 0.69. Drag out of the synced
+  layer (section 2) remains the memory / snapshot / hash win.
 - **Slump** (~70 ms per 5 s, ~227 ground reads + 3 passes over ~700 cells per op [repo: README Stage 2 run 2]):
-  (a) slump only cells the op changed + 1 ring (an active list from Stamp) instead of the op box;
-  (b) one pass with an equivalent wider kernel instead of 3; (c) read the ground once per op from the op's own
-  segment heights + the rut-field floor arrays directly, not through `GroundY` -> `ColumnAt`/`TopAt`/`DugUndug`
-  (several script calls and map lookups per read). Each changes the look slightly [inf].
+  MEASURED offline (sec 8): **1 pass at factor 0.6 = 3 passes at 0.25** within 0.6-2.2 mm rms (worst cell 2-3 cm)
+  for -67 % work; plus only cells within 1 of the op's stamps = -85-87 % work at 3-5 mm rms. Also: read the ground
+  through the rut-field arrays directly, not `GroundY` -> `ColumnAt` / `Heights` (~40-80 script / native calls per
+  read: Vector, ToFine, BaseAt, 4x GetH, FieldFloorAt, 8x LockAt ... [repo: MUD_WorldGround.c Heights]).
 - **Sheet restore + replay** (~50 ms per 5 s): only needed where the op box overlaps own prediction stamps; skip
   restore for ops of other vehicles with no own stamps in the box (check whether it already does) [inf].
-- Expected: sync per vehicle maybe -30-50 % [inf]. This matters only with many vehicles (section 1) or on the DS.
+- Expected: sync per vehicle about -40 % (sec 8: offline work counts x measured ms). This matters most with many
+  vehicles (section 1 / 11) and on the DS.
 - Test: hash compare client A vs B after the change (must still match each other), sync COST line before / after.
 
 ### 3.4 Premade rut pieces from the op stream (a different way to draw, very little script) - MEDIUM chance, large gain
@@ -259,17 +258,156 @@ the dense data exists (only where mud moved) and *who owns a surface* (one owner
 
 ---
 
-## 6. Top 3 to try first (one DS session + one WB probe session)
+---
 
-1. **Measure the two unknowns, and the native cost, in one DS session.** (a) Two then four robot trucks offroad
-   (robot setup in CLAUDE.md), sync COST line per 5 s on a client that is far from them: does sync ms grow linearly
-   with remote vehicles? (b) The native micro-bench line (3.1). Together they tell whether the sync layer needs the
-   section-2 decision, and how much 3.1 can give.
-2. **3.1 + 3.2 built behind switches, A/B in the same kind of DS run**: natives-free BuildTileMesh / Stamp, 1.5 m
-   live sub-tiles, IsRendered gate on stored rebuilds. Read sh upload, sh stored, sheet sync, delay meter.
-3. **One WB probe session for the cheap-look routes**: a premade rut piece placed from op segments (3.4), SetBone /
-   SetMorphState on a skinned plane (3.5), 0.30 m tiles with a parallax dirt emat (3.6). Look by eye; time spawns vs
-   pooled SetTransform with GetTickCount.
+# Deeper pass (2026-10-19, second round)
+
+Sources added this round: the offline Bohemia wiki + KB copy in enfusion-mcp-BK (`data/wiki/pages.json`, 258 pages;
+`data/kb/patterns`), more API dump searches, a code read of MUD_MudSync (job steps, slump, LimitDrag), MUD_MudSheet
+(SyncBegin, TakeCovered, Wheels, BuildTileMesh setup), MUD_WorldGround.Heights, and an offline experiment on the
+synced maths.
+
+## 8. Cheaper sync maths, measured offline
+Full table: [results/2026-10-19-sheet-sync-maths-offline.md](../results/2026-10-19-sheet-sync-maths-offline.md);
+tool `Tools/mud_sheet_cost_exp.py` (new, reuses the 2026-10-17 sync proto). Three scenarios (base, 5 passes,
+straight), reference = game today.
+- **Slump: 1 pass at factor 0.6 = 3 passes at 0.25** within 0.6-2.2 mm rms, worst cell 2-3 cm, for -67 % slump
+  work. Only cells within 1 of the op's stamps: -85-87 %, rms 3-5 mm. [MEASURED offline]
+- **LimitDrag over the stamp's own cells +1** instead of its whole box: -64 % drag work, heights identical, stretch
+  p99 0.48-0.60 (today 0.40). Dropping LimitDrag, or my soft-wall-drag idea, gives stretch p99 2.8 - refuted.
+- **Sync grid 0.30 m drawn at 0.15 m**: -67-76 % on every sync step, but groove -11-14 % depth, ~12 % wider, single
+  cells up to 0.2 m off. Look test needed; not first.
+- In game (inference): sync layer about -40 % per driving vehicle on every client and the DS.
+
+## 9. Tile build: where the natives are (code count, BuildTileMesh 5754-6400)
+| phase (DS ms per tile, fast path) | per touched vertex / quad | natives |
+|---|---|---|
+| setup (0.2) | dirt score per touched vertex: `Math.AbsFloat` + `Math.Sqrt` + an int hash; 4x `HasTile` (map lookups) per tile; `TaperField` if bare cells; clears of 3-4 x 441-entry arrays | ~2 per touched vertex |
+| heights `vy` (in setup/quads) | tiles with an open side: up to 4x `Math.Min` + `Math.Clamp` per vertex; `TaperFade` call near bare | 0-5 per vertex |
+| quads (0.5) | per emitted vertex `Vector()` + 2x `Math.Clamp` (UVs); mixed quads 6x Min/Max; SMOOTH_EDGE cuts; `DirtQuad` / `Changed` calls when smooth is off | ~3 per vertex + cuts |
+| skirt (0.03) | `Vector()` subtract per skirt vertex | small |
+| engine (0.12) | Create + 2x UpdateIndices + 2x UpdateVerts; both sections are given the FULL vertex array `tv`, so normals / tangents / bounds run twice over all vertices | - |
+
+So ~1300-2600 native calls per touched 441-vertex tile [inf from the code]. Two cheap extras the count shows:
+the per-vertex dirt noise (`qhs` hash -> `qnz`) can be a static 64 x 64 table indexed by `(gi % 64, gk % 64)`;
+the base UV `((um * TQ + ci) * CELL) / SIZE` is constant per (um, vm, ci, ck) and can be a static table, leaving one
+subtract and a clamp only near the UV edge.
+
+Micro-bench (put in the TEST_KIT, read on the DS client; GetTickCount sums are unbiased [repo: gotchas]):
+
+```c
+// MUD bench natives (research 2026-10-19 sec 9): ms for N calls each way; s keeps the loops from being dead code
+static void BenchNatives()
+{
+	int n = 200000;
+	float a = 0.3;
+	float b = 0.7;
+	float s = 0;
+	int t0 = System.GetTickCount();
+	for (int i = 0; i < n; i++)
+		s += Math.Max(a, b + i * 0.000001);
+	int tMax = System.GetTickCount(t0);
+	t0 = System.GetTickCount();
+	for (int j = 0; j < n; j++)
+	{
+		float m = b + j * 0.000001;
+		if (a > m)
+			m = a;
+		s += m;
+	}
+	int tIf = System.GetTickCount(t0);
+	vector tv[64];
+	t0 = System.GetTickCount();
+	for (int k = 0; k < n; k++)
+	{
+		int slot = k % 64;
+		tv[slot] = Vector(k * 0.15, s, 0.3);
+	}
+	int tVec = System.GetTickCount(t0);
+	t0 = System.GetTickCount();
+	for (int q = 0; q < n; q++)
+	{
+		int slot2 = q % 64;
+		vector p = tv[63 - slot2];
+		p[0] = q * 0.15;
+		p[1] = s;
+		tv[slot2] = p;
+	}
+	int tTpl = System.GetTickCount(t0);
+	Print(string.Format("MUD bench natives: n %1 | Math.Max %2 ms, inline if %3 ms | Vector() %4 ms, copy+set %5 ms | s %6", n, tMax, tIf, tVec, tTpl, s));
+}
+```
+Reading it: (tMax - tIf) / n = cost of one Math.* native over an inline compare; multiply by ~2000 per tile and by
+the ~55 live builds/s (sec 10) to get the ms/s 3.1 can save. If that is < ~10 % of a build, skip 3.1 and go to 3.2.
+
+## 10. Live upload: a model that fits the logs
+- Live builds ~517-571 per 10 s while driving (deep dive table 3.3) x ~1.6 ms (BuildTileMesh mean on the DS before
+  the fast path) = ~88 ms/s = ~1.0 ms/frame at ~90 fps, which matches 'sh upload' 0.84-1.27 ms/frame [repo, checked
+  against both runs]. So the live window is ~55 tile builds a second for one truck.
+- Why so many: at 10 m/s a wheel crosses a 3 m tile in 0.3 s = 3 uploads, the left and right tracks (~2 m apart)
+  often sit in different tiles, front and rear axles too, and every op restore marks the tiles of its box again.
+- 1.5 m live sub-tiles (3.2): a wheel crosses one in 0.15 s (1-2 uploads), each build ~1/4 of the vertices plus a
+  fixed part. Estimate ~8-10 sub-builds per upload at ~0.45 ms instead of ~5 builds at ~1.6 ms: ~-45 % on sh upload
+  [inf; the fixed part per build is the unknown - the bench in PAPER TEST 1 can time a 11 x 11 build directly].
+
+## 11. Vehicle count, and the DS is the first wall
+Per driving vehicle, ms per second of DS main thread (sources in brackets):
+| part | ms/s per vehicle | source |
+|---|---|---|
+| rut ops: 6-14 ms each, ~1.3/s under the sheet (RUT_SHEET_MS 750) or ~4/s off it | 8-56 | perf-assessment 3.x, mud-zone-rut-perf R1 |
+| patch colliders: ~8 ms each, ~3 per op | up to ~100 ("roughly 100 ms of every second") | perf-assessment item 2 / 3.1 |
+| sync layer on the DS (SERVER_LAYER, only for joiner snapshots) | ~40-50 (client-side numbers); DS log 9-100 per s before P1 | sheet-alternatives sec 7; deep dive B6 |
+| total | ~150-200 = 15-20 % of the DS frame budget | inference |
+
+So ~5-6 trucks driving at once fill a 30 fps DS main thread with ground work alone, and the one-collider-per-frame
+cap saturates at 2-3 trucks [repo: perf-assessment summary 5]. The sheet is not the first limit for a many-vehicle
+PvP match - the felt rut pipeline is. The sheet's share on the DS (SERVER_LAYER) is ~25 % of the per-truck cost and
+buys only joiner snapshots; turning it off (section 2) is the cheapest DS win in this whole doc.
+On each client: every remote truck costs its sync layer work (~0.45-0.55 ms/frame today, ~0.3 after sec 8) wherever
+it drives, plus restores + stored rebuilds when it is inside the drawn radius.
+
+## 12. Premade rut pieces (3.4), deeper
+- Spawn cost, from our own log: `SpawnTile` (a plain script entity, `GetGame().SpawnEntity`) shows as 'z spawn'
+  0.01 ms per frame at ~1 spawn per frame [repo: fixes-2-4 sec 1] = ~10-20 us per spawn (1 ms ticks, averaged). A
+  prefab with an .xob loads its resource once; or skip spawning: pool GenericEntities, `SetObject` the piece's
+  VObject once, then only `SetTransform` + `Update` per placement.
+- Rate: one piece per 0.5 m op segment per track = ~40 pieces/s per truck at 10 m/s -> ~0.5-1 ms per second
+  (~0.01 ms/frame) vs the sheet's ~1.3-2.2 ms/frame [inf].
+- Count is the real problem: 0.5 m pieces = ~144 000 per truck-hour. Use 1.5-2 m pieces (one per 3-4 segments), a
+  global cap that recycles the oldest pieces far from every player, and a view distance on the prefab. Render: 350-750
+  small script entities cost ~0.2 ms render in our A/B (sec 0.1); instanced .xob pieces should not cost more [inf].
+- Same on every client: placement is maths on the op segments; "pressed" variants from a per-0.5 m-cell pass counter
+  keyed by op seq (deterministic, a few ints per cell).
+- Following the ground: a rigid 1.5-2 m piece on 0.25 m patch ground leaves gaps on bumps; sink it 3-5 cm with a
+  short skirt, or bend it: ProcAnim (below) or SetBone.
+- Imported meshes have vertex colours / alpha (fade the ends), authored normals, LODs [doc: KB
+  resource-manager-blender import settings; repo: script meshes have none of these].
+
+## 13. Bones and morphs (3.5), deeper
+- Two engine paths move bones, and one of them is native per frame [doc: wiki "Procedural Animation Editor" /
+  "Nodes" / "Basics Tutorial", offline copy]: a `ProcAnimComponent` with a `.pap` (bones: RotationSet / TranslateSet /
+  ScaleSet, "Update collider" off by default) driven by a `.siga` (signals -> maths). Script only sets a signal:
+  `SignalsManagerComponent.AddOrFindSignal(name)` + `SetSignalValue(index, value)` (local, not replicated)
+  [code: API dump, arma-classes.json]. So a piece can deepen / bend with ONE native call per change, not one per bone.
+  Vanilla uses it for dashboards, exhausts, gear [doc: wiki tutorial uses UAZ469 `v_exhaust`].
+- The script path: `IEntity.SetBone / SetBoneMatrix`, `Animation.SetMorphState(name, value)` [code: API dump].
+  No public example of SetBone on a static prop found (web search 2026-10-19).
+- Skinning import: "Export Skinning", max 4 bones per vertex [doc: KB resource-manager-blender].
+- What this means: a full 225-bone "deformable tile" stays a long shot (bounds / culling / per-bone calls unknown),
+  but a rut PIECE with a few bones driven by 1-2 signals ("pressed", "bend") is a well-trodden engine feature. Probe
+  both in the same WB session (3.5 test + a 2-bone piece with a .pap / .siga and SetSignalValue).
+
+## 6. Top 3 to try first (revised after the deeper pass)
+
+1. **One DS session, measurements only + two switches**: (a) 2 then 4 robot trucks, sync COST line on a far client
+   and on the DS; (b) the native micro-bench (sec 9); (c) `SERVER_LAYER` false A/B on the DS; (d) slump 1 pass f 0.6
+   near 1 + LimitDrag per stamp strip (sec 8 - same code everywhere, re-baseline the hash compare; check client A vs
+   B still match each other).
+2. **3.2 (1.5 m live sub-tiles + IsRendered gate on stored rebuilds)**, plus 3.1 only if the bench says natives are
+   a real share. Read sh upload, sh stored, delay meter.
+3. **One WB probe session for the cheap-look routes**: a premade 1.5 m rut piece placed from op segments with a
+   2-bone ProcAnim "pressed" signal (sec 12-13), SetBone on a skinned plane (3.5), 0.30 m tiles with a parallax dirt
+   emat (3.6). Look by eye; time spawn vs pooled SetTransform.
 
 ## 7. What result says the sheet is still not worth it
 
