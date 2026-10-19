@@ -45,7 +45,8 @@ If something seems to need a change in a rut file, stop and ask me.
 ## WB look session (one launch)
 Urals on grass: one line 1 / 2 / 4 passes, a crossing, a crater and a trench near it, a road edge. For each preset look
 from 2 / 20 / 60 m: is the rut itself unchanged (grass-free floor, dirt as before), does the berm read as soft mud, any
-z-fight with the patch, any overlay over the crater / trench (must not), pop when tiles appear. Screenshots per preset.
+z-fight with the patch, any overlay over the crater / trench (must not), pop when tiles appear. FIRST: does grass grow on
+the berm / film (grass rides on our ground above the heightmap)? Screenshots per preset.
 
 ## Report back
 Files / methods, the one call site you added, compile result, log lines, screenshots, anything odd. Do not tune or

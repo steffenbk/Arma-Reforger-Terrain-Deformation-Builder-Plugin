@@ -42,6 +42,12 @@ The overlay uses only read calls. To know when to rebuild it either polls the ru
 samples it covers) or listens to the existing `MUD_MudSheet.FloorChanged` call that Submit already makes (it is a
 notification after the rut work, not a change to it). Polling is the zero-touch option.
 
+## Open risk: grass on the overlay
+Grass rode on top of our lifted ground (gotchas 2026-10-08 / 2026-10-19). The overlay also sits above the heightmap,
+so grass may ride on the berm and the film too - then the mud reads as a grassy bump. Unknown until seen (the clutter
+mechanism is not proven, gotchas 2026-10-08 'inference'). First item of the look session; if it happens, the overlay
+needs a way to stay out of the clutter (to research) or the mud is colour-only.
+
 ## Cost (inference)
 Tiles only along tracks; built once per change, kept; no sync layer; no streaming over fresh ground. The build is the
 sheet's tile build (~0.55-0.9 ms per tile, research sec 9) - only for tiles near ruts that changed.
