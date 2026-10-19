@@ -149,6 +149,8 @@ class MUD_RutTile
 	float m_aFloor[SIZE_F];         // rut floor (world y) per floor sample fk_local * FSUB + fi_local, FLOOR_NONE = none
 	float m_aRidge[SIZE_F];         // Build 3 Stage 3: bulldozed ridge top (world y), same index, FLOOR_NONE = none. Plain RUT
 	                                // FIELD ground only (MUD_VoxelProbe.GrowRidges); a sample with a floor never has one
+	float m_aWear[SIZE_F];          // WEAR COUNT (2026-10-19): passes counted on a sample with no floor yet (whole 0.01,
+	                                // RUT_RAMP weights add), 0 = never driven (a fresh array reads 0). MUD_VoxelProbe.WearPass
 }
 
 class MUD_VoxelOp
@@ -229,7 +231,7 @@ class MUD_VoxelProbe
 	static const bool SURFACE_OPS = true;   // true for the all-voxel test (user 2026-10-13 22:30); was false (test 6)
 	// All-voxel test (user 2026-10-13 22:30, checkpoint v031 = before): wheels cut ruts into the voxels (op 4), the
 	// heightfield takes no rut. 0.5 m samples: a rut shows as a soft dip ~1 m wide, no berm (user picked 0.5 m).
-	static const bool RUTS = true;      // user 2026-10-15: back to the v035 voxel ruts (ground heightfield ruts cost ~13 fps, docs/superpowers/results/2026-10-15-freeze-test.md); was false for the MUD DRAG TEST
+	static const bool RUTS = true;      // back on 2026-10-19 after the mesh-rut feel test (results/2026-10-19-mesh-vs-voxel-ruts-ds.md). user 2026-10-15: back to the v035 voxel ruts (ground heightfield ruts cost ~13 fps, docs/superpowers/results/2026-10-15-freeze-test.md); was false for the MUD DRAG TEST
 	static const float RUT_STEP = 0.5;          // a track point every this many m a wheel travels
 	static const float RUT_JUMP = 2;            // farther than this since the last point (air, teleport): track restarts
 	static const int RUT_EVERY_MS = 250;        // one rut op per vehicle at most this often
@@ -277,8 +279,19 @@ class MUD_VoxelProbe
 	// 0.06 left grass patches); deeper than that, each pass cuts at most RUT_PASS_MAX. Depends on the depth so far, not
 	// a pass count, so the RUT_RAMP weights still add up (two half passes = one first pass). RUT_FIRST_TOL: the whole-cm
 	// round can leave a first-pass floor up to 0.005 short - that must not count as uncut. 0 = off.
-	static const float RUT_FIRST_D = 0.15;     // user 2026-10-19: try 15 cm (0.10 -> 0.12 -> 0.15)
+	static const float RUT_FIRST_D = 0;     // WEAR (user 2026-10-19 evening, v230 = before): off - grass first, dirt after repeated passes; was 0.15 (0.10 -> 0.12 -> 0.15)
 	static const float RUT_FIRST_TOL = 0.01;
+	// WEAR COUNT (user 2026-10-19 'if i drive over grass the first time i dont break the ground, but repeated use will';
+	// perf plan 2026-10-19-rut-wear-perf-plan.md idea 1, v233 = before): a floor sample with no rut floor yet only counts
+	// passes (m_aWear += the RUT_RAMP weight, so two half passes = one) until WEAR_PASSES; the pass after that cuts. A
+	// wear-only pass writes no floor = no FloorDirty, no QueueBox, no patch rebuild. Wear is J2 state: snapshot '~' list,
+	// self-test compare, disp hash. The trail rule rides a worn track; look ruts skip worn-only samples. 0 = off.
+	static const float WEAR_PASSES = 1;
+	static const float WEAR_TOL = 0.05;     // 0.95 counts as a pass (ramp weights + the 0.01 round)
+	static const int WEAR_SALT = 70001;     // disp hash: a wear value is not a floor value
+	protected static int s_iWearAdd;        // 10 s line: samples a pass only wore / samples cut
+	protected static int s_iWearCut;
+	protected static int s_iWearLogAt;
 	// LEAD AXLE RUTS (user decision 2026-10-18, v223 = before): only the leading axle cuts - the front wheels driving
 	// forward, the rear wheels backing up; the trailing wheels ride the leading rut. Server feel ruts and client look
 	// ruts use the same rule (LeadAxle). Fewer rut ops and patch rebuilds. false = every wheel.
@@ -1198,12 +1211,16 @@ class MUD_VoxelProbe
 		float dep = RutDepthAt(cp[0] + dx * RUT_TRAIL_AHEAD, cp[2] + dz * RUT_TRAIL_AHEAD, false);
 		if (dep < -1)
 			return true;     // no ground there
-		float thr = 0.05;
+		float thr = RUT_TRAIL_IN * RUT_PASS_MAX;     // WEAR: a one-pass rut (RUT_PASS_MAX) counts as a rut to ride in
 		if (RUT_FIRST_D > 0)
 			thr = RUT_TRAIL_IN * RUT_FIRST_D;
 		if (TRAIL_PROBE && MUD_TestKit.TEST_KIT)
 			TrailProbe(cp, dx, dz, look, dep, hs);
-		return dep >= thr;
+		if (dep >= thr)
+			return true;
+		// WEAR COUNT: any worn track (no floor yet) is a rut to ride in too, else every axle counts a pass. Any wear, not
+		// a full pass: in the front wheel's RUT_RAMP fade only one op's weight is in yet (review 2026-10-19)
+		return WEAR_PASSES > 0 && WearAt(cp[0] + dx * RUT_TRAIL_AHEAD, cp[2] + dz * RUT_TRAIL_AHEAD) > 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2030,16 +2047,20 @@ class MUD_VoxelProbe
 	//! the tile has no ridge: "key:<floor>" as before).
 	protected static string TileText(int key, MUD_RutTile tile)
 	{
-		string s = key.ToString() + ":" + RunText(tile, false);
-		string rg = RunText(tile, true);
+		string s = key.ToString() + ":" + RunText(tile, 0);
+		string rg = RunText(tile, 1);
 		if (!rg.IsEmpty())
 			s = s + ";" + rg;
+		string wr = RunText(tile, 2);     // WEAR COUNT: "~" + the wear list in whole 0.01 passes (left out when none)
+		if (!wr.IsEmpty())
+			s = s + "~" + wr;
 		return s;
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! J2: one sample list of a tile as TileText's tokens (ridge false = m_aFloor, true = m_aRidge); "" = all none
-	protected static string RunText(MUD_RutTile tile, bool ridge)
+	//! J2: one sample list of a tile as TileText's tokens (which 0 = m_aFloor, 1 = m_aRidge, 2 = m_aWear in whole 0.01
+	//! passes, none = 0); "" = all none
+	protected static string RunText(MUD_RutTile tile, int which)
 	{
 		string s = "";
 		bool first = true;
@@ -2048,9 +2069,15 @@ class MUD_VoxelProbe
 		for (int f = 0; f < MUD_RutTile.SIZE_F; f++)
 		{
 			float v = tile.m_aFloor[f];
-			if (ridge)
+			if (which == 1)
 				v = tile.m_aRidge[f];
-			if (v >= FLOOR_NONE * 0.5)
+			bool isNone = v >= FLOOR_NONE * 0.5;
+			if (which == 2)
+			{
+				v = tile.m_aWear[f];
+				isNone = v <= 0;
+			}
+			if (isNone)
 			{
 				none++;
 				continue;
@@ -2099,8 +2126,17 @@ class MUD_VoxelProbe
 				tile.m_aFloor[z] = FLOOR_NONE;
 				tile.m_aRidge[z] = FLOOR_NONE;
 			}
-			// Build 3 Stage 3: "<floor>;<ridge>" (no ';' = no ridge)
+			// Build 3 Stage 3: "<floor>;<ridge>" (no ';' = no ridge); WEAR COUNT: then "~<wear>" (no '~' = no wear)
 			string fl = kd[1];
+			string wl = "";
+			int tilde = fl.IndexOf("~");
+			if (tilde >= 0)
+			{
+				wl = fl.Substring(tilde + 1, fl.Length() - tilde - 1);
+				fl = fl.Substring(0, tilde);
+				if (wl.IsEmpty() || wl.IndexOf("~") >= 0)
+					return false;
+			}
 			string rl = "";
 			int semi = fl.IndexOf(";");
 			if (semi >= 0)
@@ -2110,9 +2146,11 @@ class MUD_VoxelProbe
 				if (rl.IsEmpty() || rl.IndexOf(";") >= 0)
 					return false;
 			}
-			if (!ParseRuns(fl, tile, false, toks))
+			if (!ParseRuns(fl, tile, 0, toks))
 				return false;
-			if (!rl.IsEmpty() && !ParseRuns(rl, tile, true, toks))
+			if (!rl.IsEmpty() && !ParseRuns(rl, tile, 1, toks))
+				return false;
+			if (!wl.IsEmpty() && !ParseRuns(wl, tile, 2, toks))
 				return false;
 			into.Set(kd[0].ToInt(), tile);
 		}
@@ -2120,8 +2158,8 @@ class MUD_VoxelProbe
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! J2: RunText's tokens into tile (ridge false = m_aFloor, true = m_aRidge). toks = scratch. False = malformed.
-	protected static bool ParseRuns(string text, MUD_RutTile tile, bool ridge, array<string> toks)
+	//! J2: RunText's tokens into tile (which 0 = m_aFloor, 1 = m_aRidge, 2 = m_aWear). toks = scratch. False = malformed.
+	protected static bool ParseRuns(string text, MUD_RutTile tile, int which, array<string> toks)
 	{
 		toks.Clear();
 		text.Split(",", toks, true);
@@ -2142,7 +2180,9 @@ class MUD_VoxelProbe
 			int cm = prev + tok.ToInt();
 			prev = cm;
 			float v = cm;
-			if (ridge)
+			if (which == 2)
+				tile.m_aWear[at] = v / 100.0;     // = WearPass' Math.Round(w * 100) / 100.0 (same float)
+			else if (which == 1)
 				tile.m_aRidge[at] = v / 100.0;     // = GrowRidges' Math.Round(y * 100) / 100.0 (same float)
 			else
 				tile.m_aFloor[at] = v / 100.0;     // = CarveFloor's Math.Round(y * 100) / 100.0 (same float)
@@ -2429,8 +2469,8 @@ class MUD_VoxelProbe
 					floorN++;
 				if (tile.m_aRidge[f] < FLOOR_NONE * 0.5)
 					ridgeN++;
-				// a sample counts once when its floor or its ridge (Build 3 Stage 3) differs
-				if (tile.m_aFloor[f] != bt.m_aFloor[f] || tile.m_aRidge[f] != bt.m_aRidge[f])
+				// a sample counts once when its floor, its ridge (Build 3 Stage 3) or its wear (WEAR COUNT) differs
+				if (tile.m_aFloor[f] != bt.m_aFloor[f] || tile.m_aRidge[f] != bt.m_aRidge[f] || tile.m_aWear[f] != bt.m_aWear[f])
 					bad++;
 			}
 		}
@@ -4927,6 +4967,8 @@ class MUD_VoxelProbe
 			float rw = 1;
 			if (RUT_RAMP)
 				rw = m_mRampW.Get(ck);    // > 0: set with every 'best'
+			if (WEAR_PASSES > 0 && WearPass(ftile, fbi, fbk, fn, rw))
+				continue;     // WEAR COUNT: grass not broken yet - this pass only counted
 			float capY = undug - op.m_fB * cf / rw;     // RUT_RAMP: the cap keeps the plain profile, only the cut fades
 			float cut = op.m_fDepth * cf / rw;
 			float left = RUT_SHARE * (surf - capY);     // R4: the first passes cut most, later ones less
@@ -4989,7 +5031,75 @@ class MUD_VoxelProbe
 		tC = System.GetTickCount();
 		if (OP_LOG)
 			Print(string.Format("MUD rut floor: %1 samples, %2 relaxed, %3 ridged, %4 carved cells, %5 ms", written, relaxed, ridged, m_aOpCarved.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+		s_iWearCut += written;
+		if (WEAR_PASSES > 0 && t0 - s_iWearLogAt >= 10000)
+		{
+			if (s_iWearAdd + s_iWearCut > 0)
+				Print(string.Format("MUD rut wear 10 s: %1 samples only worn (no cut), %2 samples cut | WEAR_PASSES %3", s_iWearAdd, s_iWearCut, WEAR_PASSES), LogLevel.NORMAL);
+			s_iWearAdd = 0;
+			s_iWearCut = 0;
+			s_iWearLogAt = t0;
+		}
 		m_iCLog = System.GetTickCount(tC);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! WEAR COUNT: sample fn of tile bi, bk (ftile may be null) has no rut floor and fewer than WEAR_PASSES passes ->
+	//! count this pass (weight rw), true = cut nothing there. Op content only (same on every machine, J2).
+	protected bool WearPass(MUD_RutTile ftile, int bi, int bk, int fn, float rw)
+	{
+		float wr = 0;
+		if (ftile)
+		{
+			if (ftile.m_aFloor[fn] < FLOOR_NONE * 0.5)
+				return false;     // already a rut: wear is over
+			wr = ftile.m_aWear[fn];
+		}
+		if (wr >= WEAR_PASSES - WEAR_TOL)
+			return false;
+		MUD_RutTile wt = ftile;
+		if (!wt)
+			wt = RutTileMake(bi, bk);
+		wt.m_aWear[fn] = Math.Round((wr + rw) * 100) / 100.0;     // J2: the same float as the snapshot's whole 0.01
+		int wv = Math.Round(wt.m_aWear[fn] * 100);
+		m_iDispHash = (m_iDispHash + ((wv + WEAR_SALT) * (fn + 1) + ColKey(bi, bk)) % DISP_HASH_M) % DISP_HASH_M;
+		s_iWearAdd++;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! WEAR COUNT: passes counted at global floor sample fi, fk (0 = none / no tile)
+	protected float WearSample(int fi, int fk)
+	{
+		int bi = FloorDiv(fi, FSUB);
+		int bk = FloorDiv(fk, FSUB);
+		MUD_RutTile tile = m_mRutTiles.Get(ColKey(bi, bk));
+		if (!tile)
+			return 0;
+		return tile.m_aWear[(fk - bk * FSUB) * FSUB + fi - bi * FSUB];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! WEAR COUNT (look ruts, trail rule): true = a pass at global fine vertex gx, gz would only count wear, not cut
+	//! (no rut floor there and fewer than WEAR_PASSES passes so far). False when wear is off or the field is off.
+	static bool WearOnly(int gx, int gz)
+	{
+		if (WEAR_PASSES <= 0 || !RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return false;
+		if (s_Inst.FloorSample(gx, gz) < FLOOR_NONE * 0.5)
+			return false;
+		return s_Inst.WearSample(gx, gz) < WEAR_PASSES - WEAR_TOL;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! WEAR COUNT (trail rule): passes counted at world x, z on the nearest floor sample (0 = none / field off)
+	static float WearAt(float x, float z)
+	{
+		if (WEAR_PASSES <= 0 || !RUT_FIELD || !DISPLACE_RUTS || !s_Inst)
+			return 0;
+		int gx = Math.Round((x - s_Inst.m_fX0) / FCELL);
+		int gz = Math.Round((z - s_Inst.m_fZ0) / FCELL);
+		return s_Inst.WearSample(gx, gz);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -5658,6 +5768,44 @@ class MUD_VoxelProbe
 			for (int i = 0; i < s_iFPNx; i++)
 				s_aFPTiles.Insert(s_Inst.m_mRutTiles.Get(ColKey(s_iFPBi0 + i, s_iFPBk0 + k)));
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PERF IDEA 3 (2026-10-19): FieldFloorP / FieldRidgeP of the n x n vertices from gx0, gz0 (inside the FieldPatchBegin
+	//! box) into fl / rg (index vz * n + vx, size >= n * n) in one call - no call per vertex. Same values (same tiles, same
+	//! index). FLOOR_NONE where no tile / field off; rg FLOOR_NONE when RUT_RIDGES is off. False = no tile at all.
+	static bool FieldPatchFill(int gx0, int gz0, int n, array<float> fl, array<float> rg)
+	{
+		int nn = n * n;
+		for (int c = 0; c < nn; c++)
+		{
+			fl[c] = FLOOR_NONE;
+			rg[c] = FLOOR_NONE;
+		}
+		if (!s_bFPOn)
+			return false;
+		bool any = false;
+		for (int vz = 0; vz < n; vz++)
+		{
+			int oz = gz0 + vz - s_iFPBk0 * FSUB;
+			int tk = oz / FSUB;
+			int row = (oz - tk * FSUB) * FSUB;
+			int tRow = tk * s_iFPNx;
+			for (int vx = 0; vx < n; vx++)
+			{
+				int ox = gx0 + vx - s_iFPBi0 * FSUB;
+				int ti = ox / FSUB;
+				MUD_RutTile tile = s_aFPTiles[tRow + ti];
+				if (!tile)
+					continue;
+				int at = row + ox - ti * FSUB;
+				fl[vz * n + vx] = tile.m_aFloor[at];
+				if (RUT_RIDGES)
+					rg[vz * n + vx] = tile.m_aRidge[at];
+				any = true;
+			}
+		}
+		return any;
 	}
 
 	//------------------------------------------------------------------------------------------------

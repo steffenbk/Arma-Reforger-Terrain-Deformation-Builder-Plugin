@@ -89,7 +89,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	// RUT FIELD: a field rut vertex shows the groove (soil) only this deep under the undug ground - v097's brick rule
 	// (MUD_VoxelProbe.DISP_SOIL_CUT under the seeded top, which is LIFT over the ground). The reveal's own 0.01 m
 	// (tuned for one-pass heightfield ruts) made the whole 1 m wide trough soil: ruts looked ~2x wider (user 2026-10-15)
-	static const float FIELD_SOIL_D = 0.03;
+	static const float FIELD_SOIL_D = 0.06;     // WEAR COUNT 2026-10-19 (v233 = before): pass 1 only wears (MUD_VoxelProbe.WEAR_PASSES 1), passes 2-3 cut 0.03 each = dirt on pass 3 as with 0.08 before (+ ragged noise up to RAG_D); was 0.08, 0.03
 	// RAGGED EDGE (2026-10-18, user: dirt pops in with no transition grass -> dirt): the groove reveal threshold gets
 	// world-fixed noise (same value every rebuild and on both sides of a patch seam), so a rut rim turns to dirt in
 	// broken patches instead of one clean line. Each vertex needs RevealDepth + n * RAG_D deeper (n 0..1) and the
@@ -153,7 +153,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	static const int IDX_SETS = 16;     // cached index layouts, MUD_IdxSet (~120-200 KB each)
 	static const int SLOT = 15;
 	static const bool RUT_MUD = true;   // Build 3 Stage 4: rut cells get m_RutMudMaterial on the grid collider (false = as before)
-	static const float RUT_MAT_D = 0.05;    // a 2 m skin cell is rut mud where a vertex's rut floor is this far under its base
+	static const float RUT_MAT_D = 0.06;    // WEAR COUNT 2026-10-19: = FIELD_SOIL_D, mud grip where the dirt shows (was 0.08, 0.05). a 2 m skin cell is rut mud where a vertex's rut floor is this far under its base
 	// MUD_FinePatch.m_iBuild: steps a patch made ahead still needs, one per frame (Fix B, 2026-10-09)
 	static const int BUILD_INDEX = 3;       // index lists (a cache miss is ~2.5 ms)
 	static const int BUILD_COLLIDER = 2;    // collider; the skin stays until it exists
@@ -734,9 +734,72 @@ class MUD_WorldGroundEntity : GenericEntity
 	// PAPER TEST 3 (2026-10-18, research/2026-10-18-mud-mesh-cost-research-findings.md item 2): a queued band collider
 	// rebuild is skipped while no vertex moved COL_SMALL_M or more and the last real build is < COL_SMALL_MAX_S old; the
 	// patch stays dirty, so it builds at the latest then. false = off (v204)
-	static const bool COL_SKIP_SMALL = false;    // false 2026-10-18 (quick win 2: 0-4 skips per 10 s on the DS 16:16 = no gain)
-	static const float COL_SMALL_M = 0.02;
+	static const bool COL_SKIP_SMALL = true;     // PERF IDEA 4 (user 2026-10-19, v232 = before): re-test with 3 cm wear passes; false 2026-10-18 (quick win 2: 0-4 skips per 10 s on the DS 16:16 = no gain)
+	static const float COL_SMALL_M = 0.035;    // PERF IDEA 4: one wear pass (RUT_PASS_MAX 0.03) waits up to COL_SMALL_MAX_S; was 0.02
 	static const float COL_SMALL_MAX_S = 1.0;
+	// PERF IDEA 2 (user 2026-10-19 'move on to idea 2', v234 = before; plan 2026-10-19-rut-wear-perf-plan.md): the same for a
+	// queued patch MESH rebuild (client: look ruts + real rut floor) - skipped while no vertex moved MESH_SMALL_M or more
+	// against the last built band mesh and that build is < MESH_SMALL_MAX_S old; the patch stays dirty (built then at the
+	// latest). A 3 cm wear pass then shows up to 0.5 s late; a first cut on a quiet patch builds at once. false = off.
+	static const bool MESH_SKIP_SMALL = true;
+	static const float MESH_SMALL_M = 0.035;
+	static const float MESH_SMALL_MAX_S = 0.5;
+	protected bool m_bMeshGate;         // true only around the rebuild queue's BuildMesh call
+	protected bool m_bMeshSkipped;      // that call skipped (MESH_SKIP_SMALL)
+	protected int m_iMeshSkipSmall;     // log: skips per 10 s ('MUD world: budget' line)
+	// PERF IDEA 3 (user 2026-10-19, v235 = before): the band mesh / collider input reads the rut floor, ridge and look floor
+	// of a patch in one fill call each (MUD_VoxelProbe.FieldPatchFill, MUD_LookRuts.PatchFill) and the press holder once,
+	// not 3-4 calls per vertex. BAND_FILL_CHECK (TEMP): every BAND_FILL_CHECK_EVERY-th fill also reads the old per-vertex
+	// way and counts differences ('MUD band fill check' in the band 10 s lines; must stay 0).
+	static const bool BAND_FILL_CHECK = false;
+	static const int BAND_FILL_CHECK_EVERY = 10;
+	// PERF B7 (user 2026-10-19, v237 = before; plans/2026-10-18-perf-plan.md B7): with voxel ruts on (MUD_VoxelProbe
+	// ENABLED + RUTS) no heightfield press happens (run 9: 'presses 0' on server and client), and the ahead hide only
+	// holds m_aH back (BuildMeshBand) - the voxel rut floor goes in after it, never hidden. So AheadView skips the
+	// per-wheel ArcHide and HoldHide then. ScrapeView keeps its own. false = old behaviour (A/B switch).
+	static const bool AHEAD_HIDE_SKIP = true;
+	// REBUILD 5 (user 2026-10-19, v240 = before): 5 cuts of the patch rebuild cost, each on its own switch (A/B on the DS);
+	// the 'MUD rebuild 5' 10 s line counts each. Option 4 + the bench need MESHER_FAST (BuildRef never merges).
+	static const bool RUT_PACE = true;               // 1: mesh dirt from the rut floor alone (no look dirt) rebuilds at
+	static const float RUT_MESH_EVERY = 0.25;        //    most every RUT_MESH_EVERY s (was m_fMeshInterval)
+	static const bool SAME_SKIP = true;              // 2: a queued band mesh whose input equals the shown mesh's is not rebuilt
+	static const bool PARTIAL_IN = true;             // 3: the queued band mesh input pass reads only the changed box
+	static const bool PARTIAL_CHECK = true;          //    TEMP: every PARTIAL_CHECK_EVERY-th partial pass also runs the full one, compares
+	static const int PARTIAL_CHECK_EVERY = 10;
+	static const bool COL_MERGE = true;              // 4: the collider draws flat untouched 2 x 2 quad blocks as one quad
+	static const float COL_MERGE_TOL = 0.01;         //    max off-plane (m) of a merged block's inner vertices
+	static const bool MESHER_FAST = true;            // 5: MUD_BandMesher.Build (false = BuildRef = the v240 mesher)
+	static const bool MESHER_BENCH = true;           //    TEMP: every MESHER_BENCH_EVERY-th band build runs both meshers, compares
+	static const int MESHER_BENCH_EVERY = 25;
+	static const int MESHER_BENCH_REPS = 3;
+	protected int m_iPaceHeldPF;     // 1: patch-frames the old pace would have built
+	protected int m_iPaceBuilds;     // 1: builds (or same skips) of a patch that was held
+	protected int m_iSameSkip;       // 2
+	protected int m_iPartN;          // 3: partial input passes
+	protected int m_iPartVerts;      // 3: vertices they read
+	protected int m_iPartMs;         // 3: input ms of those builds (fills included)
+	protected int m_iFullN;          // 3: full input passes (band mesh)
+	protected int m_iFullMs;
+	protected int m_iPartChecks;
+	protected int m_iPartBad;        // 3: vertices the partial pass got wrong (must be 0)
+	protected int m_iColMerged;      // 4: merged blocks over all band collider builds
+	protected int m_iColTrisN;       // 4: their collider tris
+	protected int m_iColMergeN;      // 4: band collider builds counted
+	protected int m_iBenchCnt;
+	protected int m_iBenchN;
+	protected int m_iBenchOld;       // 5: ms of BuildRef x reps
+	protected int m_iBenchNew;       // 5: ms of Build x reps
+	protected int m_iBenchDiff;      // 5: benches whose outputs differ (must be 0)
+	protected int m_iBenchMs;        // 5: whole bench ms (inside the rebuild ms - subtract)
+	protected float m_aChkY[1089];
+	protected float m_aChkD[1089];
+	protected int m_iProfAheadScan;     // TEMP prof split: Ahead's candidate scan ms this frame (MUD_Prof.A_SCAN)
+	protected ref array<float> m_aInFl = {};     // fill: floor (+ look) per patch vertex
+	protected ref array<float> m_aInRg = {};     // fill: ridge per patch vertex
+	protected int m_iFillN;
+	protected int m_iFillChecks;
+	protected int m_iFillBad;
+	protected int m_iFillCheckMs;
 	protected bool m_bColGate;          // true only around the rebuild queue's BuildCollider call
 	protected bool m_bQueueMesh;        // TEMP split delay meter: true only around the rebuild queue's BuildMesh call
 	protected int m_iColSkipSmall;      // log: skips per 10 s ('MUD world: budget' line)
@@ -973,6 +1036,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		GroundRescue();
 		if (MUD_TestKit.TEST_KIT)
 			MUD_JoltProbe.Tick(timeSlice, IsProxy(), this);    // test kit (2026-10-17, back from the archive): MP robot / snap probe
+		MUD_TestKit.BenchTick(timeSlice);    // sheet cost A4 (2026-10-19): 'MUD bench natives' once, 30 s in, clients
 		// MUD_Prof (TEMP 2026-10-18): each part's ms
 		int tP = System.GetTickCount();
 		MUD_VoxelProbe.Tick(m_fTime);    // TEMP probe 2026-10-12
@@ -995,12 +1059,21 @@ class MUD_WorldGroundEntity : GenericEntity
 			MUD_LookRuts.Tick(m_fTime, m_fRutStep, m_fRutBaseDepth, m_fRutDepthPerTon, m_fRutMaxDepth);   // client look ruts
 		MUD_Prof.Add(MUD_Prof.LOOK, System.GetTickCount(tP));
 		tP = System.GetTickCount();
+		int tAv = System.GetTickCount();
 		AheadView();
+		MUD_Prof.Add(MUD_Prof.A_VIEW, System.GetTickCount(tAv));
+		tAv = System.GetTickCount();
 		FloorSpreadTick();
+		MUD_Prof.Add(MUD_Prof.A_SPREAD, System.GetTickCount(tAv));
 		int tW = System.GetTickCount(t0);
 		// after the wheels every job checks the frame budget (Fix B: one new patch + a rebuild in one
 		// frame was 10-18 ms, measured 2026-10-09 14:12 Exp 192624)
+		tAv = System.GetTickCount();
+		m_iProfAheadScan = 0;
 		Ahead(t0);
+		int tAh = System.GetTickCount(tAv);
+		MUD_Prof.Add(MUD_Prof.A_SCAN, m_iProfAheadScan);
+		MUD_Prof.Add(MUD_Prof.A_BUILD, Math.Max(0, tAh - m_iProfAheadScan));
 		int tA = System.GetTickCount(t0);
 		MUD_Prof.Add(MUD_Prof.AHEAD, System.GetTickCount(tP));
 		tP = System.GetTickCount();
@@ -1890,7 +1963,10 @@ class MUD_WorldGroundEntity : GenericEntity
 					{
 						int v = lz * PVERTS + lx;
 						if (p.HideAt(v) >= since)
+						{
 							p.EnsurePress().m_aHideAt[v] = m_fTime;
+							p.m_fHideUntil = m_fTime + HIDE_HOLD;     // REBUILD 5 option 3
+						}
 					}
 				}
 			}
@@ -2520,6 +2596,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	{
 		if (!m_bAheadRuts || !m_bRender)
 			return;
+		bool hideOn = !AHEAD_HIDE_SKIP || !MUD_VoxelProbe.ENABLED || !MUD_VoxelProbe.RUTS;     // PERF B7
 		foreach (Vehicle veh : MUD_Wheels.GetAll())
 		{
 			if (!veh)
@@ -2557,8 +2634,12 @@ class MUD_WorldGroundEntity : GenericEntity
 					if (vector.Dot(flat * (1 / hs), hb.m_vKeepDir) > 0.5)
 						hb.m_fKeepUntil = -100;
 				}
-				if (m_fTime < hb.m_fKeepUntil)
+				if (hideOn && m_fTime < hb.m_fKeepUntil)
+				{
+					int tHh = System.GetTickCount();
 					HoldHide(hb);
+					MUD_Prof.Add(MUD_Prof.A_HIDE, System.GetTickCount(tHh));
+				}
 			}
 			if (stopped)
 				continue;
@@ -2586,7 +2667,12 @@ class MUD_WorldGroundEntity : GenericEntity
 				else
 					skipped++;
 				// to the far edge of the press (berm radius) + 0.5 m slack: client and server leads differ a little
-				ArcHide(cp, vp, yaw, revealFrom / hs, (lead + m_fBermRadius + 0.5) / hs, m_fBermRadius);
+				if (hideOn)
+				{
+					int tAc = System.GetTickCount();
+					ArcHide(cp, vp, yaw, revealFrom / hs, (lead + m_fBermRadius + 0.5) / hs, m_fBermRadius);
+					MUD_Prof.Add(MUD_Prof.A_HIDE, System.GetTickCount(tAc));
+				}
 				if (!m_bAheadDraw)
 					continue;
 				int col = ARGB(255, 0, 255, 0);
@@ -2735,6 +2821,7 @@ class MUD_WorldGroundEntity : GenericEntity
 						if (Math.AbsFloat(rx * dz - rz * dx) > rr)
 							continue;
 						p.EnsurePress().m_aHideAt[lz * PVERTS + lx] = m_fTime;
+						p.m_fHideUntil = m_fTime + HIDE_HOLD;     // REBUILD 5 option 3: no partial pass while hidden
 					}
 				}
 			}
@@ -3444,6 +3531,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				else
 				{
 					p.m_bMeshDirty = true;
+					p.m_bMBoxAll = true;     // REBUILD 5 option 3: whole-patch change
+					p.m_bRutMesh = false;
 					if (!p.m_bQueued)
 					{
 						p.m_bQueued = true;
@@ -3525,6 +3614,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				else if (m_bRender)
 				{
 					p.m_bMeshDirty = true;
+					p.m_bMBoxAll = true;     // REBUILD 5 option 3: whole-patch change
+					p.m_bRutMesh = false;
 				}
 				if (!p.m_bQueued)
 				{
@@ -3834,6 +3925,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	//------------------------------------------------------------------------------------------------
 	protected void Ahead(int t0)
 	{
+		int tScan = System.GetTickCount();     // TEMP prof split (MUD_Prof.A_SCAN)
 		array<int> candKey = {};
 		array<float> candDist = {};
 		float size = PCELLS * m_fFine;
@@ -3901,6 +3993,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		NearPlayers(candKey, candDist);
 		FarDue(candKey, candDist);
 		FieldDue(candKey, candDist);
+		m_iProfAheadScan = System.GetTickCount(tScan);
 
 		if (m_iBuildKey < 0 && candKey.IsEmpty())
 			return;
@@ -4275,6 +4368,24 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 3: a look sample dropped with no rebuild (MUD_LookRuts CATCH: up to 2 cm) still changes the
+	//! mesh input there - grow the changed box of the patches holding [gx0..gx1] x [gz0..gz1], no dirt
+	static void LookBox(int gx0, int gx1, int gz0, int gz1)
+	{
+		if (!s_Inst || !s_Inst.m_bReady || !s_Inst.m_bRender)
+			return;
+		for (int pz = s_Inst.PatchLo(gz0, s_Inst.m_iNPZ); pz <= s_Inst.PatchHi(gz1, s_Inst.m_iNPZ); pz++)
+		{
+			for (int px = s_Inst.PatchLo(gx0, s_Inst.m_iNPX); px <= s_Inst.PatchHi(gx1, s_Inst.m_iNPX); px++)
+			{
+				MUD_FinePatch p = s_Inst.m_mPatches.Get(pz * s_Inst.m_iNPX + px);
+				if (p)
+					s_Inst.MeshBoxG(p, gx0, gx1, gz0, gz1);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Client look ruts (MUD_LookRuts): mesh-only dirt on the patches holding global fine vertices [gx0..gx1] x
 	//! [gz0..gz1] - no collider, no net, no new patches; builds past the floor settle hold (Rebuild). Patches marked.
 	//! since / speed: TEMP delay meter (m_fTime the cut's oldest segment's wheel passed, its vehicle speed); -1 = not timed
@@ -4320,6 +4431,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				}
 				p.m_bMeshDirty = true;
 				p.m_bLookDirty = true;
+				MeshBoxG(p, gx0, gx1, gz0, gz1);     // REBUILD 5 option 3
 				if (since >= 0 && (p.m_fLookSince < 0 || since < p.m_fLookSince))
 				{
 					p.m_fLookSince = since;     // TEMP delay meter
@@ -4361,7 +4473,12 @@ class MUD_WorldGroundEntity : GenericEntity
 					p.m_fFloorDirtAt = m_fTime;
 				}
 				if (m_bRender && !keepMesh)     // LOOK_COVERS: the look floor already shows it
+				{
+					if (!p.m_bMeshDirty)
+						p.m_bRutMesh = true;     // REBUILD 5 option 1: only rut floor dirt so far
 					p.m_bMeshDirty = true;
+				}
+				MeshBoxG(p, gx0, gx1, gz0, gz1);     // REBUILD 5 option 3 (keepMesh too: the next build reads it)
 				p.m_bColDirty = true;
 				if (!p.m_bQueued)
 				{
@@ -4408,7 +4525,10 @@ class MUD_WorldGroundEntity : GenericEntity
 				int oz = pz * PCELLS;
 				bool own = gx1 >= ox && gx0 <= ox + PCELLS && gz1 >= oz && gz0 <= oz + PCELLS;
 				if (own && m_bRender)
+				{
 					p.m_bMeshDirty = true;
+					p.m_bRutMesh = false;     // REBUILD 5 option 1: height dirt - normal pace
+				}
 				p.m_bColDirty = true;
 				p.m_bFloorWait = false;     // real dirt: build at today's pace (FLOOR_SETTLE)
 				if (!p.m_bQueued)
@@ -4422,6 +4542,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				int sx1 = Math.ClampInt(gx1 + r - ox, 0, PCELLS);
 				int sz0 = Math.ClampInt(gz0 - r - oz, 0, PCELLS);
 				int sz1 = Math.ClampInt(gz1 + r - oz, 0, PCELLS);
+				MeshBoxL(p, sx0, sx1, sz0, sz1);     // REBUILD 5 option 3: m_aH + m_aSmooth (ridge flat test) of the reach
 				if (p.m_iSx0 < 0)
 				{
 					p.m_iSx0 = sx0;
@@ -4614,7 +4735,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (!quiet && !waitedOut)
 				{
 					// client look ruts: the MESH may build now (look floor shows), the collider keeps waiting
-					if (p.m_bLookDirty && m_bRender && p.m_bMeshDirty && !sheetHeld && m_fTime - p.m_fMeshAt >= LOOK_MESH_EVERY && (!mp || p.m_fMeshAt < mp.m_fMeshAt))
+					if (p.m_bLookDirty && m_bRender && p.m_bMeshDirty && !sheetHeld && m_fTime - p.m_fMeshAt >= LOOK_MESH_EVERY && m_fTime >= p.m_fMeshHoldTo && (!mp || p.m_fMeshAt < mp.m_fMeshAt))
 						mp = p;
 					if (lk && !sheetHeld)
 					{
@@ -4635,8 +4756,18 @@ class MUD_WorldGroundEntity : GenericEntity
 			float meshEvery = m_fMeshInterval;
 			if (p.m_bLookDirty && !p.m_bColDirty)
 				meshEvery = Math.Max(m_fMeshInterval, LOOK_MESH_EVERY);     // L2: look-only dirt
-			if (m_bRender && p.m_bMeshDirty && !sheetHeld && m_fTime - p.m_fMeshAt >= meshEvery && (!mp || p.m_fMeshAt < mp.m_fMeshAt) && !RenderWait(p))
-				mp = p;
+			if (RUT_PACE && p.m_bRutMesh && !p.m_bLookDirty && RUT_MESH_EVERY > meshEvery)
+			{
+				// REBUILD 5 option 1: rut floor dirt alone - slower pace (debug: held = the old pace would build now)
+				if (m_bRender && p.m_bMeshDirty && m_fTime - p.m_fMeshAt >= meshEvery && m_fTime - p.m_fMeshAt < RUT_MESH_EVERY)
+				{
+					m_iPaceHeldPF++;
+					p.m_bPaceHeld = true;
+				}
+				meshEvery = RUT_MESH_EVERY;
+			}
+			if (m_bRender && p.m_bMeshDirty && !sheetHeld && m_fTime - p.m_fMeshAt >= meshEvery && m_fTime >= p.m_fMeshHoldTo && (!mp || p.m_fMeshAt < mp.m_fMeshAt) && !RenderWait(p))
+				mp = p;     // PERF IDEA 2 fix: a skipped patch waits for m_fMeshHoldTo (one skip per window, not one per 0.25 s)
 			if (lk && !sheetHeld)
 			{
 				if (m_fTime - p.m_fMeshAt < meshEvery)
@@ -4679,8 +4810,13 @@ class MUD_WorldGroundEntity : GenericEntity
 					float lookSince = mp.m_fLookSince;     // TEMP delay meter
 					float lookSpeed = mp.m_fLookSpeed;
 					m_bQueueMesh = true;     // TEMP split delay meter: this build came from the queue
+					m_bMeshGate = true;
+					m_bMeshSkipped = false;
 					BuildMesh(mp);
+					m_bMeshGate = false;
 					m_bQueueMesh = false;
+					if (m_bMeshSkipped)
+						lookMesh = false;     // PERF IDEA 2: nothing built - no look mesh / delay sample
 					if (lookMesh)
 						MUD_LookRuts.NoteMesh(System.GetTickCount(tm));     // look ruts 10 s line: client rebuild cost
 					if (lookMesh && lookSince >= 0)
@@ -6215,6 +6351,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	{
 		if (p.m_iSx0 < 0)
 			return;
+		MeshBoxL(p, p.m_iSx0, p.m_iSx1, p.m_iSz0, p.m_iSz1);     // REBUILD 5 option 3: m_aSmooth feeds the mesh ridge test
 		UpdateSmooth(p, p.m_iSx0, p.m_iSx1, p.m_iSz0, p.m_iSz1);
 		p.m_iSx0 = -1;
 	}
@@ -6682,6 +6819,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				Print(string.Format("MUD world: groove material '%1' did not load - groove layer off", m_RutMaterial), LogLevel.ERROR);
 				m_bGroove = false;
 				p.m_bMeshDirty = true;
+				p.m_fMeshBuiltAt = -100;     // REBUILD 5: the groove layer goes off - no same skip against the old mesh
 				return;
 			}
 		}
@@ -6720,6 +6858,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		p.m_bLookDirty = false;
 		p.m_fLookSince = -1;     // TEMP delay meter
 		m_iMeshBuilds++;
+		p.m_fMeshBuiltAt = -100;     // PERF IDEA 2: m_aMeshY is not this mesh
 		int gridMs = System.GetTickCount(t0);
 		m_iMeshMs += gridMs;
 		m_iGridMeshN++;
@@ -6746,6 +6885,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		}
 		float side = PCELLS * m_fFine;
 		p.m_MeshRes = MUD_BoundsMesh.Make(p.m_Ent, Vector(0, yLo - 30, 0), Vector(side, yHi + 5, side), m_Material);
+		p.m_fMeshBuiltAt = -100;     // REBUILD 5: not a band mesh - no skip / partial pass against it
 		if (!p.m_MeshRes)
 			Print(string.Format("MUD world: bounds mesh failed - material '%1'", m_Material), LogLevel.ERROR);
 	}
@@ -7065,7 +7205,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		int t0 = System.GetTickCount();
 		if (!m_Band)
 			m_Band = new MUD_BandMesher();
-		bool hideOwed = false;
+		m_Band.m_bMerge = false;     // REBUILD 5 option 4: the drawn mesh never merges (collider only)
 		int csIn = System.GetTickCount();
 		// RUT FIELD: the rut floor goes into the mesher INPUTS (d = min(m_aH, floor - base)), never into m_aH;
 		// the groove reveal then works for field ruts too. m_aShow keeps the m_aH value (no floor): ahead-rut hold.
@@ -7076,57 +7216,78 @@ class MUD_WorldGroundEntity : GenericEntity
 			rfOn = MUD_LookRuts.InBox(rfX0, rfX0 + PCELLS, rfZ0, rfZ0 + PCELLS);     // client look ruts (mesh only)
 		bool bLift = LiftSetup(p);     // SPARSE SHEET A2, as BuildMesh
 		if (rfOn)
-			MUD_LookRuts.PatchBegin(rfX0, rfZ0, PVERTS - 1);     // perf plan B2: tiles once per patch
-		for (int v = 0; v < PVERTS * PVERTS; v++)
 		{
-			float d = p.m_aH[v];
-			if (m_bAheadRuts && m_fTime - p.HideAt(v) < HIDE_HOLD)
-			{
-				if (Math.AbsFloat(d - p.Show(v)) > 0.0005)
-					hideOwed = true;
-				d = p.Show(v);
-			}
-			p.SetShow(v, d);      // = BuildMesh: a hidden vertex keeps its m_aShow, the rest show m_aH
-			float rfD = d;         // groove reveal input (m_aD): a field rut shows soil only from FIELD_SOIL_D deep
-			if (rfOn)
-			{
-				int rfVx = v % PVERTS;
-				int rfVz = v / PVERTS;
-				float rfF = MUD_LookRuts.MeshFloorP(rfX0 + rfVx, rfZ0 + rfVz) - p.m_aBase[v];     // + client look ruts
-				if (rfF < 0)
-					rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
-				if (rfF < d)
-				{
-					d = rfF;
-					float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
-					if (rfS < rfD)
-						rfD = rfS;
-				}
-				// Build 3 Stage 3: the ridge on top, as BuildMesh
-				if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
-				{
-					float rgF = MUD_VoxelProbe.FieldRidgeP(rfX0 + rfVx, rfZ0 + rfVz);
-					if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
-					{
-						float rgD = (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
-						if (rgD > d)
-							d = rgD;
-					}
-				}
-			}
-			m_Band.m_aD[v] = rfD;
-			m_Band.m_aY[v] = p.m_aBase[v] + d;
-			if (bLift)
-				m_Band.m_aY[v] = m_Band.m_aY[v] + LiftAt(p, v);
+			MUD_LookRuts.PatchBegin(rfX0, rfZ0, PVERTS - 1);     // perf plan B2: tiles once per patch
+			BandFill(rfX0, rfZ0, true);     // PERF IDEA 3: floor + look + ridge of every vertex, one call
 		}
-		FillBandOn(p);
-		m_iCsMeshIn += System.GetTickCount(csIn);
-		int tc = System.GetTickCount();
+		// REBUILD 5 option 3: the kept input of the shown mesh + only the box marked since (PartialOk); else every vertex
+		bool part = PartialOk(p, rfOn, bLift);
+		int bx0 = 0;
+		int bx1 = PCELLS;
+		int bz0 = 0;
+		int bz1 = PCELLS;
+		if (part)
+		{
+			for (int k = 0; k < PVERTS * PVERTS; k++)
+			{
+				m_Band.m_aY[k] = p.m_aMeshY[k];
+				m_Band.m_aD[k] = p.m_aMeshD[k];
+			}
+			bx1 = -1;     // no box marked: nothing to read (the same skip then catches it)
+			bz1 = -1;
+			if (p.m_iMBx0 >= 0)
+			{
+				bx0 = p.m_iMBx0;
+				bx1 = p.m_iMBx1;
+				bz0 = p.m_iMBz0;
+				bz1 = p.m_iMBz1;
+			}
+		}
+		bool hideOwed = BandMeshIn(p, rfOn, bLift, bx0, bx1, bz0, bz1);
+		if (part)
+		{
+			m_iPartN++;
+			m_iPartVerts += (bx1 - bx0 + 1) * (bz1 - bz0 + 1);
+			PartCheck(p, rfOn, bLift);
+		}
+		else
+		{
+			m_iFullN++;
+		}
+		FillBandOn(p);     // before the skips: MeshSame / KeepMeshY read m_aSkin
+		int inMs = System.GetTickCount(csIn);
+		m_iCsMeshIn += inMs;
+		if (part)
+			m_iPartMs += inMs;
+		else
+			m_iFullMs += inMs;
+		if (SAME_SKIP && m_bMeshGate && MeshSame(p))
+		{
+			// REBUILD 5 option 2: same input = same mesh (RevealT, UVs: from D and position only) - the shown one stays
+			m_iSameSkip++;
+			m_bMeshSkipped = true;
+			p.m_bMeshDirty = hideOwed;
+			p.m_fLookCutAt = -1;
+			p.m_bLookDirty = false;
+			p.m_fLookSince = -1;
+			MeshDone(p, hideOwed, rfOn);
+			return true;
+		}
+		if (m_bMeshGate && MESH_SKIP_SMALL && MeshSmall(p))
+		{
+			m_iMeshSkipSmall++;
+			m_bMeshSkipped = true;
+			p.m_fMeshHoldTo = p.m_fMeshBuiltAt + MESH_SMALL_MAX_S;     // fix (run 8): the input pass is ~1.2 ms - retry once, at the window end
+			return true;     // PERF IDEA 2: old mesh kept, m_bMeshDirty / m_bLookDirty stay - built on a later pass
+		}
+		KeepMeshY(p);
 		// SKIRT DEPTH (2026-10-18, user: see-through gaps while driving): a look rut drawn on one patch before its
 		// neighbour opens a crack at the seam as deep as the rut (up to Rut Max Depth 0.35) + the groove sink
 		// (Reveal Gap x 3); the 0.3 m skirt was too short for a heavy truck. Same tri count, so no extra cost.
 		float skirt = Math.Max(m_fBandSkirt, m_fRutMaxDepth + m_fRevealGap * 3 + 0.1);
-		bool ok = m_Band.Build(m_fFine, skirt);
+		t0 += BandBench(skirt);     // REBUILD 5 option 5 TEMP bench: not in this build's ms
+		int tc = System.GetTickCount();
+		bool ok = BandCore(skirt);
 		m_iBandCoreMs += System.GetTickCount(tc);
 		m_iCsMeshCore += System.GetTickCount(tc);
 		int csUv = System.GetTickCount();
@@ -7195,6 +7356,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				Print(string.Format("MUD world: groove material '%1' did not load - groove layer off", m_RutMaterial), LogLevel.ERROR);
 				m_bGroove = false;
 				p.m_bMeshDirty = true;
+				p.m_fMeshBuiltAt = -100;     // REBUILD 5: the kept input (KeepMeshY) is not the shown mesh
 				return true;
 			}
 		}
@@ -7231,6 +7393,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		p.m_fLookCutAt = -1;
 		p.m_bLookDirty = false;
 		p.m_fLookSince = -1;     // TEMP delay meter
+		p.m_fMeshBuiltAt = m_fTime;     // PERF IDEA 2: m_aMeshY (KeepMeshY above) is this mesh
+		MeshDone(p, hideOwed, rfOn);     // REBUILD 5
 		m_iMeshBuilds++;
 		int ms = System.GetTickCount(t0);
 		m_iMeshMs += ms;
@@ -7240,6 +7404,280 @@ class MUD_WorldGroundEntity : GenericEntity
 			m_iBandMeshWorst = ms;
 		BandCount();
 		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! BuildMeshBand's input pass over patch-local vertex rows z0..z1, columns x0..x1 (full = 0..PCELLS, the same order
+	//! as before REBUILD 5): m_Band.m_aY / m_aD there, after BandFill. True = a hidden change is owed (ahead ruts).
+	protected bool BandMeshIn(MUD_FinePatch p, bool rfOn, bool bLift, int x0, int x1, int z0, int z1)
+	{
+		bool hideOwed = false;
+		MUD_PatchPress pr = p.m_Press;     // PERF IDEA 3: HideAt / Show / SetShow inlined (null = their defaults)
+		for (int vz = z0; vz <= z1; vz++)
+		{
+			for (int vx = x0; vx <= x1; vx++)
+			{
+				int v = vz * PVERTS + vx;
+				float d = p.m_aH[v];
+				if (m_bAheadRuts && pr && m_fTime - pr.m_aHideAt[v] < HIDE_HOLD)     // no holder: HideAt -100 = never
+				{
+					if (Math.AbsFloat(d - pr.m_aShow[v]) > 0.0005)
+						hideOwed = true;
+					d = pr.m_aShow[v];
+				}
+				// = SetShow: a hidden vertex keeps its m_aShow, the rest show m_aH; the holder is made only for a non-0
+				if (pr)
+					pr.m_aShow[v] = d;
+				else if (d != 0)
+				{
+					pr = p.EnsurePress();
+					pr.m_aShow[v] = d;
+				}
+				float rfD = d;         // groove reveal input (m_aD): a field rut shows soil only from FIELD_SOIL_D deep
+				if (rfOn)
+				{
+					float rfF = m_aInFl[v] - p.m_aBase[v];     // + client look ruts (BandFill)
+					if (rfF < 0)
+						rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+					if (rfF < d)
+					{
+						d = rfF;
+						float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
+						if (rfS < rfD)
+							rfD = rfS;
+					}
+					// Build 3 Stage 3: the ridge on top, as BuildMesh
+					if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
+					{
+						float rgF = m_aInRg[v];     // PERF IDEA 3 (BandFill)
+						if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
+						{
+							float rgD = (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
+							if (rgD > d)
+								d = rgD;
+						}
+					}
+				}
+				m_Band.m_aD[v] = rfD;
+				m_Band.m_aY[v] = p.m_aBase[v] + d;
+				if (bLift)
+					m_Band.m_aY[v] = m_Band.m_aY[v] + LiftAt(p, v);
+			}
+		}
+		return hideOwed;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 3: true = this queued band mesh may read only p's changed box - the kept input (m_aMeshY / D)
+	//! is the shown mesh's, every change since has a box, nothing is hidden or owed, the same rut floor / look switch
+	protected bool PartialOk(MUD_FinePatch p, bool rfOn, bool bLift)
+	{
+		if (!PARTIAL_IN || !m_bMeshGate || bLift || p.m_bMBoxAll || p.m_bLastHideOwed || p.m_iBuild != 0)
+			return false;
+		if (!p.m_aMeshY || !p.m_aMeshD || !p.m_aMeshSkin || !p.m_MeshRes || p.m_fMeshBuiltAt < -50)
+			return false;
+		if (rfOn != p.m_bLastRfOn || m_fTime < p.m_fHideUntil)
+			return false;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 3 TEMP: every PARTIAL_CHECK_EVERY-th partial pass runs the full pass on top (its result is used)
+	//! and counts the vertices the partial one got wrong ('MUD rebuild 5' bad, must be 0)
+	protected void PartCheck(MUD_FinePatch p, bool rfOn, bool bLift)
+	{
+		if (!PARTIAL_CHECK)
+			return;
+		int nth = m_iPartN % PARTIAL_CHECK_EVERY;
+		if (nth != 0)
+			return;
+		int nn = PVERTS * PVERTS;
+		for (int c = 0; c < nn; c++)
+		{
+			m_aChkY[c] = m_Band.m_aY[c];
+			m_aChkD[c] = m_Band.m_aD[c];
+		}
+		BandMeshIn(p, rfOn, bLift, 0, PCELLS, 0, PCELLS);
+		m_iPartChecks++;
+		for (int k = 0; k < nn; k++)
+		{
+			if (m_aChkY[k] != m_Band.m_aY[k] || m_aChkD[k] != m_Band.m_aD[k])
+				m_iPartBad++;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 2: true = m_Band's input (Y, D, skin) equals the kept input of p's shown band mesh exactly
+	protected bool MeshSame(MUD_FinePatch p)
+	{
+		if (!p.m_aMeshY || !p.m_aMeshD || !p.m_aMeshSkin || !p.m_MeshRes || p.m_iBuild != 0 || p.m_fMeshBuiltAt < -50)
+			return false;
+		for (int c = 0; c < SKIN * SKIN; c++)
+		{
+			if (m_Band.m_aSkin[c] != p.m_aMeshSkin[c])
+				return false;
+		}
+		for (int v = 0; v < PVERTS * PVERTS; v++)
+		{
+			if (m_Band.m_aY[v] != p.m_aMeshY[v] || m_Band.m_aD[v] != p.m_aMeshD[v])
+				return false;
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5: p's band mesh is now its kept input (built or same skip) - box, owed, rut pace reset
+	protected void MeshDone(MUD_FinePatch p, bool owed, bool rfOn)
+	{
+		p.m_iMBx0 = -1;
+		p.m_bMBoxAll = false;
+		p.m_bLastHideOwed = owed;
+		p.m_bLastRfOn = rfOn;
+		p.m_bRutMesh = false;
+		if (p.m_bPaceHeld)
+			m_iPaceBuilds++;
+		p.m_bPaceHeld = false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 3: grow p's changed box by patch-local vertices x0..x1, z0..z1
+	protected void MeshBoxL(MUD_FinePatch p, int x0, int x1, int z0, int z1)
+	{
+		if (p.m_iMBx0 < 0)
+		{
+			p.m_iMBx0 = x0;
+			p.m_iMBx1 = x1;
+			p.m_iMBz0 = z0;
+			p.m_iMBz1 = z1;
+			return;
+		}
+		p.m_iMBx0 = Math.Min(p.m_iMBx0, x0);
+		p.m_iMBx1 = Math.Max(p.m_iMBx1, x1);
+		p.m_iMBz0 = Math.Min(p.m_iMBz0, z0);
+		p.m_iMBz1 = Math.Max(p.m_iMBz1, z1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 3: MeshBoxL from global fine vertex coords (clamped to p)
+	protected void MeshBoxG(MUD_FinePatch p, int gx0, int gx1, int gz0, int gz1)
+	{
+		int ox = p.m_iPx * PCELLS;
+		int oz = p.m_iPz * PCELLS;
+		MeshBoxL(p, Math.ClampInt(gx0 - ox, 0, PCELLS), Math.ClampInt(gx1 - ox, 0, PCELLS), Math.ClampInt(gz0 - oz, 0, PCELLS), Math.ClampInt(gz1 - oz, 0, PCELLS));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 5: the band mesher, new (Build) or v240 (BuildRef) by MESHER_FAST
+	protected bool BandCore(float skirt)
+	{
+		if (MESHER_FAST)
+			return m_Band.Build(m_fFine, skirt);
+		m_Band.m_iMerged = 0;     // BuildRef never merges (and does not reset it)
+		return m_Band.BuildRef(m_fFine, skirt);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! REBUILD 5 option 5 TEMP: every MESHER_BENCH_EVERY-th band build, BuildRef x reps vs Build x reps on this input
+	//! (MUD_BandMesher.Bench; the real build runs after it). Returns the bench ms (the caller keeps it out of its build ms).
+	protected int BandBench(float skirt)
+	{
+		if (!MESHER_BENCH || !MESHER_FAST)
+			return 0;
+		m_iBenchCnt++;
+		int nth = m_iBenchCnt % MESHER_BENCH_EVERY;
+		if (nth != 0)
+			return 0;
+		int tb = System.GetTickCount();
+		int oldMs;
+		int newMs;
+		bool same = m_Band.Bench(m_fFine, skirt, MESHER_BENCH_REPS, oldMs, newMs);
+		m_iBenchN++;
+		m_iBenchOld += oldMs;
+		m_iBenchNew += newMs;
+		if (!same)
+			m_iBenchDiff++;
+		int ms = System.GetTickCount(tb);
+		m_iBenchMs += ms;
+		return ms;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PERF IDEA 3: m_aInFl / m_aInRg for the patch at global vertex gx0, gz0 (after FieldPatchBegin, and PatchBegin when
+	//! look): the floor (look = + the client look floor, MeshFloorP) and ridge of every vertex. BAND_FILL_CHECK: every
+	//! BAND_FILL_CHECK_EVERY-th fill compares with the per-vertex readers it replaces.
+	protected void BandFill(int gx0, int gz0, bool look)
+	{
+		if (m_aInFl.Count() != PVERTS * PVERTS)
+		{
+			m_aInFl.Resize(PVERTS * PVERTS);
+			m_aInRg.Resize(PVERTS * PVERTS);
+		}
+		MUD_VoxelProbe.FieldPatchFill(gx0, gz0, PVERTS, m_aInFl, m_aInRg);
+		if (look)
+			MUD_LookRuts.PatchFill(gx0, gz0, PVERTS, m_aInFl);
+		m_iFillN++;
+		if (!BAND_FILL_CHECK || m_iFillN % BAND_FILL_CHECK_EVERY != 0)
+			return;
+		int tk = System.GetTickCount();
+		m_iFillChecks++;
+		for (int vz = 0; vz < PVERTS; vz++)
+		{
+			for (int vx = 0; vx < PVERTS; vx++)
+			{
+				int v = vz * PVERTS + vx;
+				float fl = MUD_VoxelProbe.FieldFloorP(gx0 + vx, gz0 + vz);
+				if (look)
+					fl = MUD_LookRuts.MeshFloorP(gx0 + vx, gz0 + vz);
+				if (fl != m_aInFl[v] || MUD_VoxelProbe.FieldRidgeP(gx0 + vx, gz0 + vz) != m_aInRg[v])
+					m_iFillBad++;
+			}
+		}
+		m_iFillCheckMs += System.GetTickCount(tk);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PERF IDEA 2: true = the band input (m_Band.m_aY) is within MESH_SMALL_M of p's last built band mesh everywhere
+	//! and that build is < MESH_SMALL_MAX_S old (live patch only) - the rebuild can wait
+	protected bool MeshSmall(MUD_FinePatch p)
+	{
+		if (!p.m_aMeshY || !p.m_MeshRes || p.m_iBuild != 0 || m_fTime - p.m_fMeshBuiltAt >= MESH_SMALL_MAX_S)
+			return false;
+		for (int v = 0; v < PVERTS * PVERTS; v++)
+		{
+			if (Math.AbsFloat(m_Band.m_aY[v] - p.m_aMeshY[v]) >= MESH_SMALL_M)
+				return false;
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PERF IDEA 2: m_Band.m_aY (this band mesh's input) into p.m_aMeshY; m_fMeshBuiltAt is set once the mesh is made
+	protected void KeepMeshY(MUD_FinePatch p)
+	{
+		if (!MESH_SKIP_SMALL && !SAME_SKIP && !PARTIAL_IN)
+			return;
+		if (!p.m_aMeshY)
+		{
+			p.m_aMeshY = new array<float>();
+			p.m_aMeshY.Resize(PVERTS * PVERTS);
+		}
+		if (!p.m_aMeshD)
+		{
+			p.m_aMeshD = new array<float>();     // REBUILD 5: + D and skin (same skip, partial pass)
+			p.m_aMeshD.Resize(PVERTS * PVERTS);
+		}
+		if (!p.m_aMeshSkin)
+		{
+			p.m_aMeshSkin = new array<int>();
+			p.m_aMeshSkin.Resize(SKIN * SKIN);
+		}
+		for (int v = 0; v < PVERTS * PVERTS; v++)
+		{
+			p.m_aMeshY[v] = m_Band.m_aY[v];
+			p.m_aMeshD[v] = m_Band.m_aD[v];
+		}
+		for (int c = 0; c < SKIN * SKIN; c++)
+			p.m_aMeshSkin[c] = m_Band.m_aSkin[c];
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -7264,7 +7702,10 @@ class MUD_WorldGroundEntity : GenericEntity
 		bool rutMud = rfOn && RUT_MUD && !m_RutMudMaterial.IsEmpty();
 		int mudMask;     // Build 3 Stage 4: bit per skin cell (cz * SKIN + cx) that is rut mud
 		if (rfOn)
+		{
 			MUD_VoxelProbe.FieldPatchBegin(rfX0, rfZ0, PVERTS - 1);     // perf plan B2: tiles once per patch
+			BandFill(rfX0, rfZ0, false);     // PERF IDEA 3: floor + ridge of every vertex, one call
+		}
 		for (int vz = 0; vz < PVERTS; vz++)
 		{
 			for (int vx = 0; vx < PVERTS; vx++)
@@ -7273,7 +7714,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				float y = p.m_aBase[v] + p.m_aSmooth[v];
 				if (rfOn)
 				{
-					float rfF = MUD_VoxelProbe.FieldFloorP(rfX0 + vx, rfZ0 + vz);
+					float rfF = m_aInFl[v];     // PERF IDEA 3 (BandFill)
 					if (rfF < p.m_aBase[v])
 						rfF = p.m_aBase[v] + (rfF - p.m_aBase[v]) * p.m_aEdgeLock[v];     // edge lock, as the mesh
 					if (rfF < y)
@@ -7284,7 +7725,7 @@ class MUD_WorldGroundEntity : GenericEntity
 					// Build 3 Stage 3: the ridge on top, as the mesh
 					if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
 					{
-						float rgF = MUD_VoxelProbe.FieldRidgeP(rfX0 + vx, rfZ0 + vz);
+						float rgF = m_aInRg[v];     // PERF IDEA 3 (BandFill)
 						if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
 						{
 							rgF = p.m_aBase[v] + (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
@@ -7302,6 +7743,10 @@ class MUD_WorldGroundEntity : GenericEntity
 					moved = true;
 				if (hadBody)
 					colDiff = Math.Max(colDiff, Math.AbsFloat(y - p.m_aColH[v]));
+				if (y != p.m_aBase[v] + p.m_aSmooth[v])
+					m_Band.m_aTouch[v] = 1;     // REBUILD 5 option 4: rut / ridge / hold - never merged
+				else
+					m_Band.m_aTouch[v] = 0;
 				m_Band.m_aY[v] = y;
 				m_Band.m_aD[v] = 0;
 				m_Buf.m_aPlate[v] = Vector(vx * m_fFine, p.m_aBase[v] + p.m_aFloor[v] - m_fPlateGap, vz * m_fFine);
@@ -7314,8 +7759,11 @@ class MUD_WorldGroundEntity : GenericEntity
 		}
 		FillBandOn(p);
 		m_iCsColIn += System.GetTickCount(csIn);
+		m_Band.m_bMerge = COL_MERGE;     // REBUILD 5 option 4 (needs MESHER_FAST)
+		m_Band.m_fMergeTol = COL_MERGE_TOL;
+		t0 += BandBench(0);     // REBUILD 5 option 5 TEMP bench: not in this build's ms
 		int tc = System.GetTickCount();
-		bool ok = m_Band.Build(m_fFine, 0);
+		bool ok = BandCore(0);
 		m_iBandCoreMs += System.GetTickCount(tc);
 		m_iCsColCore += System.GetTickCount(tc);
 		if (!ok)
@@ -7324,6 +7772,9 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iBandFallback++;     // else: no on cell (all kept terrain) - the grid collapses it the same way
 			return false;
 		}
+		m_iColMerged += m_Band.m_iMerged;     // REBUILD 5 option 4
+		m_iColTrisN += m_Band.m_iI / 3;
+		m_iColMergeN++;
 		for (int vc = 0; vc < PVERTS * PVERTS; vc++)
 			p.m_aColH[vc] = m_Band.m_aY[vc];
 
@@ -7537,7 +7988,40 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iBandColMs - m_iCsColIn - m_iCsColCore - m_iCsColGeom - m_iCsColDrop - m_iCsColStatic, m_iBandColMs));
 			Print(string.Format("MUD band: grid path - mesh %1 builds, mean %2 ms, worst %3 | collider %4, mean %5 ms, worst %6 | band fast verts mean %7, fast quads mean %8",
 				m_iGridMeshN, gMeshMean, m_iGridMeshWorst, m_iGridColN, gColMean, m_iGridColWorst, m_iBandFastV / b, m_iBandFastQ / b));
+			if (BAND_FILL_CHECK)
+				Print(string.Format("MUD band fill check (PERF IDEA 3, TEMP): %1 fills, %2 checked, %3 vertices differ (must be 0), check %4 ms (in the input split)",
+					m_iFillN, m_iFillChecks, m_iFillBad, m_iFillCheckMs));
+			float mergeN = Math.Max(m_iColMergeN, 1.0);
+			Print(string.Format("MUD rebuild 5: 1 rut pace %1 - held patch-frames %2, held builds %3 | 2 same skip %4 - skips %5 | 3 partial %6 - passes %7, verts mean %8, input ms %9",
+				RUT_PACE, m_iPaceHeldPF, m_iPaceBuilds, SAME_SKIP, m_iSameSkip, PARTIAL_IN, m_iPartN, m_iPartVerts / Math.Max(m_iPartN, 1.0), m_iPartMs)
+				+ string.Format(" | full passes %1, input ms %2 | check %3 - %4 checked, %5 verts bad (must be 0)",
+				m_iFullN, m_iFullMs, PARTIAL_CHECK, m_iPartChecks, m_iPartBad)
+				+ string.Format(" | 4 merge %1 - col builds %2, merged blocks mean %3, col tris mean %4 (%5 saved) | 5 fast %6 - bench %7 x %8: old %9 ms",
+				COL_MERGE, m_iColMergeN, m_iColMerged / mergeN, m_iColTrisN / mergeN, m_iColMerged * 6 / mergeN, MESHER_FAST, m_iBenchN, MESHER_BENCH_REPS, m_iBenchOld)
+				+ string.Format(", new %1 ms, differ %2 (must be 0), bench %3 ms in the rebuild ms", m_iBenchNew, m_iBenchDiff, m_iBenchMs));
 		}
+		m_iPaceHeldPF = 0;
+		m_iPaceBuilds = 0;
+		m_iSameSkip = 0;
+		m_iPartN = 0;
+		m_iPartVerts = 0;
+		m_iPartMs = 0;
+		m_iFullN = 0;
+		m_iFullMs = 0;
+		m_iPartChecks = 0;
+		m_iPartBad = 0;
+		m_iColMerged = 0;
+		m_iColTrisN = 0;
+		m_iColMergeN = 0;
+		m_iBenchN = 0;
+		m_iBenchOld = 0;
+		m_iBenchNew = 0;
+		m_iBenchDiff = 0;
+		m_iBenchMs = 0;
+		m_iFillN = 0;
+		m_iFillChecks = 0;
+		m_iFillBad = 0;
+		m_iFillCheckMs = 0;
 		m_iBandMeshN = 0;
 		m_iBandMeshMs = 0;
 		m_iBandMeshWorst = 0;
@@ -8660,8 +9144,10 @@ class MUD_WorldGroundEntity : GenericEntity
 		Print(string.Format("MUD world: budget %1 ms - waits: ahead %2, mesh %3, collider %4, free %5 | rushed %6 (made ahead, finished at once by a stamp) | wheel presses that waited (patch missing / building) %7",
 			m_iFrameBudget, m_iWaitAhead, m_iWaitMesh, m_iWaitCol, m_iWaitFree, m_iRushed, m_iWheelCapped)
 			+ string.Format(" | floor spread: %1 patches (look %4), %2 steps, %3 waiting", m_iFloorSpreadAdds, m_iFloorSpreadSteps, m_aFloorSpread.Count(), m_iLookSpreadAdds)
-			+ string.Format(" | PAPER TEST 3 small collider skips %1 (COL_SMALL_M %2, max %3 s)", m_iColSkipSmall, COL_SMALL_M, COL_SMALL_MAX_S));
+			+ string.Format(" | PAPER TEST 3 small collider skips %1 (COL_SMALL_M %2, max %3 s)", m_iColSkipSmall, COL_SMALL_M, COL_SMALL_MAX_S)
+			+ string.Format(" | PERF IDEA 2 small mesh skips %1 (MESH_SMALL_M %2, max %3 s)", m_iMeshSkipSmall, MESH_SMALL_M, MESH_SMALL_MAX_S));
 		m_iColSkipSmall = 0;
+		m_iMeshSkipSmall = 0;
 		m_iFloorSpreadAdds = 0;
 		m_iLookSpreadAdds = 0;
 		m_iFloorSpreadSteps = 0;

@@ -1,3 +1,13 @@
+GenericEntity {
+ coords 1121.453 39.254 2662.102
+ {
+  DecalEntity {
+   coords 1.11 0 -3.143
+   angles -69.187 180 -180
+   scale 6.36
+  }
+ }
+}
 MUD_CoarseSkinEntity {
  coords 1420.572 38.572 2185.829
 }
@@ -7,18 +17,7 @@ MUD_DepthBoxEntity MUD_DepthBox_0_5 {
  m_fMaxDepth 0.5
 }
 MUD_MudZoneEntity {
- coords 997.397 39 2729.715
-}
-GenericEntity : "{033BA33972BC0946}Prefabs/Decaltest/Long_track_1.et" {
- coords 1121.453 39.254 2662.102
- {
-  DecalEntity {
-   ID "66A17AE0DB0429D6"
-   coords 1.11 0 -3.143
-   angles -69.187 180 -180
-   scale 6.36
-  }
- }
+ coords 1055.368 39 2600.326
 }
 GenericEntity : "{21D83950DF36F250}Prefabs/Props/Military/Sandbags/Sandbag_01_long_burlap.et" {
  coords 997.93 39 2662.291
@@ -33,10 +32,12 @@ $grp GenericEntity : "{31CE12B3D1F6789E}Prefabs/Structures/Military/Flags/FlagPo
 }
 $grp Vehicle : "{3F5D19AC3C7E20DC}Prefabs/Vehicles/Wheeled/Ural4320/Ural4320_ammo_FIA.et" {
  Ural4320_ammo_FIA1 {
-  coords 1040.025 40.259 2602.858
+  coords 1045.452 40.259 2589.323
+  angles 0 101.002 0
  }
  Ural4320_ammo_FIA2 {
-  coords 1006.247 39 2684.969
+  coords 1083.802 40.259 2514.972
+  angles 0 101.002 0
  }
 }
 SCR_DestructibleBuildingEntity : "{B27AF198E146D70D}Prefabs/Structures/Houses/Village/House_Village_E_1I01/House_Village_E_1I01_beige.et" {

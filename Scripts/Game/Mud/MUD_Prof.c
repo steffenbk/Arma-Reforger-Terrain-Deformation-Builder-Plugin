@@ -65,9 +65,14 @@ class MUD_Prof
 	static const int T_QUADS = 46;     // inside every BuildTileMesh: the quad loop (cuts, dirt / top split)
 	static const int T_SKIRT = 47;     // inside every BuildTileMesh: the side skirt
 	static const int T_ENGINE = 48;    // inside every BuildTileMesh: MeshObject.Create + UpdateIndices / Verts + SetObject
-	static const int N = 49;
-	static const int TOP = 10;          // parts 0..TOP-1 add up to the MUD total (10-18 inside SHEET, 19-22 inside WHEELS, 23-27 inside REBUILD)
-	static const string NAMES = "vox,keepscan,sheet sync,sheet,house,wheels,look ruts,ahead,rebuild,free+net,sh follow,sh wheels,sh grounds,sh upload,sh stored,sh pre,sh zones,sh jobs,sh expire,w track,w ahead,w flush,w other,rb index,rb mesh,rb smooth,rb collider,rb nav,op all,op flush,op pre,op carve,op smooth,op dirty,op reground,op sync,op post,c seg,c write,c relax,c ridge,z ground,z data,z spawn,z mesh,t setup,t quads,t skirt,t engine";
+	static const int A_VIEW = 49;      // inside AHEAD: AheadView (client ahead hide / draw; A_HIDE is inside it)
+	static const int A_HIDE = 50;      // inside A_VIEW: per-wheel ArcHide + HoldHide (PERF B7 skips them with voxel ruts)
+	static const int A_SPREAD = 51;    // inside AHEAD: FloorSpreadTick
+	static const int A_SCAN = 52;      // inside AHEAD: Ahead's candidate scan (vehicles, NearPlayers, FarDue, FieldDue)
+	static const int A_BUILD = 53;     // inside AHEAD: Ahead's rest (new patch build steps)
+	static const int N = 54;
+	static const int TOP = 10;          // parts 0..TOP-1 add up to the MUD total (10-18 inside SHEET, 19-22 inside WHEELS, 23-27 inside REBUILD, 49-53 inside AHEAD)
+	static const string NAMES = "vox,keepscan,sheet sync,sheet,house,wheels,look ruts,ahead,rebuild,free+net,sh follow,sh wheels,sh grounds,sh upload,sh stored,sh pre,sh zones,sh jobs,sh expire,w track,w ahead,w flush,w other,rb index,rb mesh,rb smooth,rb collider,rb nav,op all,op flush,op pre,op carve,op smooth,op dirty,op reground,op sync,op post,c seg,c write,c relax,c ridge,z ground,z data,z spawn,z mesh,t setup,t quads,t skirt,t engine,a view,a hide,a spread,a scan,a build";
 
 	protected static ref array<int> s_aCur;     // this frame
 	protected static ref array<int> s_aSum;     // this 5 s
@@ -233,9 +238,10 @@ class MUD_Prof
 		float share = 0;
 		if (dtAvg > 0)
 			share = 100 * mudAvg / dtAvg;
+		string sw = MUD_MudSync.SwitchTag();     // sheet cost switches (2026-10-19)
 		Print(string.Format("MUD prof 5 s: %1 frames, fps %2, frame avg %3 ms max %4 | engine frame avg %5 max %6, render %7, GPU %8, simulation %9",
 			s_iFrames, fps, dtAvg, s_fDtMax, s_fEngFrame / n, s_fEngFrameMax, s_fEngRender / n, s_fEngGpu / n, s_fEngSim / n)
-			+ string.Format(" | MUD script avg %1 ms/frame (%2 pct of the frame), max %3 ms", mudAvg, share, s_iMudMax) + AbTag(), LogLevel.NORMAL);
+			+ string.Format(" | MUD script avg %1 ms/frame (%2 pct of the frame), max %3 ms", mudAvg, share, s_iMudMax) + AbTag() + sw, LogLevel.NORMAL);
 		string parts = "MUD prof parts (avg ms/frame / worst ms):";
 		for (int i = 0; i < N; i++)
 		{

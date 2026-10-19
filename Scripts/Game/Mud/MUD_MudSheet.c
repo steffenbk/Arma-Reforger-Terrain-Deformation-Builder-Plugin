@@ -287,6 +287,12 @@ class MUD_MudSheet
 	// (sync restore, trench / fill) stop once STORED_MS is used in a frame (at least one build); the rest wait for the
 	// next frame. 0 = all at once, as before (v188).
 	static const int STORED_MS = 3;
+	// sheet cost A5 (2026-10-19, prompts/2026-10-19-local-sheet-cost-followup-v2.md Part A; v239 = before): a stored tile
+	// rebuild (FlushOneBuild) waits while the tile was not drawn last frame (IEntity.IsRendered, SET_RENDERED set at
+	// spawn), as MUD_WorldGroundEntity.RenderWait does for patches. Only tiles with a mesh that are shown; always built
+	// within STORED_GATE_NEAR m of the camera. Live window slots never wait (they are not built here). false = off.
+	static const bool STORED_RENDERED_GATE = false;
+	static const float STORED_GATE_NEAR = 15;
 	// FREEZE TEST (TEMP 2026-10-15): mesh rebuilds (Upload, incl. colliders) paused every other FREEZE_CYCLE s; all
 	// script work still runs and the tiles stay drawn. PERF line splits fps live vs frozen: frozen much higher =
 	// rebuild cost, same = cost of drawing the mud tiles (DYNAMIC_VERTEXES is no way out, mud-gotchas 2026-10-15)
@@ -527,6 +533,8 @@ class MUD_MudSheet
 	protected int m_iStatResync;
 	protected int m_iStatResyncMs;
 	protected int m_iStatStoredRe;
+	protected int m_iSt10StoredHeld;            // A5: stored builds held (not rendered), tile-frames per 10 s
+	protected ref array<int> m_aHeldBuild = {};  // A5: keys held this FlushOneBuild (queued again at its end)
 
 	//------------------------------------------------------------------------------------------------
 	//! OFF_TEST: fps, worst frame and top vehicle speed per 5 s, nothing else
@@ -604,7 +612,9 @@ class MUD_MudSheet
 		string p2 = string.Format(" | (%1 stored + %2 live meshes, %3 kept data-only, %4 dropped, %5 to build, radius %6 m)",
 			meshes, live, kept, m_iSt10Drops, m_aBuildTx.Count(), RADIUS)
 			+ string.Format(" | build radius %1 m at %2 m/s, last queue %3, sparse %4", m_fRadBuild, m_vRadVel.Length(), m_iRadQueued, PatchLiftOn());
-		Print(p1 + p2, LogLevel.NORMAL);
+		string p3 = string.Format(" | stored builds held (not rendered) %1 (tile-frames, A5 gate %2)", m_iSt10StoredHeld, STORED_RENDERED_GATE);
+		Print(p1 + p2 + p3, LogLevel.NORMAL);
+		m_iSt10StoredHeld = 0;
 		Print(string.Format("MUD sheet gaps: live builds %1, with untraced quads %2 (quads %3, max %4 in one build) | border gap max %5 m, builds over 2 cm %6",
 			m_iGapLiveBuilds, m_iGapBuildsUnt, m_iGapUntraced, m_iGapUntracedMax, m_fGapEdgeMax, m_iGapEdgeOver)
 			+ string.Format(" | re-ground exact: %1 cells in %2 ops | look ruts: %3 cells in %4 calls", m_iReCells10, m_iReOps10, m_iLookCells10, m_iLookCuts10) + " | " + MUD_MudZoneEntity.OffroadStats(), LogLevel.NORMAL);
@@ -718,6 +728,9 @@ class MUD_MudSheet
 		int t0 = System.GetTickCount();
 		int built = 0;
 		m_iTaperMs = 0;
+		vector gcam[4];
+		if (STORED_RENDERED_GATE)
+			GetGame().GetWorld().GetCurrentCamera(gcam);
 		while (!m_aOneBuild.IsEmpty())
 		{
 			if (STORED_MS > 0 && built > 0 && System.GetTickCount(t0) >= STORED_MS)
@@ -731,12 +744,38 @@ class MUD_MudSheet
 			int tz = key - tx * 20000;
 			if (IsLive(tx, tz))
 				continue;
+			if (STORED_RENDERED_GATE && StoredWait(st, tx, tz, gcam[3]))
+			{
+				m_aHeldBuild.Insert(key);
+				continue;
+			}
 			Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
 			if (res)
 				st.m_Res = res;
 			built++;
 		}
+		// A5: held tiles wait at the end of the queue (checked again next frame)
+		foreach (int hk : m_aHeldBuild)
+			m_aOneBuild.Insert(hk);
+		m_aHeldBuild.Clear();
 		MUD_Prof.Add(MUD_Prof.SH_STORED, System.GetTickCount(t0));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A5 STORED_RENDERED_GATE: true = stored tile st's rebuild waits (it has a mesh, is shown, was not drawn last
+	//! frame, and its middle is over STORED_GATE_NEAR m from the camera cp)
+	protected bool StoredWait(MUD_MudSheetStore st, int tx, int tz, vector cp)
+	{
+		if (!st.m_Res || (st.m_Ent.GetFlags() & EntityFlags.VISIBLE) == 0)
+			return false;
+		if (st.m_Ent.IsRendered())
+			return false;
+		float ux = (tx + 0.5) * TILE_M - cp[0];
+		float uz = (tz + 0.5) * TILE_M - cp[2];
+		if (ux * ux + uz * uz < STORED_GATE_NEAR * STORED_GATE_NEAR)
+			return false;
+		m_iSt10StoredHeld++;
+		return true;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3903,7 +3942,10 @@ class MUD_MudSheet
 		params.Transform[1] = vector.Up;
 		params.Transform[2] = vector.Forward;
 		params.Transform[3] = Vector(tx * TQ * CELL, y, tz * TQ * CELL);
-		return GetGame().SpawnEntity(MUD_MudTileEntity, GetGame().GetWorld(), params);
+		IEntity te = GetGame().SpawnEntity(MUD_MudTileEntity, GetGame().GetWorld(), params);
+		if (STORED_RENDERED_GATE && te)
+			te.SetFlags(EntityFlags.SET_RENDERED, false);     // A5: IsRendered works
+		return te;
 	}
 
 	//------------------------------------------------------------------------------------------------

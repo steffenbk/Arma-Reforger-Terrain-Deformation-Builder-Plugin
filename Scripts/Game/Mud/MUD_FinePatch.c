@@ -68,6 +68,24 @@ class MUD_FinePatch
 	float m_fMeshAt = -100;
 	float m_fColAt = -100;
 	float m_fColBuiltAt = -100; // PAPER TEST 3: m_fTime of the last collider body actually built (m_fColAt also moves on a skip)
+	float m_fMeshBuiltAt = -100; // PERF IDEA 2: m_fTime of the last band mesh actually built (m_fMeshAt also moves on a skip;
+	                             // -100 after a grid mesh = no skip against it)
+	ref array<float> m_aMeshY;   // PERF IDEA 2: band mesher input Y per vertex of that build (made at the first band mesh:
+	                             // a DS never has one)
+	float m_fMeshHoldTo = -100;  // PERF IDEA 2 fix: a skipped patch is not picked by the mesh queue before this m_fTime
+	// REBUILD 5 (2026-10-19, v240 = before; MUD_WorldGroundEntity RUT_PACE / SAME_SKIP / PARTIAL_IN)
+	bool m_bRutMesh;             // option 1: the mesh dirt came from the rut floor alone (MarkFloorDirty) - RUT_MESH_EVERY pace
+	bool m_bPaceHeld;            // option 1 debug: the old pace would have built it already
+	ref array<float> m_aMeshD;   // option 2 / 3: band mesher input D of the last band mesh (with m_aMeshY)
+	ref array<int> m_aMeshSkin;  // option 2 / 3: band mesher m_aSkin of that build
+	int m_iMBx0 = -1;            // option 3: patch-local vertex box whose mesh input changed since that build (-1 = none)
+	int m_iMBx1;
+	int m_iMBz0;
+	int m_iMBz1;
+	bool m_bMBoxAll = true;      // option 3: a change with no box since that build - the next one reads every vertex
+	bool m_bLastHideOwed;        // option 3: that build left hidden changes owed
+	bool m_bLastRfOn;            // option 3: that build read the rut floor / look ruts
+	float m_fHideUntil = -100;   // option 3: m_fTime until which a vertex may still be hidden (ahead ruts, HIDE_HOLD)
 	float m_fColChangeAt = -100;  // TEMP probe 2026-10-11: m_fTime a collider rebuild last moved a vertex
 	float m_fNearAt;            // m_fTime a vehicle was last near
 	// patch-local vertex rect whose m_aSmooth is stale (-1 = clean)
