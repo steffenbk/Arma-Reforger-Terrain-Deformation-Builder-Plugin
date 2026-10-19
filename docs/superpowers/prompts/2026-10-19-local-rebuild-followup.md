@@ -1,11 +1,36 @@
 # Prompt for the local AI: rebuild follow-up build + one DS session (2026-10-19)
 
-Source: `docs/superpowers/research/2026-10-19-rebuild-and-bugs-research.md` (read sections 1.4, 2.1, 2.2, 2.4, 3 C1,
-5.1 first). All code there is unreviewed plan code: compile it, check it against the rules below, then test.
+Answers `prompts/2026-10-19-research-rebuild-and-bugs.md` task 6. Copy everything below the line into the local AI.
+
+---
+
+You are working on the Arma Reforger mud mod (repo steffenbk/Terrain-deformation, branch
+`displaced-ruts-partial-split`, commit 2cd6d2f or later). A cloud session did the research and code review after DS
+run 11 (no Workbench, game, DS or IDA there). Your job is the part that needs this machine: build 5 small items + one
+TEMP counter, compile, run ONE DS session with the user, write the results down. Ruts stay voxel; the mud sheet stays
+PARKED.
+
+## Read first
+1. `CLAUDE.md` - all rules (checkpoints, TESTING RULES, FEATURE FREEZE, git, MP robot setup).
+2. `docs/superpowers/research/2026-10-19-rebuild-and-bugs-research.md` - the ranked summary at the top, then
+   sections 1.2, 1.4, 1.5 (R1), 2.1, 2.2, 2.4 (coarse plate), 3 (C1, C2, P1), 5.1. All code there is unreviewed plan
+   code: check every line number against the file before you edit (they are from commit 1107eec).
+3. `docs/superpowers/results/2026-10-19-mesh-vs-voxel-ruts-ds.md` run 11 = the baseline numbers.
+4. `docs/superpowers/research/mud-gotchas.md` (Enforce limits).
+If your working tree lacks the research file, do not switch branches with uncommitted work - copy it in with
+`git checkout origin/displaced-ruts-partial-split -- docs/superpowers/research/2026-10-19-rebuild-and-bugs-research.md`.
+
+## Before you build: two log reads (no code)
+- Run 11 SERVER log (server/logs_2026-10-19_22-15-57): every 'MUD scrape: last 10 s - N underside points cut ground'
+  line while driving. Report N per line to the user (decides SCRAPE_HIDE_SKIP, see 'Not in this build').
+- Run 11 CLIENT log (PeerPlugin1/logs_2026-10-19_22-15-58): 'MUD look ruts: 10 s' expired + replaced counts during the
+  robot run. Report them (decides whether P1, the lead along the arc, is a perf item or only a look item).
 
 ## Rules
 - CLAUDE.md TESTING RULES: perf numbers only from the DS session, never Workbench. One launch, one checklist.
 - Checkpoint first: `mud_backups/checkpoint.ps1 save "before rebuild follow-up"`.
+- Every item behind its own switch; with the switches off the build must behave as now (BENCH_OFF excepted - TEMP code).
+- Git: commit to `displaced-ruts-partial-split`, stage with `git add --ignore-removal .`, no PR.
 - Enforce limits (mud-gotchas): 64 locals in scope per method (params count), no `%` / `&` inside a float expression,
   `set` / `debug` / `owned` reserved, string.Format max 9 values, member flag arrays int[] not bool[], Math.Min / Max
   return float (int local before indexing).
