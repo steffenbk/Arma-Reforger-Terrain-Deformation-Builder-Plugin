@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-10-19 by plans/2026-10-19-mud-overlay-v3.md (option A) and plans/2026-10-19-pressed-lift-ruts.md.
+
 # Mud overlay beside the voxel ruts - read-only, ruts untouched (plan, 2026-10-19, v2)
 
 v2 replaces the first version of this file (a lift inside the patch meshes). User 2026-10-19: "don't touch the ruts,

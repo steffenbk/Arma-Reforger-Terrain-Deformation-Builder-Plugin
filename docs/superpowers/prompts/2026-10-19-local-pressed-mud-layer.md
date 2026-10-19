@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-10-19 by prompts/2026-10-19-local-mud-two-designs.md - do not build this one.
+
 # Prompt for the local AI: mud overlay beside the voxel ruts (stage 1), 2026-10-19 - v2
 
 v2 (user 2026-10-19: "don't touch the ruts, we only focus on the mud"). Copy everything below the line.
