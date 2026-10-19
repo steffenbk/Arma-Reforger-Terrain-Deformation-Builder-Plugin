@@ -478,3 +478,14 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   steered front tyre. WheelGetPosition(w) is VEHICLE-LOCAL (WB 00:38 log: constant x 1.02 z 2.65 while driving; read
   as world it cut ruts near the map corner = no ruts) - use CoordToParent. Whether its hub follows steering: by eye
   pending (user named the world-read ball first, which cannot sit on the tyre).
+- IDA 2026-10-19 (Exp Diag 1.9, results/2026-10-19-sheet-cost-probes.md D1): IEntity.SetBone (sub_140E3BAE0) needs a
+  MeshObject whose .xob has a skeleton AND its skeleton instance; without either it does nothing, silently. The instance
+  is made by IEntity.GetAnimation() (sub_140E4C680 -> sub_140A47C10) - call it once on a bare entity. SetBone stores a
+  per-bone override (zero angles + trans, scale 1 = clear) and marks the entity dirty; main thread only. Bounds are NOT
+  updated: the MeshObject property 'BoundingBox' is the "override of bounding volume, if object is animated and can
+  exceed its static bounds".
+- IDA 2026-10-19 (D2): SignalsManagerComponent.SetSignalValue only writes a float (no changed flag). ProcAnimSystem
+  evaluates EVERY registered ProcAnim every frame (jobs of 4, worker threads), no distance / visibility / signal-changed
+  test - cost grows with the number of ProcAnim pieces, not with changes. ProcAnimComponent has 'OnFrameUpdate'.
+- IDA 2026-10-19 (D4): SpawnEntityPrefab's native takes an already-loaded Resource and calls the game (no resource
+  load inside); keep one Resource from Resource.Load. The Render diag "Shape instancing" is debug Shapes only.

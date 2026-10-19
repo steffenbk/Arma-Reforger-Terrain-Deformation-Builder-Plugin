@@ -443,3 +443,14 @@ The sheet is not worth it if, after top-3 items 1-2:
 - [Arma Reforger: Scripting Example (biki)](https://community.bistudio.com/wiki/Arma_Reforger:Scripting_Example) - foreach / cached Count() advice (search snippet)
 - [Changes and Improvements in 1.9 (modding update)](https://reforger.armaplatform.com/news/modding-update-sept-24-2026)
 - [Remote Script Console (workshop)](https://reforger.armaplatform.com/workshop/6686460F377B64FD-RemoteScriptConsole)
+
+## 14. IDA answers 2026-10-19 (local session; results/2026-10-19-sheet-cost-probes.md)
+- 3.5 / 13 SetBone: works without an anim component IF the .xob is skinned and `ent.GetAnimation()` is called once
+  (it makes the skeleton instance; SetBone alone silently does nothing). Bounds stay static - set the MeshObject
+  `BoundingBox` override. Still needs the WB look (C1). [IDA]
+- 3.4 / 13 ProcAnim pieces: REVISED. SetSignalValue is one float write, but every registered ProcAnim is evaluated
+  every frame (no change / visibility test), so ProcAnim only on live pieces; static .xob for the bulk. [IDA]
+- 12 spawn: SpawnEntityPrefab's native loads nothing when given a held Resource; component init not traced. [IDA]
+- Instancing of spawned same-.xob entities: unresolved (only terrain objects shown to batch). [IDA, partial]
+- 3.2 IsRendered: already proven on our patches (RENDER_GATE waits counted, audit-ground 2026-10-18). [repo]
+- Parts A-C (switches, DS session, WB probes) not run yet.
