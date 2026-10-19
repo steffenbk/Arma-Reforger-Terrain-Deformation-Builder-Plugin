@@ -1,49 +1,53 @@
-# Pressed mud layer: the mud look without the sheet (plan, 2026-10-19)
+# Mud overlay beside the voxel ruts - read-only, ruts untouched (plan, 2026-10-19, v2)
 
-Why: the look lift test (2026-10-19 22:53) proved two things (research/2026-10-19-ruts-invisible.md, gotchas):
-- a lifted surface reads as a soft layer (tyres sit in it), and
-- grass rides on top of any ground above the heightmap, so a lift hides every rut shallower than it.
-So the lift must be PRESSED OUT where wheels go. Done in the patch meshes, from data every client already has
-(the rut floor, look ruts, wear count), it needs no sheet tiles and no MUD_MudSync layer at all.
+v2 replaces the first version of this file (a lift inside the patch meshes). User 2026-10-19: "don't touch the ruts,
+we only focus on the mud". The voxel ruts are OFF LIMITS: rut ops, the rut field, wear, look ruts, the patch meshes
+and colliders that draw / feel them, and the op format. The mud may only READ their data and draw its own meshes.
 
-## The rule (per patch vertex, clients only, mesh only - colliders untouched)
-```
-cut   = max(0, -(rut floor - base))            // rfF in BuildMesh / BandMeshIn; includes client look ruts (instant)
-wear  = min(1, MUD_VoxelProbe.WearAt(x, z))    // pass 1 on grass only counts wear (WEAR_PASSES 1)
-keep  = (1 - WEAR_PRESS * wear) * (1 - clamp(cut / PRESS_M, 0, 1))
-keep  = 0 where the vertex touches a dug / voxel cell (else a lip over the hole - issues doc sec 3)
-lift  = MUD_LIFT_M * p.m_aLock[v] * keep        // m_aLock already fades to 0 at kept terrain / buildings
-drawn = base + d + lift                         // d keeps the floor + ridge as today
-```
-Start values: MUD_LIFT_M 0.08 and 0.16 (user picks), PRESS_M 0.03 (one cutting pass presses the layer out fully),
-WEAR_PRESS 0.5 (pass 1 leaves a half-pressed track with grass; pass 2 cuts and clears the grass).
-Coarse skin: the same MUD_LIFT_M on hole cells (no ruts there; patches replace skin cells where ground moves).
+## What the lift test taught (keeps the design honest)
+- Grass rides on top of any ground above the heightmap (gotchas 2026-10-19): a mud layer that covers a rut hides it.
+- A lifted layer everywhere costs a 0.16 m visual-only offset (prone soldiers, props) and whole-map streaming.
+So the mud is NOT a layer over all ground. It is decoration around the ruts: it starts at 0 height at its outer edge,
+rises into a soft berm / wet band beside the rut, and has no quads over the rut floor. The rut itself is drawn by the
+untouched voxel / patch path and stays visible (grass-free floor, dirt from FIELD_SOIL_D).
 
-What it looks like: untouched offroad = a soft layer MUD_LIFT_M above the collider (tyres and boots sit in it); a
-rutted line = a groove MUD_LIFT_M + cut deep, its floor below the heightmap -> grass-free, dirt from FIELD_SOIL_D;
-ridges stay on top of the layer; roads / buildings: the layer slopes to 0 over Edge Fade (1 m).
-What it does not do (vs the parked sheet): texture smear, slump animation, live bow wave, per-quad wet material.
-Pieces (research 15.2 design A) can add tread / wet detail later.
+## The overlay
+- Own entities: 3 m mud tiles (the sheet's tile code is the starting point), no collider, clients only.
+- Exists only where the rut field has ruts or wear (read-only `MUD_VoxelProbe.FieldFloor / FieldFloorAt`, `WearAt`).
+  No tile on untouched ground -> nothing to stream on fresh offroad, no step against untouched ground (height 0 at the
+  edge), and far view comes from keeping the few touched tiles.
+- Height per vertex: drawn ground (read-only: `MUD_WorldGroundEntity.DugUndug`, `MUD_VoxelProbe.TopAt` on voxel
+  columns) + mud m, with
+  - m = 0 over the rut floor (cut > ~1 cm) -> quad skipped, the rut shows through untouched;
+  - m = berm profile beside the cut (a few cm, wider / higher with depth and passes), 0 at the outer edge;
+  - m from wear only (pass 1, no cut yet): a thin flattened band, no berm.
+- Look: a wet / dark mud material on the overlay; texture smear and the sheet's live wheel stamps are optional extras
+  (client-only prediction under the wheel, dropped when the rut field catches up).
+- MP: the same on every client because it is computed from replicated data (rut floor, wear) - no MUD_MudSync layer,
+  no op tag, no snapshot parts. The DS does nothing.
 
-## Cost
-- No sync layer, no sheet tiles: the sheet's whole cost line goes (sync 0.4-0.5 ms/frame per truck, tile builds).
-- Per patch vertex: a few float ops + WearAt (a map lookup) - only for patches in a rut field box (rfOn), the rest
-  get a constant lift. Patch meshes rebuild on rut changes as today.
-- New: a wear-only pass changes no floor, so nothing rebuilds the mesh - a wear change must mark the patch mesh dirty on
-  clients (look only, through the same mesh pacing).
-- DS: nothing (it builds no meshes).
+## What must stay OFF / unused (couplings the parked sheet has into the rut path)
+With MUD_MudSheet.ENABLED false these are all inert today; the overlay must not switch any of them on:
+| where | what it does | file / line (44335db) |
+|---|---|---|
+| sheet tag in kind-4 rut ops | changes the op's seed field | MUD_VoxelProbe.c 3396-3425 |
+| RUT_SHEET_MS / RutUnderSheet | slows the feel rut ops under the sheet | MUD_VoxelProbe.c 256, 1384-1401 |
+| RUT_SHEET_ONLY_TEST | skips feel ruts under the sheet | MUD_VoxelProbe.c 241, 3942 |
+| TakeOp / Holds / m_bSheetOp / CoversCell / SheetDepth | ops or voxel drawing handed to the sheet (ONE_GRID era) | MUD_VoxelProbe.c 3090, 3933, 4081-4086, 6551 |
+| MUD_MudSync hooks (Flush, RutOp, ClearBefore / ClearOp, snapshot parts) | sync layer work inside Submit / J2 | MUD_VoxelProbe.c 1717, 2015-2436, 4068, 4170, 4217-4220 |
+| LookRuts SHEET_SKIP / H2 LookChanged | look ruts skipped or redirected under the sheet | MUD_LookRuts.c 46, 532, 600 |
+| LAZY_RUT_MESH, SPARSE A2 lift, LOOK_LIFT_TEST | hide / lift the patch meshes | MUD_WorldGround.c 4615-4630, 6607-6690; MUD_CoarseSkin.c 617-751 |
+The overlay uses only read calls. To know when to rebuild it either polls the rut field per tile near the camera
+(every ~0.25-0.5 s: compare a per-tile change counter if the rut field has one, else a cheap checksum of the floor
+samples it covers) or listens to the existing `MUD_MudSheet.FloorChanged` call that Submit already makes (it is a
+notification after the rut work, not a change to it). Polling is the zero-touch option.
 
-## Risks to judge in the look test
-- Prone soldiers: their lower MUD_LIFT_M is drawn under the layer but still hittable (PvP visual-only cover). This
-  decides MUD_LIFT_M more than looks do.
-- Props / rocks / trees on holed ground: do they look sunk by MUD_LIFT_M (MUD_PinLift height)?
-- The groove wall is one 0.25 m patch cell wide (MUD_LIFT_M over 0.25 m) - too sharp? A 1-cell half-press ring
-  softens it.
-- Patch / skin seam and road edges.
-Determinism: none (drawn only, from replicated data).
+## Cost (inference)
+Tiles only along tracks; built once per change, kept; no sync layer; no streaming over fresh ground. The build is the
+sheet's tile build (~0.55-0.9 ms per tile, research sec 9) - only for tiles near ruts that changed.
 
 ## Stages
-1. Build behind `MUD_WorldGround.PRESS_LIFT` (default false) + WB look session (prompts/2026-10-19-local-pressed-mud-layer.md).
-2. User picks MUD_LIFT_M / PRESS_M / WEAR_PRESS by eye.
-3. DS session for cost (patch mesh rebuilds with wear dirt marks) and MP look on a second client.
-4. Later, optional: pieces for tread / wet; the sheet stays parked unless the 0.25 m groove is not soft enough.
+1. Build behind a new switch (e.g. `MUD_MudOverlay.ENABLED`, default false, separate from MUD_MudSheet), WB look
+   session (prompts/2026-10-19-local-pressed-mud-layer.md).
+2. User tunes berm width / height, wet material, whether pass 1 shows.
+3. DS session: client cost + MP look on a second client.

@@ -1,53 +1,52 @@
-# Prompt for the local AI: build the pressed mud layer (stage 1), 2026-10-19
+# Prompt for the local AI: mud overlay beside the voxel ruts (stage 1), 2026-10-19 - v2
 
-Copy everything below the line into the local AI.
+v2 (user 2026-10-19: "don't touch the ruts, we only focus on the mud"). Copy everything below the line.
 
 ---
 
-Build stage 1 of `docs/superpowers/plans/2026-10-19-pressed-mud-layer.md` (branch `claude/upbeat-lovelace-q0w022`):
-a mud layer drawn by the patch and skin meshes, pressed out where wheels cut or wear the ground. Build + one WB look
-session only (look check, no ms). Stop and report after the session.
+Build stage 1 of `docs/superpowers/plans/2026-10-19-pressed-mud-layer.md` (v2, branch `claude/upbeat-lovelace-q0w022`):
+a mud overlay drawn beside the voxel ruts. Build + one WB look session (look only, no ms). Stop and report after it.
+
+## Hard rule: do not touch the ruts
+No change in the rut ops, rut field, wear, look ruts, MUD_VoxelProbe Submit / op format, the patch meshes or colliders
+(MUD_WorldGround mesh / collider builders, LiftAt, lazy hide), MUD_CoarseSkin, or MUD_MudSync. The overlay only READS:
+`MUD_VoxelProbe.FieldFloor / FieldFloorAt / WearAt / TopAt / ColumnAt`, `MUD_WorldGroundEntity.DugUndug`. Every sheet
+coupling listed in the plan's "must stay OFF" table stays off (MUD_MudSheet.ENABLED false, LOOK_LIFT_TEST false).
+If something seems to need a change in a rut file, stop and ask me.
 
 ## Read first
-- `CLAUDE.md`; the plan above; `research/2026-10-19-ruts-invisible.md` (why a plain lift hides ruts);
-  `mud-gotchas.md` (Enforce limits; clutter >= 1 mm above the heightmap rides on top; the IDA lines).
-- Code: `MUD_WorldGround.c` LiftSetup / LiftAt (~6610-6680), BuildMesh (~6740-6810), BandMeshIn (~7410-7470),
-  MESH_SKIP_SMALL / MeshSmall; `MUD_CoarseSkin.c` LookLift (~617-651, 747-751); `MUD_VoxelProbe.WearAt / WearOnly`
-  (~5085-5105); `MUD_MudSheet.LOOK_LIFT_TEST` (the old TEMP test - leave it false).
+- `CLAUDE.md`; the plan (v2); `research/2026-10-19-ruts-invisible.md` (grass rides on top of anything above the
+  heightmap); `mud-gotchas.md` (Enforce limits, MeshObject rules: one fresh mesh per change, distinct emat per section,
+  indices before verts, 64 locals).
+- Code to borrow from (copy, do not call into its state): `MUD_MudSheet.BuildTileMesh` / `SpawnTile` (tile mesh,
+  skirt), `MUD_LookRuts` (how a rut sample maps to world x, z).
 
 ## Rules
-- Checkpoint first: `mud_backups/checkpoint.ps1 save "before pressed mud layer"`.
-- One switch `MUD_WorldGround.PRESS_LIFT` (default false). Off = exactly today. Mesh only, clients only; colliders,
-  ops, rut field, wear and the DS untouched. MUD_MudSheet.ENABLED stays false.
-- For the look session the lift values must be changeable without a relaunch: make MUD_LIFT_M / PRESS_M / WEAR_PRESS
-  static floats (not const) with a TEST_KIT key or console hook that cycles presets and marks every live patch mesh
-  dirty + rebuilds the skin chunk meshes in view. Presets: (0, -, -), (0.08, 0.03, 0.5), (0.16, 0.03, 0.5),
-  (0.16, 0.06, 0).
-- Enforce limits: new per-vertex work in its own small method (BandMeshIn / BuildMesh are near the locals limit);
-  no Math.Min/Max as an index; no Print per vertex / per build.
+- Checkpoint first: `mud_backups/checkpoint.ps1 save "before mud overlay"`.
+- New file `Scripts/Game/Mud/MUD_MudOverlay.c`, switch `MUD_MudOverlay.ENABLED` (default false), clients only (return
+  on a DS), no collider. Ticked from one existing place with a single guarded call is fine (say where); nothing else in
+  existing files.
+- Tuning values as static floats with a TEST_KIT key that cycles presets and rebuilds the overlay tiles in view.
 - Git: `git add --ignore-removal .`, commit, push to this branch. No PR.
 
 ## Build
-1. Patch lift per vertex (both mesh paths, after d is known, replacing the LOOK_LIFT_TEST branch when PRESS_LIFT is on):
-   `keep = (1 - WEAR_PRESS * min(1, wear)) * (1 - clamp(cut / PRESS_M, 0, 1))`, `cut = max(0, -rfF)` (the floor incl.
-   look ruts, before the ridge), `wear = MUD_VoxelProbe.WearAt(x, z)` only when rfOn (else 0),
-   `lift = MUD_LIFT_M * p.m_aLock[v] * keep`. Ridges stay on top (d as today).
-2. keep = 0 at patch vertices that touch a cell the voxels carry or a dug cell (m_aH clearly below 0), so a crater /
-   trench rim gets no lip. Say how you detect it and what it costs per build.
-3. Coarse skin: hole cells lifted MUD_LIFT_M (reuse LookLift with the new value; mesh only, put back before the
-   collider as now).
-4. A wear-only pass changes no floor: mark the patch mesh dirty on clients when wear changes there (look only, through
-   the normal mesh pacing). Count it.
-5. Log every 10 s on the client, with PRESS_LIFT on: 'MUD pressed mud: preset P (lift L, press M, wear W) | rutted
-   verts N, pressed out N, half (wear) N, drawn below heightmap N | wear mesh marks N'.
+1. Tile set: 3 m tiles at 0.15 m (21 x 21), only where any rut-field floor sample or wear in the tile is set; built
+   near the camera (start 60 m), kept until far + a memory cap; rebuilt when the rut data under it changed (poll a
+   cheap per-tile check every 0.25-0.5 s near the camera - no hook into the rut code).
+2. Per vertex: ground = DugUndug dug height (TopAt on voxel columns), cut = undug - floor (read-only).
+   m = 0 where cut > CUT_BARE (start 0.01) -> those quads are skipped; beside the cut a berm: m = BERM_H x profile(distance
+   to the nearest cut sample / BERM_W), BERM_H growing with cut depth and passes (cap), 0 at the outer edge; wear-only
+   cells (pass 1): a thin flat band WEAR_H. Vertex = ground + m + 0.005 (never below the drawn ground).
+3. Material: one wet / dark mud emat on the overlay (distinct path; MatPBRBasic or MatPBRMulti from vanilla mud), a
+   short skirt on open sides.
+4. Log every 10 s: 'MUD mud overlay: tiles N (built N, kept N, dropped N), polls N, rebuilds N, worst build ms (WB, not
+   perf), preset P'.
 
-## WB look session (one launch, my eyes decide)
-1. Urals on grass, drive one line 4 passes (trail probe shows the depth), plus a crater and a short trench nearby.
-2. For each preset look from 2 m / 20 m / 100 m: the groove (grass gone? dirt? wall too sharp?), pass 1 (half-pressed
-   track), untouched layer (tyres / boots sunk), the crater and trench rims (no lip), a road / runway edge, a building,
-   holed props / rocks / trees (sunk?), the patch / skin seam, and a prone soldier (second client or placed character).
-3. Screenshots per preset; note what you saw next to the log line.
+## WB look session (one launch)
+Urals on grass: one line 1 / 2 / 4 passes, a crossing, a crater and a trench near it, a road edge. For each preset look
+from 2 / 20 / 60 m: is the rut itself unchanged (grass-free floor, dirt as before), does the berm read as soft mud, any
+z-fight with the patch, any overlay over the crater / trench (must not), pop when tiles appear. Screenshots per preset.
 
 ## Report back
-What you built (file / method per step), compile result, the log lines per preset, the screenshots, anything odd.
-Do not tune the values yourself and do not turn anything on by default - I pick.
+Files / methods, the one call site you added, compile result, log lines, screenshots, anything odd. Do not tune or
+enable anything by default - I pick.
