@@ -774,3 +774,12 @@ new are expected to differ; DS vs client vs client must not). Hash lines: re-bas
 5. C3 / D3: are same-.xob pieces batched; memory per 1000 pieces; spawn vs pool.
 6. The user's eye: pieces + parallax (C3 / C4) vs the sheet.
 With 1-2 in hand, sec 7's budget test can be run; with 4-6, the cheap-look route can be judged against it.
+
+### 15.7 IDA D5-D8 (local session 2026-10-19; results/2026-10-19-sheet-cost-probes.md "Part D, round 2")
+- D5 [IDA]: `Deactivate` on a ProcAnimComponent unregisters it from ProcAnimSystem (no per-frame eval); `Activate`
+  re-registers. Design C can park pieces. No script path to `OnFrameUpdate` (prefab property only).
+- D6 [IDA, medium]: script side free when bones do not change, but every DRAWN skinned object copies its bone palette
+  each frame (48 B per bone); no unchanged skip found. Design B / skinned tiles are not zero per-frame cost.
+- D7 [IDA, medium]: 384-bone stack buffers in the pose / bounds code; 121 bones fit. No limit string found.
+- D8 [IDA]: SetObject (different object or remap) makes a new MeshObject - bone overrides lost. A + B on one piece do
+  not mix.

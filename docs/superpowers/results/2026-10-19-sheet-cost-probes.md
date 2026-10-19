@@ -104,3 +104,76 @@ not traced. The pool + `SetTransform` + `Update` route avoids both, so C3's 100 
    `BoundingBox` override on the second variant to test culling.
 8. **C2 / 3.4 scaling:** ProcAnim costs every frame per piece (D2) - ProcAnim only on live pieces; the bulk of the
    pieces must be static .xob.
+
+
+## Part D, round 2 (v2 prompt D5-D8, 2026-10-19, same IDB, no code run)
+
+### D5. GenericComponent.Deactivate on a ProcAnimComponent
+
+| what | address | finding | label |
+|---|---|---|---|
+| Deactivate native | `sub_141321EA0` | if the component is already inactive (sign bit of `comp+76`) it returns; else it sets that bit and calls the component's vtable `+48` with the owner. | IDA |
+| ProcAnimComponent vtable | `??_7ProcAnimComponent@gamecode@@6B@` = `0x141B390C0` | slot `+40` = `sub_1402A0500` (activate side), slot `+48` = `sub_1402A0560` (deactivate side). | IDA |
+| deactivate side | `sub_1402A0560` | unhooks its signals (`sub_1402A0460`), then, if the OnFrameUpdate bit (`+156 & 1`) is set, calls `sub_1402A2980` = **ProcAnimSystem::Unregister**: removes the component from the flat per-frame list (swap with last, count - 1, slot = -1). | IDA |
+| activate side | `sub_1402A0500` | if `+156 & 0x21` and the entity has a MeshObject -> `sub_1402A2780` = ProcAnimSystem::Register (back on the list). | IDA |
+| the `+156` bits | ctor `sub_14029FD60` | bit 1 = the prefab property `OnFrameUpdate` (default true); bit 4 is ALWAYS set in the ctor and nothing on the Deactivate path clears it. | IDA |
+
+Answer: yes, Deactivate stops the per-frame evaluation - not by clearing `+156 & 4`, but by taking the component off
+ProcAnimSystem's list (the job walks only that list). `Activate(owner)` puts it back. So design C (live ProcAnim pool)
+can park a piece with one Deactivate and wake it with one Activate. Other script path to OnFrameUpdate: none found -
+it is a prefab property only (no script methods on ProcAnimComponent were found); `OnFrameUpdate 0` in the prefab
+means the component is never registered at all. Confidence: high for the list removal; WB C2 still checks that the
+piece stops moving.
+
+### D6. Skinned entity with unchanged bones: per-frame work?
+
+| what | address | finding | label |
+|---|---|---|---|
+| SetBone write | `sub_140A48F30` | an unchanged matrix returns early; a change sets MeshObject flag `0x100000` (VObject `+12`) and the entity dirty mark. | IDA (D1) |
+| GetAnimation side | `sub_140A47C10` | creating the skeleton instance also sets `0x100000` - the flag marks "has a skeleton instance", not only "changed". | IDA |
+| draw-side bone read | `MeshObject` vtable `0x141CA3CB0` slot 32 = `sub_140AAF5A0` | the MeshObject draw-prepare method calls `sub_140AA8D70` (current bone matrices, from the instance at `+48` via `sub_140A47850`) and reserves / copies `48 B x bones` of matrices per draw (`v198 += 48 * bones`). No test of a changed / dirty flag was found on this path. | IDA |
+| reader of `0x100000` | byte-pattern search (test / bt on `[reg+0Ch]`) | no direct reader found - so no "skip if unchanged" gate was found. | IDA (negative, narrow search) |
+
+Answer: the script side costs nothing when bones do not change (D1). The render side, as far as IDA shows, copies the
+bone palette (48 B per bone) for every DRAWN skinned object every frame it is drawn - there is no "unchanged" skip.
+A culled (not drawn) object does not reach this method. For a 121-bone tile that is ~5.8 KB of matrix copy per visible
+tile per frame; 460-620 stored tiles in view = ~2.7-3.6 MB / frame of palette data (INFERENCE from the sizes).
+Confidence: medium (the per-draw copy is clear; that no other cache exists is a negative from a narrow search).
+Measure it: C1's 300 tiles left alone, then ms on the DS.
+
+### D7. Bone limits
+
+| what | address | finding | label |
+|---|---|---|---|
+| bone buffers in the MeshObject code | `sub_140A472A0` (animated bounds, flag `0x20`), `sub_140AAF5A0` (draw-prepare, twice) | each uses a fixed stack buffer of **384** bone matrices (`384 x 48 B`) to fetch the current pose. | IDA |
+| animated bounds | `sub_140A472A0` | with request flag `0x20` and a skeleton, bounds are computed from the CURRENT bone matrices (min / max over bones); otherwise the static box or the `BoundingBox` override. Who passes `0x20` was not traced. | IDA |
+| override mask | skeleton instance (`0x80` B) | the override bit mask is inline (`+24 .. +119` = 768 bits); matrices are heap arrays sized by the skeleton's bone count. | IDA |
+| strings | find_regex "too many bones / max bones / bone limit" | no limit string or assert found. | IDA (negative) |
+
+Answer: the hard number in the code is 384 bones per skeleton (stack buffers in the pose / bounds path); 121 bones
+(11 x 11) fits. No per-draw (GPU) bone cap was found in this exe; a shader-side cap would be in the shaders, not here.
+Import (Blender / FBX) limits are not in this exe. Confidence: medium (384 is a buffer size, not a stated limit).
+Note: a skinned tile may get animated bounds automatically if the renderer asks with flag `0x20` - C1's cull test
+(with and without `BoundingBox`) settles it.
+
+### D8. SetObject on an entity that already has a skeleton instance
+
+| what | address | finding | label |
+|---|---|---|---|
+| SetObject native | `sub_140E4E1E0` | parses the `$remap` string, then calls `sub_1409B5610(ent, vobject, remap)`. | IDA |
+| set VObject | `sub_1409B5610` | if the new VObject's resource AND remap equal the current ones -> returns the old MeshObject (no-op). Otherwise clears `ent+80`, creates a NEW MeshObject through the VObject's factory (vtable `+248`), releases the old one (vtable `+64`, `+576`), marks the entity dirty (`0x10800000`) and updates it. | IDA |
+
+Answer: dropped. A real SetObject builds a fresh MeshObject (its skeleton instance at `+48` starts empty), so all
+SetBone overrides are lost; call `GetAnimation()` again and re-send the bones after a swap. Same object + same remap
+= nothing happens (overrides kept). Main thread only (the same "locked entity" assert). Confidence: high for "new
+object, old released"; medium that the new object's `+48` is empty (the instance is made only on demand by
+`sub_140A47C10`).
+
+### What this changes for sec 15
+- 15.2 design C: parking = `Deactivate`, waking = `Activate` (D5) - parked pieces cost nothing per frame.
+- 15.2 design B / 15.3 skinned tile: "unchanged bones cost nothing" holds for script only; each drawn skinned object
+  copies its bone palette every frame (D6). Design A (static .xob variants) stays the only zero-per-frame option.
+- 15.2 designs A + B on one piece: a variant swap (SetObject) wipes the bones (D8) - pick one per piece.
+- 15.3: 121 bones fit under the 384 buffer (D7).
+- v2 prompt B2 puts A5 (render-gated stored builds) in the same launch as A1 + A2: the 'sheet sync' and 'sh stored'
+  parts are logged apart, but the total MUD ms mixes them - read the parts, not the total.

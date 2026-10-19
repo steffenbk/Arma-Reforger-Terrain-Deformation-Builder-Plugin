@@ -489,3 +489,11 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   test - cost grows with the number of ProcAnim pieces, not with changes. ProcAnimComponent has 'OnFrameUpdate'.
 - IDA 2026-10-19 (D4): SpawnEntityPrefab's native takes an already-loaded Resource and calls the game (no resource
   load inside); keep one Resource from Resource.Load. The Render diag "Shape instancing" is debug Shapes only.
+- IDA 2026-10-19 (D5): GenericComponent.Deactivate(owner) on a ProcAnimComponent calls ProcAnimSystem::Unregister
+  (vtable +48 = sub_1402A0560) - the component leaves the per-frame list; Activate re-registers it. OnFrameUpdate is a
+  prefab-only property (0 = never registered).
+- IDA 2026-10-19 (D6/D7): a drawn skinned MeshObject copies its bone palette (48 B per bone) every draw, no unchanged
+  skip found (MeshObject draw-prepare sub_140AAF5A0). Pose / bounds code uses fixed 384-bone buffers.
+- IDA 2026-10-19 (D8): IEntity.SetObject with a different VObject or remap builds a NEW MeshObject and releases the old
+  one - the skeleton instance and all SetBone overrides are lost (call GetAnimation + SetBone again). Same object +
+  same remap = no-op.
