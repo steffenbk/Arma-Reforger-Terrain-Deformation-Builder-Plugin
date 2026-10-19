@@ -818,3 +818,9 @@ Measurement this adds: the per-frame cost of drawn skinned objects is now the de
 WB cannot give ms (TESTING RULES), so it goes to a DS client: N static skinned tiles (or pieces) in view vs the same
 N static script meshes, render + frame ms. Put it in the DS launch that already runs (launch 2), as its own phase with
 nothing else changing, or skip it if the user drops skinned tiles.
+
+### 15.9 IDA D9 (local session 2026-10-19)
+- D9 [IDA]: bone bounds are used only while the mesh's own flag `0x20` is set; animation systems set it (ProcAnim when
+  its bones moved, doors, Cinematic Tool), SetBone does not. SetBone tiles / design B pieces keep the bind-pose box ->
+  `BoundingBox` override (or a bind pose that spans the depth). Design C (ProcAnim) gets bone bounds for free.
+- B5 is a DS CLIENT reading (the server draws nothing). Details + 15.8 number check: results/2026-10-19-sheet-cost-probes.md.

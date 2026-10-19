@@ -177,3 +177,26 @@ object, old released"; medium that the new object's `+48` is empty (the instance
 - 15.3: 121 bones fit under the 384 buffer (D7).
 - v2 prompt B2 puts A5 (render-gated stored builds) in the same launch as A1 + A2: the 'sheet sync' and 'sh stored'
   parts are logged apart, but the total MUD ms mixes them - read the parts, not the total.
+
+### D9. Who asks for animated bounds (flag `0x20`, `sub_140A472A0`)?
+
+| what | address | finding | label |
+|---|---|---|---|
+| entity bounds | `GenericEntity` vtable `+136` = `sub_1409B0800` | asks the VObject for its box: VObject vtable `+608` with flags = the VObject's OWN flag word (`VObject+12`). | IDA |
+| animated MeshObject class | `sub_140AA7B70` (factory) | a mesh whose resource has a skeleton (`+208`) (or two other resource conditions) is created as `MeshObjectAnimatedComponent` (vtable `0x141C9A920`), not a plain MeshObject. Its `+608` = `sub_140A47580` -> `+616` = `sub_140A472A0`, flags passed through. | IDA |
+| bone bounds | `sub_140A472A0` | flag `0x20` set -> box from the current bones; else `0x20000` -> the `BoundingBox` override; else the static box. | IDA |
+| who sets `0x20` on `VObject+12` | byte search `or dword [reg+0Ch], 20h` | ProcAnim job `sub_1402A1080` (cleared each eval, set again if its bones moved), door bone animation `sub_140332DA0`, Cinematic Tool `sub_1415B29A0`, two more (`sub_140B07C60`, `sub_1404F2A30`, not identified). Not SetBone / SetBoneMatrix (they set `0x100000`). | IDA |
+
+Answer: the renderer does not ask for bone bounds; the flag lives on the mesh and only animation systems turn it on.
+A tile or piece moved only by `SetBone` keeps the static (bind-pose) box -> it needs the MeshObject `BoundingBox`
+override when bones move out of the bind box (or a bind pose that already spans the full depth range). A ProcAnim-driven
+piece (design C) gets bone bounds automatically while it moves. Confidence: high for the call chain and the SetBone
+side; medium that no other path sets `0x20` (byte search, one instruction form).
+
+### Review of research sec 15.8 + v2 prompt (commit 54766a8)
+- 15.8 numbers check: 121 x 48 B x 460-620 = 2.7-3.6 MB; 36 x 48 B x 460-620 = 0.8-1.1 MB; 121 x 48 B x 16-64 =
+  0.09-0.37 MB; 4 x 48 B x 1000 = 0.19 MB. All match.
+- B5 must be read on the DS CLIENT (the server draws nothing, so it has no palette copy); say so in the prompt.
+- C1: with D9, the cull test is expected to FAIL without `BoundingBox` for bones moved 0.5 m out of the bind box;
+  the run confirms it rather than decides it.
+- Design B rut pieces: same - the "pressed" depth must stay inside the bind box or the piece needs `BoundingBox`.

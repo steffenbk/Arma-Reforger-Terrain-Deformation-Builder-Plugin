@@ -497,3 +497,6 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
 - IDA 2026-10-19 (D8): IEntity.SetObject with a different VObject or remap builds a NEW MeshObject and releases the old
   one - the skeleton instance and all SetBone overrides are lost (call GetAnimation + SetBone again). Same object +
   same remap = no-op.
+- IDA 2026-10-19 (D9): a skeleton mesh is a MeshObjectAnimatedComponent; its bounds follow the bones ONLY while its own
+  flag 0x20 is set, which animation systems set (ProcAnim job when bones moved, doors, Cinematic Tool) - SetBone does
+  not. SetBone-moved meshes keep the bind-pose box: use the MeshObject BoundingBox override.
