@@ -614,6 +614,39 @@ class MUD_CoarseSkinEntity : GenericEntity
 	//------------------------------------------------------------------------------------------------
 	//! Mesh and collider of one chunk: its hole cells that no fine patch covers. Spawns the chunk entity
 	//! on first use; on a rebuild the old body is destroyed and the new one made in this same call.
+	//! TEMP LOOK LIFT TEST (MUD_MudSheet.LOOK_LIFT_TEST): on = m_Buf.m_aVerts of rec drawn LOOK_LIFT_M higher where every
+	//! cell around the vertex (inside this chunk) is a hole cell and not a voxel cell; off = back to rec.m_aH
+	protected void LookLift(MUD_SkinChunk rec, bool on)
+	{
+		for (int vz = 0; vz < VERTS; vz++)
+		{
+			for (int vx = 0; vx < VERTS; vx++)
+			{
+				int v = vz * VERTS + vx;
+				float y = rec.m_aH[v];
+				if (on)
+				{
+					bool lifts = true;
+					for (int cz = vz - 1; cz <= vz; cz++)
+					{
+						for (int cx = vx - 1; cx <= vx; cx++)
+						{
+							if (cx < 0 || cz < 0 || cx >= CELLS || cz >= CELLS)
+								continue;
+							int cell = rec.m_aCell[cz * CELLS + cx];
+							if (cell < 0 || (cell & CELL_VOX) != 0)
+								lifts = false;
+						}
+					}
+					if (lifts)
+						y += MUD_MudSheet.LOOK_LIFT_M;
+				}
+				m_Buf.m_aVerts[v] = Vector(vx * m_fCell, y, vz * m_fCell);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	protected void BuildGeometry(MUD_SkinChunk rec)
 	{
 		if (!rec.m_Ent)
@@ -711,7 +744,11 @@ class MUD_CoarseSkinEntity : GenericEntity
 				MeshObject mesh = res.GetResource().ToMeshObject();
 				// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 				mesh.UpdateIndices(0, m_Buf.m_aIndices);
+				if (MUD_MudSheet.LOOK_LIFT_TEST)
+					LookLift(rec, true);     // TEMP look lift test: mesh only, put back before the collider
 				mesh.UpdateVerts(0, m_Buf.m_aVerts, m_Buf.m_aUVs);
+				if (MUD_MudSheet.LOOK_LIFT_TEST)
+					LookLift(rec, false);
 				rec.m_Ent.SetObject(mesh, "");
 				rec.m_MeshRes = res;
 			}

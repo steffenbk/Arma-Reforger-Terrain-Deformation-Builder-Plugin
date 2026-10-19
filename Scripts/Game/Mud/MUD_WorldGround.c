@@ -760,11 +760,12 @@ class MUD_WorldGroundEntity : GenericEntity
 	static const bool AHEAD_HIDE_SKIP = true;
 	// REBUILD 5 (user 2026-10-19, v240 = before): 5 cuts of the patch rebuild cost, each on its own switch (A/B on the DS);
 	// the 'MUD rebuild 5' 10 s line counts each. Option 4 + the bench need MESHER_FAST (BuildRef never merges).
-	static const bool RUT_PACE = true;               // 1: mesh dirt from the rut floor alone (no look dirt) rebuilds at
+	// DS run 11 (22:15, user 2026-10-19): KEPT 4 + 5; 1, 2, 3 OFF (no measurable win - results run 11), code kept.
+	static const bool RUT_PACE = false;               // 1: mesh dirt from the rut floor alone (no look dirt) rebuilds at
 	static const float RUT_MESH_EVERY = 0.25;        //    most every RUT_MESH_EVERY s (was m_fMeshInterval)
-	static const bool SAME_SKIP = true;              // 2: a queued band mesh whose input equals the shown mesh's is not rebuilt
-	static const bool PARTIAL_IN = true;             // 3: the queued band mesh input pass reads only the changed box
-	static const bool PARTIAL_CHECK = true;          //    TEMP: every PARTIAL_CHECK_EVERY-th partial pass also runs the full one, compares
+	static const bool SAME_SKIP = false;              // 2: a queued band mesh whose input equals the shown mesh's is not rebuilt
+	static const bool PARTIAL_IN = false;             // 3: the queued band mesh input pass reads only the changed box
+	static const bool PARTIAL_CHECK = false;          //    TEMP: every PARTIAL_CHECK_EVERY-th partial pass also runs the full one, compares
 	static const int PARTIAL_CHECK_EVERY = 10;
 	static const bool COL_MERGE = true;              // 4: the collider draws flat untouched 2 x 2 quad blocks as one quad
 	static const float COL_MERGE_TOL = 0.01;         //    max off-plane (m) of a merged block's inner vertices
@@ -6608,7 +6609,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! (DS, sheet off, zones only).
 	protected bool LiftSetup(MUD_FinePatch p)
 	{
-		if (!m_bRender || !MUD_MudSheet.PatchLiftOn())
+		if (!m_bRender || (!MUD_MudSheet.PatchLiftOn() && !MUD_MudSheet.LOOK_LIFT_TEST))
 			return false;
 		m_fLiftX0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
 		m_fLiftZ0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
@@ -6641,6 +6642,8 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! times the lock: 0 at kept terrain / buildings, the same fade the rut floor uses)
 	protected float LiftAt(MUD_FinePatch p, int v)
 	{
+		if (MUD_MudSheet.LOOK_LIFT_TEST)
+			return MUD_MudSheet.LOOK_LIFT_M * p.m_aLock[v];     // TEMP look lift test: every patch, sheet or not
 		int lvz = v / PVERTS;     // int maths on its own line: '%' in a float expression does not compile
 		int lvx = v - lvz * PVERTS;
 		if (MUD_MudSheet.LIFT_BY_DRAWN)

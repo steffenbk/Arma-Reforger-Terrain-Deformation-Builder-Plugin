@@ -26,7 +26,7 @@ class MUD_MudSheet
 	// DRAG_TEST off; the wheels and feet stand on the felt ground (heightfield + rut field) under the mud.
 	// PARKED AGAIN 2026-10-18 (user: 'park the mud zone, focus on voxel ruts'; v206 = last sheet state, step fix
 	// LIFT_BY_DRAWN built but the user still saw the step / pop). Lessons: docs/features/mud-sheet/README.md top.
-	static const bool ENABLED = false;
+	static const bool ENABLED = false;   // parked (user 2026-10-19: off for the rebuild 5 DS test)
 	// SYNCED SHEET Stage 2 (2026-10-18, v179 = before): the drawn mud = the sync layer (MUD_MudSync: pressed from the
 	// replicated rut ops, the same on every machine) + this machine's own stamps at the tyres it sees (prediction),
 	// each dropped when the op holding it comes (SyncChanged) or it expires (ExpirePreds). No local slump (the sync
@@ -229,7 +229,7 @@ class MUD_MudSheet
 	// covered ground shows the ground patches, their MESH drawn PatchLift() higher (MUD_WorldGroundEntity, A2; colliders
 	// unchanged) so it meets the untouched sheet top. Patches over a sync tile stay unlifted (the sheet draws there).
 	// Needs SYNC + ALL_OFFROAD. false = every covered tile gets a sheet tile (H3, v202 = before).
-	static const bool SPARSE = true;
+	static const bool SPARSE = false;   // WHOLE-MAP TEST (every offroad tile in RADIUS) - set back to true before commit
 	static const float PATCH_GAP = 0.03;        // m a lifted patch stays under the untouched sheet top (no z-fight)
 	// LIFT BY DRAWN (step fix, user 2026-10-18 'tiles pop in, height difference driven / not driven'): a patch is drawn
 	// unlifted only under a tile whose sheet mesh is ON SCREEN (live slot or stored, flag m_iUnlift / m_aSlotUnlift),
@@ -239,6 +239,12 @@ class MUD_MudSheet
 	// false = A2 as v204 (unlift over sync tiles + the whole live window)
 	static const bool LIFT_BY_DRAWN = true;
 	static const float LIFT_UNDER = 0.01;
+	// TEMP LOOK LIFT TEST (user 2026-10-19, research/2026-10-19-sheet-redesign.md sec 6, v242 = before): clients draw
+	// the coarse skin hole cells and every ground patch mesh LOOK_LIFT_M higher (mesh only, colliders untouched; works
+	// with the sheet off). Skin: 0 at any vertex touching kept terrain or a voxel cell; patch: times its lock. Look at
+	// grass, holed props, road / building edges, patch-skin seam, crater rim, a prone soldier. Remove after the test.
+	static const bool LOOK_LIFT_TEST = true;
+	static const float LOOK_LIFT_M = 0.16;
 	static const bool SPEED_RADIUS = true;
 	static const float SPEED_RADIUS_K = 320;
 	static const float RADIUS_MIN = 20;
