@@ -20,8 +20,9 @@ research/2026-10-19-whole-map-sheet-issues.md. Labels: PROVEN-CODE, MEASURED (lo
   patches with the mud channel (mid, kept) -> sheet tiles only near the camera / vehicles (0.15 m, texture drag, dirt
   material). Every level already exists and two of the three hand-offs already work; the new parts are the lifts and
   the mud channel.
-- **The biggest risk is not cost, it is the 0.15 m visual layer everywhere offroad**: grass clutter is planted at
-  heightmap height, props / rocks / trees may sit at collider height, and a prone soldier lies on the collider while
+- **The biggest risk is not cost, it is the 0.15 m visual layer everywhere offroad**: grass rides on top of any ground
+  above the heightmap, so ruts shallower than the lift keep their grass (seen in the 2026-10-19 look lift test);
+  props / rocks / trees may sit at collider height, and a prone soldier lies on the collider while
   the drawn ground is 0.16 m higher - in PvP that is visual-only cover (bullets hit what you cannot see). The sheet
   had the same problem; making it whole-map makes it everyone's problem. That is a design decision before any build.
 
@@ -77,8 +78,10 @@ patch height| on the 'MUD sheet:' line.
 
 ## 5. The risk that decides it: a 0.15 m visual layer over all offroad ground
 All INFERENCE until seen; each is a look / gameplay check, not a cost:
-- Grass clutter is planted at heightmap height [repo gotchas] - with the ground drawn 0.16 m higher, short grass
-  sits partly under it.
+- Grass clutter: CORRECTED 2026-10-19 (research/2026-10-19-ruts-invisible.md) - grass does not get buried; it rides
+  on top of our ground once that is >= 1 mm above the heightmap (gotchas 2026-10-08). The real effect: grass also
+  covers every rut / pressed area that stays above the heightmap, so a lift must be pressed out where the ground is
+  cut, or ruts stop showing (MEASURED in the look lift test, 2026-10-19 22:53).
 - Props, rocks, trees on holed ground are placed by MUD_PinLift - if they sit at collider height they look 0.16 m sunk.
 - Prone soldiers lie on the collider: their lower ~0.16 m is under the drawn ground - visible to nobody, still hit by
   bullets. In PvP that is cover that only works for the eye. The zone sheet had it in 64 m; whole-map makes it
