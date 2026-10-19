@@ -7,7 +7,7 @@ Replaces `prompts/2026-10-19-local-sheet-cost-followup.md`. Fixed per the review
 
 You are working on the Arma Reforger mud mod (branch `claude/upbeat-lovelace-q0w022`). A cloud session did the
 research (no Workbench, game, DS or IDA there). Your job is the part that needs this machine: build a few switches,
-run the DS launches and one Workbench probe session, answer one open IDA question, write the results down. The mud sheet
+run the DS launches and one Workbench probe session, write the results down. The mud sheet
 stays PARKED - this is measurement, not un-parking.
 
 ## Read first
@@ -62,7 +62,8 @@ B4 Vehicle count: the robot drives only the local truck (`MUD_StutterRobot.Tick`
    or the `fake_rut_ops` stand-in (per-op cost only, not "per remote truck"). Do not improvise.
 B5 Skinned draw cost (only if C1 shows skinned tiles work and I still want the route - ask): in launch 2, as its own
    phase with nothing else changing and no driving, spawn N = 300 static skinned tiles in view, then the same N static
-   script meshes; render + frame ms for each, >= 6 x 5 s rows each. Also read the 'MUD prof parts' (the B2 switches stay
+   script meshes; render + frame ms on the DS CLIENT (PeerPlugin1) for each, >= 6 x 5 s rows each - the DS draws
+   nothing, so it has no bone palette to copy and its numbers say nothing here. Also read the 'MUD prof parts' (the B2 switches stay
    as they are) - read parts, not the MUD total, since A5 shares the launch.
 Rows per 5 s (time, fps, MUD ms, parts) with checksums, as in the 2026-10-18 docs.
 
@@ -72,7 +73,9 @@ C1 Skinned tile (research sec 15.3): import a 1.5 x 1.5 m tile skinned to 11 x 1
    no anim component), call `ent.GetAnimation()` once, then:
    - SetBone on one bone (+0.3 m) - does it show? Without GetAnimation - does it silently do nothing (IDA says so)?
    - SetBoneMatrix with a tilted frame from neighbour heights - does shading follow?
-   - Move bones 0.5 m out of the bind box, look away and back: culled? Then with the MeshObject `BoundingBox` override.
+   - Move bones 0.5 m out of the bind box, look away and back. EXPECTED (IDA D9): culled wrongly without the MeshObject
+     `BoundingBox` override, because SetBone never turns on the animated bounds (flag 0x20 is set only while animation
+     code - ProcAnim, door anim, Cinematic Tool - moves the bones). Confirm it, then repeat with the override set.
    - 300 tiles, bones set once, then left alone: `System.MemoryAllocationKB()` delta (per tile). Per-frame cost:
      IDA D6 says every drawn skinned object copies 48 B per bone every frame - the ms is measured on the DS (B5), not
      here. Skinned STORED tiles are ranked low now (research sec 15.8); the live-window use is what this probe is for.
@@ -83,7 +86,9 @@ C3 Static rut pieces (sec 15.2 design A, B): a 1.5 m piece .xob with 2-3 variant
    op segments on the felt floor (`MUD_WorldGroundEntity.DugUndug`). 100 `SpawnEntityPrefabLocal` with a held
    Resource vs 100 pooled `SetTransform` + `Update`; variant swap = `SetObject` + `Update`; memory per 1000 pieces.
    A swap drops any bone overrides (IDA D8): a skinned piece (design B) changes "pressed" by SetBone, never by a swap.
-   After a swap on a skinned piece, `GetAnimation()` + bones again.
+   After a swap on a skinned piece, `GetAnimation()` + bones again. Design B bounds stay the bind box (IDA D9): keep the
+   pressed depth inside the piece's box (model the bind pose at full depth) or set the `BoundingBox` override. The
+   ProcAnim piece (C2) gets moving bounds for free.
    Look in low sun.
 C4 Parallax: a 0.30 m sheet tile with a HeightMap + ParallaxScale dirt emat vs the normal 0.15 m tile. My eyes.
 D3 count test (sec 15.4): fixed camera, Statistics > General = all and MeshObject stats = count / mesh, screenshots at
@@ -91,9 +96,7 @@ D3 count test (sec 15.4): fixed camera, Statistics > General = all and MeshObjec
    Report whether General shows a draw-call / batch line at all.
 
 ## Part D - IDA
-D5-D8 are answered (results/2026-10-19-sheet-cost-probes.md "Part D, round 2"). One open follow-up, only if time
-allows: D9 who calls the MeshObject bounds path with flag `0x20` (animated bounds from the current bones,
-`sub_140A472A0`) - if the renderer does, skinned tiles need no `BoundingBox` override.
+All answered (D1-D9, results/2026-10-19-sheet-cost-probes.md). Nothing open.
 
 ## Write at the end
 - `docs/superpowers/results/2026-10-19-sheet-cost-ds-session.md` (Part B) and append Parts C / D to
