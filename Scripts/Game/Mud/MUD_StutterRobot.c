@@ -3,14 +3,14 @@
 //! Input pattern from TESTEX SCR_ScriptedDriveTest_BK (proven there in SP 2026-09-25..10-02): car actions set
 //! in the driver's OnPrepareControls before super; holding the brake at a stop makes the automatic box
 //! select reverse.
-//! Start: driver seat, stopped, hold handbrake (Space) 3 s -> reverse circle (full brake + full steer) 20 s.
+//! Start: driver seat, stopped, hold handbrake (Space) 3 s -> reverse circle (full brake + full steer) 2 min (RUN_SEC).
 //! Stop early: press Space again. (A diag menu item was tried first: script ids must be < 512 and id 500
 //! started runs but the truck never moved, 10:07 run - possibly an engine diag on that id, unproven.)
 //! Log: 'MUD robot START' / 'input' / 'STOP' lines; STOP has the corrections MUD_JoltProbe saw in the run.
 class MUD_StutterRobot
 {
 	static const bool ON = true;     // back on for the band mesher MP test (2026-10-13)
-	protected static const float RUN_SEC = 20;
+	protected static const float RUN_SEC = 120;     // user 2026-10-19: 2 min loop per run (was 20)
 	protected static const float ARM_SEC = 3;
 	protected static const float HEARTBEAT_MS = 500;
 

@@ -34,6 +34,20 @@ class MUD_MudSync
 	static const int TN = 400;                  // MUD_MudSheet.TQ squared: cells per sync tile
 	static const int NEVER = -1000000;          // m_aPT of a cell no stamp touched
 	static const int CLEAR_MAX = 400;           // cells a side: a bigger crater box clears nothing (WARNING, every machine; a dig: BOX_MAX)
+	// SHEET COST switches (research 2026-10-19 sec 15.5, prompts/2026-10-19-local-sheet-cost-followup-v2.md Part A;
+	// v239 = before). BUILD switches: they change the synced maths, so the DS and every client need the same build
+	// (hash lines re-baseline). Offline reference: Tools/mud_sheet_cost_exp.py.
+	// A1 SLUMP_ONE: the op's slump runs only on the cells within 1 of its stamped cells (4 neighbours), 1 pass at
+	// SLUMP_ONE_K (the local sheet slump keeps MUD_MudSheet.SLUMP); ground read only on the even cells they use.
+	static const bool SLUMP_ONE = false;
+	static const float SLUMP_ONE_K = 0.6;       // sync slump factor (before: MUD_MudSheet.SLUMP 0.25 x 3 passes)
+	static const int SLUMP_ONE_PASSES = 1;
+	// A2 DRAG_STRIP: each stamp's drag limit walks only the cells the stamp's strip reached + 1 ring (in row order,
+	// then reversed), not the stamp's whole box
+	static const bool DRAG_STRIP = false;
+	// TEST KIT self-test (Part A step 7): once, this many rut ops after start, one op runs through the old and the new
+	// A1 / A2 paths on copies of its tiles ('MUD sheet cost self-test:' line)
+	static const int SELF_TEST_AFTER = 20;
 
 	protected static ref MUD_MudSync s_Inst;
 	protected static int s_iSnapTo;             // Stage 5 joiner: ops <= this come in the snapshot layer - no work for them here
@@ -123,6 +137,40 @@ class MUD_MudSync
 	protected int m_iStatFlushMs;
 	protected int m_iSt10Stamps;           // stamps since the sheet's 10 s Stage 3 line (TakeStamps10)
 	protected int m_iDsLogAt;              // Stage 5, DS: last 'MUD mud sheet sync (server)' line
+	// SHEET COST A1 / A2: per instance (= the build switches; only a self-test copy differs)
+	protected bool m_bA1;
+	protected bool m_bA2;
+	protected ref array<int> m_aStI = {};       // A1, open op: stamped cells, gi (duplicates fine)
+	protected ref array<int> m_aStK = {};       //                         gk
+	protected ref array<int> m_aSmSeed = {};    // A1, per box cell: stamped
+	protected ref array<int> m_aSm = {};        // A1, per box cell: in the mask (seed dilated by 1)
+	protected ref array<int> m_aSmList = {};    // A1, box cell indices of the mask, row order
+	protected ref array<int> m_aEgNeed = {};    // A1, per even cell: a mask cell reads it
+	protected ref array<int> m_aDm = {};        // A2, per cell of the stamp box + 1: 1 = passed the stamp's strip test
+	protected ref array<int> m_aDl = {};        // A2, marked cells + ring, as m_iDw-box indices, row order
+	protected int m_iDw;
+	protected int m_iDh;
+	protected int m_iStatDragCells;             // cells the drag limit visited (both paths)
+	protected int m_iStatSlumpMoved;            // cells whose depth the slump changed (both paths)
+	// self-test (TEST_KIT)
+	protected bool m_bTest;                     // a self-test copy: no hash line, no sheet restore, no lift
+	protected int m_iSelfTestN;
+	protected static bool s_bSelfTestDone;
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_MudSync()
+	{
+		m_bA1 = SLUMP_ONE;
+		m_bA2 = DRAG_STRIP;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Sheet cost switch states for the 'MUD prof 5 s' and 'MUD mud sheet sync' lines
+	static string SwitchTag()
+	{
+		return string.Format(" | sheet cost switches: A1 slump one %1, A2 drag strip %2, A3 server layer (DS) %3, A5 stored render gate %4",
+			SLUMP_ONE, DRAG_STRIP, MUD_TestKit.ServerLayer(), MUD_MudSheet.STORED_RENDERED_GATE);
+	}
 
 	//------------------------------------------------------------------------------------------------
 	//! Does this machine keep the layer? Every machine that draws the sheet; Stage 5: a DS too (SERVER_LAYER)
@@ -131,7 +179,7 @@ class MUD_MudSync
 		if (!MUD_MudSheet.ENABLED || !MUD_MudSheet.SYNC)
 			return false;
 		if (RplSession.Mode() == RplMode.Dedicated)
-			return SERVER_LAYER;
+			return MUD_TestKit.ServerLayer();     // A3: SERVER_LAYER, or the DS test kit file's server_layer
 		return true;
 	}
 
@@ -270,6 +318,7 @@ class MUD_MudSync
 	{
 		s_Inst = null;
 		s_iSnapTo = 0;
+		s_bSelfTestDone = false;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -357,14 +406,17 @@ class MUD_MudSync
 		MUD_MudSync s = s_Inst;
 		string p1 = string.Format("sync layer: %1 ops, %2 stamps, %3 tiles, %4 ms (max %5 ms per op), %6 untagged, %7 too big to slump",
 			s.m_iStatOps, s.m_iStatStamps, s.m_mTiles.Count(), s.m_iStatMs, s.m_iStatMaxMs, s.m_iStatNoTag, s.m_iStatBig);
-		string p2 = string.Format(" | COST ms: stamps %1, slump %2 (%3 ground reads, %4 cells), quant + hash %5, sheet restore %6",
-			s.m_iMsStamp, s.m_iMsSlump, s.m_iStatGround, s.m_iStatSlumpCells, s.m_iMsHash, s.m_iMsSheet);
+		string p2 = string.Format(" | COST ms: stamps %1, slump %2 (%3 ground reads, %4 cells, %7 moved), quant + hash %5, sheet restore %6",
+			s.m_iMsStamp, s.m_iMsSlump, s.m_iStatGround, s.m_iStatSlumpCells, s.m_iMsHash, s.m_iMsSheet, s.m_iStatSlumpMoved);
+		s.m_iStatSlumpMoved = 0;
 		string p3 = string.Format(" | queue max %1, now %2, %3 frames ran op steps, worst frame %4 ms, %5 flushes (%6 ms)",
 			s.m_iStatQueueMax, s.m_aQueue.Count(), s.m_iStatDrainFrames, s.m_iStatDrainMaxMs, s.m_iStatFlush, s.m_iStatFlushMs);
 		string p4 = string.Format(" | op clearing: %1 crater / dig ops, %2 cells bared, %3 ms", s.m_iStatClears, s.m_iStatBared, s.m_iMsClear);
-		string p5 = string.Format(" | STAMP split ms: side reads %1, cells %2 (%3 walked, %4 stamped), drag limit %5",
-			s.m_iMsStSide, s.m_iMsStCells, s.m_iStatStWalk, s.m_iStatStHit, s.m_iMsStDrag);
-		string line = p1 + p2 + p3 + p4 + p5;
+		string p5 = string.Format(" | STAMP split ms: side reads %1, cells %2 (%3 walked, %4 stamped), drag limit %5 (%6 cells)",
+			s.m_iMsStSide, s.m_iMsStCells, s.m_iStatStWalk, s.m_iStatStHit, s.m_iMsStDrag, s.m_iStatDragCells);
+		string sw = SwitchTag();
+		string line = p1 + p2 + p3 + p4 + p5 + sw;
+		s.m_iStatDragCells = 0;
 		s.m_iMsStSide = 0;
 		s.m_iMsStCells = 0;
 		s.m_iMsStDrag = 0;
@@ -488,6 +540,10 @@ class MUD_MudSync
 		m_iBi1 = -1;
 		m_iBk0 = 0;
 		m_iBk1 = -1;
+		m_aStI.Clear();
+		m_aStK.Clear();
+		if (MUD_TestKit.TEST_KIT && !m_bTest && !s_bSelfTestDone)
+			SelfTestMaybe(op);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -686,6 +742,8 @@ class MUD_MudSync
 			return;
 		}
 		SlumpBegin();
+		if (m_bA1)
+			BuildSlumpMask();
 		m_iJobStep = JOB_GROUND;
 		m_iJobI = 0;
 	}
@@ -695,9 +753,9 @@ class MUD_MudSync
 	protected void StepHash()
 	{
 		m_iJobStep = JOB_SHEET;
-		if (m_bJobClear)
-			m_iJobEnd = 2;     // Stage 4: the drawn sheet clears at the op's go-live (MUD_MudSheet.GroundChanged)
-		if (!MUD_TestKit.TEST_KIT)
+		if (m_bJobClear || m_bTest)
+			m_iJobEnd = 2;     // Stage 4: the drawn sheet clears at the op's go-live (MUD_MudSheet.GroundChanged); a self-test copy ends here
+		if (!MUD_TestKit.TEST_KIT || m_bTest)
 			return;
 		int h = -1;
 		if (!m_bJobBig)
@@ -793,7 +851,7 @@ class MUD_MudSync
 				t.m_aB[c] = 0;
 			}
 			m_mTiles.Set(key, t);
-			if (!MUD_MudSheet.LIFT_BY_DRAWN)
+			if (!MUD_MudSheet.LIFT_BY_DRAWN && !m_bTest)
 				MUD_WorldGroundEntity.SheetLiftDirty(tx * MUD_MudSheet.TILE_M, tz * MUD_MudSheet.TILE_M);     // A2: lift off there
 		}
 		if (t)
@@ -877,6 +935,8 @@ class MUD_MudSync
 		m_iMsStSide += System.GetTickCount(tS);
 		int tC = System.GetTickCount();
 		bool any = false;
+		if (m_bA2)
+			DragStripBegin(i1 - i0 + 3, k1 - k0 + 3);
 		// sheet perf fix 4 (2026-10-18, MUD_Prof WB 10:48: stamps ~1 ms each; v188 = before): plain float maths instead of a
 		// Vector + 2 vector.Dot per cell, and each row only walks the cells the stamp's strip can reach (+1 cell each side,
 		// so float rounding never drops a cell). The per-cell test below is unchanged, so the same cells are stamped.
@@ -925,6 +985,8 @@ class MUD_MudSync
 				float lat = Math.AbsFloat(latS);
 				if (lat >= reach || (t > nose && lat >= half))
 					continue;
+				if (m_bA2)
+					m_aDm[(k - k0 + 1) * m_iDw + i - i0 + 1] = 1;     // A2: the strip reached it (before the tile test)
 				int l;
 				MUD_MudSyncTile tile = TileOf(i, k, true, l);
 				if (!tile)
@@ -991,6 +1053,11 @@ class MUD_MudSync
 				tile.m_aOv[l] = ov;
 				any = true;
 				m_iStatStHit++;
+				if (m_bA1)
+				{
+					m_aStI.Insert(i);
+					m_aStK.Insert(k);
+				}
 			}
 		}
 		m_iMsStCells += System.GetTickCount(tC);
@@ -998,7 +1065,12 @@ class MUD_MudSync
 			return;
 		int tD = System.GetTickCount();
 		if (MUD_MudSheet.DRAG_LIM > 0)
-			LimitDrag(i0, i1, k0, k1);
+		{
+			if (m_bA2)
+				LimitDragStrip(i0, k0);
+			else
+				LimitDrag(i0, i1, k0, k1);
+		}
 		m_iMsStDrag += System.GetTickCount(tD);
 		if (m_iBi1 < m_iBi0)
 		{
@@ -1017,11 +1089,6 @@ class MUD_MudSync
 	//! MUD_MudSheet.LimitDrag on the sync tiles: each cell's drag pulled to within DRAG_LIM of its 4 neighbours
 	protected void LimitDrag(int i0, int i1, int k0, int k1)
 	{
-		float lim = MUD_MudSheet.DRAG_LIM;
-		// sheet perf P1 (2026-10-18, DS client 11:08: LimitDrag = 84-93 % of the sync stamp ms; v190 = before): a cell
-		// whose 4 neighbours lie in its own tile reads them straight from that tile's arrays (same values, same order
-		// as GetI); cells on a tile edge (or near 0, where TileOf's int division differs) keep the TileOf path.
-		int tq = MUD_MudSheet.TQ;
 		for (int sweep = 0; sweep < 2; sweep++)
 		{
 			for (int kk = k0; kk <= k1; kk++)
@@ -1034,61 +1101,130 @@ class MUD_MudSync
 					int i = ii;
 					if (sweep == 1)
 						i = i0 + i1 - ii;
-					int l;
-					MUD_MudSyncTile t = TileOf(i, k, false, l);
-					if (!t)
-						continue;
-					float ou = t.m_aOu[l];
-					float ov = t.m_aOv[l];
-					int li = l % tq;
-					int lk = l / tq;
-					if (i > tq && k > tq && li > 0 && li < tq - 1 && lk > 0 && lk < tq - 1)
-					{
-						// neighbours in the order of the loop below: i - 1, i + 1, k - 1, k + 1
-						float au = t.m_aOu[l - 1];
-						float av = t.m_aOv[l - 1];
-						ou = Math.Clamp(ou, au - lim, au + lim);
-						ov = Math.Clamp(ov, av - lim, av + lim);
-						au = t.m_aOu[l + 1];
-						av = t.m_aOv[l + 1];
-						ou = Math.Clamp(ou, au - lim, au + lim);
-						ov = Math.Clamp(ov, av - lim, av + lim);
-						au = t.m_aOu[l - tq];
-						av = t.m_aOv[l - tq];
-						ou = Math.Clamp(ou, au - lim, au + lim);
-						ov = Math.Clamp(ov, av - lim, av + lim);
-						au = t.m_aOu[l + tq];
-						av = t.m_aOv[l + tq];
-						ou = Math.Clamp(ou, au - lim, au + lim);
-						ov = Math.Clamp(ov, av - lim, av + lim);
-						t.m_aOu[l] = ou;
-						t.m_aOv[l] = ov;
-						continue;
-					}
-					for (int q = 0; q < 4; q++)
-					{
-						int ni = i;
-						int nk = k;
-						if (q == 0)
-							ni--;
-						else if (q == 1)
-							ni++;
-						else if (q == 2)
-							nk--;
-						else
-							nk++;
-						float nd;
-						float nou;
-						float nov;
-						GetI(ni, nk, nd, nou, nov);
-						ou = Math.Clamp(ou, nou - lim, nou + lim);
-						ov = Math.Clamp(ov, nov - lim, nov + lim);
-					}
-					// the neighbour read may have moved the cache: write through the cell's own tile again
-					MUD_MudSyncTile tw = TileOf(i, k, false, l);
-					tw.m_aOu[l] = ou;
-					tw.m_aOv[l] = ov;
+					LimitDragCell(i, k);
 				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! One cell of the drag limit (LimitDrag / LimitDragStrip): its drag pulled to within DRAG_LIM of its 4 neighbours.
+	//! No tile: skipped; a neighbour with no tile reads THICK / 0 drag (GetI).
+	protected void LimitDragCell(int i, int k)
+	{
+		m_iStatDragCells++;
+		float lim = MUD_MudSheet.DRAG_LIM;
+		// sheet perf P1 (2026-10-18, DS client 11:08: LimitDrag = 84-93 % of the sync stamp ms; v190 = before): a cell
+		// whose 4 neighbours lie in its own tile reads them straight from that tile's arrays (same values, same order
+		// as GetI); cells on a tile edge (or near 0, where TileOf's int division differs) keep the TileOf path.
+		int tq = MUD_MudSheet.TQ;
+		int l;
+		MUD_MudSyncTile t = TileOf(i, k, false, l);
+		if (!t)
+			return;
+		float ou = t.m_aOu[l];
+		float ov = t.m_aOv[l];
+		int li = l % tq;
+		int lk = l / tq;
+		if (i > tq && k > tq && li > 0 && li < tq - 1 && lk > 0 && lk < tq - 1)
+		{
+			// neighbours in the order of the loop below: i - 1, i + 1, k - 1, k + 1
+			float au = t.m_aOu[l - 1];
+			float av = t.m_aOv[l - 1];
+			ou = Math.Clamp(ou, au - lim, au + lim);
+			ov = Math.Clamp(ov, av - lim, av + lim);
+			au = t.m_aOu[l + 1];
+			av = t.m_aOv[l + 1];
+			ou = Math.Clamp(ou, au - lim, au + lim);
+			ov = Math.Clamp(ov, av - lim, av + lim);
+			au = t.m_aOu[l - tq];
+			av = t.m_aOv[l - tq];
+			ou = Math.Clamp(ou, au - lim, au + lim);
+			ov = Math.Clamp(ov, av - lim, av + lim);
+			au = t.m_aOu[l + tq];
+			av = t.m_aOv[l + tq];
+			ou = Math.Clamp(ou, au - lim, au + lim);
+			ov = Math.Clamp(ov, av - lim, av + lim);
+			t.m_aOu[l] = ou;
+			t.m_aOv[l] = ov;
+			return;
+		}
+		for (int q = 0; q < 4; q++)
+		{
+			int ni = i;
+			int nk = k;
+			if (q == 0)
+				ni--;
+			else if (q == 1)
+				ni++;
+			else if (q == 2)
+				nk--;
+			else
+				nk++;
+			float nd;
+			float nou;
+			float nov;
+			GetI(ni, nk, nd, nou, nov);
+			ou = Math.Clamp(ou, nou - lim, nou + lim);
+			ov = Math.Clamp(ov, nov - lim, nov + lim);
+		}
+		// the neighbour read may have moved the cache: write through the cell's own tile again
+		MUD_MudSyncTile tw = TileOf(i, k, false, l);
+		tw.m_aOu[l] = ou;
+		tw.m_aOv[l] = ov;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A2 DRAG_STRIP, Stamp start: the strip marks of this stamp, dw x dh = its box + 1 cell each side, all 0
+	protected void DragStripBegin(int dw, int dh)
+	{
+		m_iDw = dw;
+		m_iDh = dh;
+		int n = dw * dh;
+		m_aDm.Resize(n);
+		for (int z = 0; z < n; z++)
+			m_aDm[z] = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A2 DRAG_STRIP, Stamp end: the drag limit on the marked cells + 1 ring (4 neighbours, from the marks - not in
+	//! place), in row order (k up, i up), then the same list reversed (= LimitDrag's reversed k and i). i0, k0 = the
+	//! stamp box corner (box cell x, y = world i0 - 1 + x, k0 - 1 + y).
+	protected void LimitDragStrip(int i0, int k0)
+	{
+		int dw = m_iDw;
+		int dh = m_iDh;
+		m_aDl.Clear();
+		for (int y = 0; y < dh; y++)
+		{
+			for (int x = 0; x < dw; x++)
+			{
+				int c = y * dw + x;
+				bool on = m_aDm[c] != 0;
+				if (!on && x > 0 && m_aDm[c - 1] != 0)
+					on = true;
+				if (!on && x < dw - 1 && m_aDm[c + 1] != 0)
+					on = true;
+				if (!on && y > 0 && m_aDm[c - dw] != 0)
+					on = true;
+				if (!on && y < dh - 1 && m_aDm[c + dw] != 0)
+					on = true;
+				if (on)
+					m_aDl.Insert(c);
+			}
+		}
+		int cnt = m_aDl.Count();
+		for (int sweep = 0; sweep < 2; sweep++)
+		{
+			for (int q = 0; q < cnt; q++)
+			{
+				int idx = q;
+				if (sweep == 1)
+					idx = cnt - 1 - q;
+				int c2 = m_aDl[idx];
+				int xx = c2 % dw;
+				int yy = c2 / dw;
+				LimitDragCell(i0 - 1 + xx, k0 - 1 + yy);
 			}
 		}
 	}
@@ -1135,6 +1271,12 @@ class MUD_MudSync
 		{
 			bool gok;
 			int e = ek * m_iEw + ei;
+			if (m_bA1 && m_aEgNeed[e] == 0)
+			{
+				m_aEg[e] = 0;     // A1: no mask cell reads it
+				m_aEgOk[e] = 0;
+				continue;
+			}
 			m_aEg[e] = GroundY((m_iEi0 + ei * 2) * cell, (m_iEk0 + ek * 2) * cell, gok);
 			m_aEgOk[e] = 0;
 			if (gok)
@@ -1162,6 +1304,13 @@ class MUD_MudSync
 			for (int i = 0; i < w; i++)
 			{
 				int c = k * w + i;
+				if (m_bA1 && m_aSm[c] == 0)
+				{
+					m_aSok[c] = 0;     // A1: outside the mask - neither gives nor takes, no tile made
+					m_aSd[c] = 0;
+					m_aSg[c] = 0;
+					continue;
+				}
 				int oi = m_iJi0 + i - m_iEi0;
 				int ok2 = m_iJk0 + k - m_iEk0;
 				int mi = oi % 2;
@@ -1194,6 +1343,11 @@ class MUD_MudSync
 	//! JOB_PASS: one slump iteration over the box (all flows from the old depths, then added)
 	protected void SlumpPass()
 	{
+		if (m_bA1)
+		{
+			SlumpPassList();
+			return;
+		}
 		int w = m_iJi1 - m_iJi0 + 1;
 		int hgt = m_iJk1 - m_iJk0 + 1;
 		int n = w * hgt;
@@ -1247,6 +1401,283 @@ class MUD_MudSync
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! A1 SLUMP_ONE (StepStamp, after SlumpBegin - the op box is known only after its last stamp): the mask = the
+	//! stamped cells (m_aStI / m_aStK) dilated by 1 over 4 neighbours, read from the seed copy (never in place); the
+	//! op box's +1 margin holds the ring. m_aSmList = mask cells in row order.
+	protected void BuildSlumpMask()
+	{
+		int w = m_iJi1 - m_iJi0 + 1;
+		int h = m_iJk1 - m_iJk0 + 1;
+		int n = w * h;
+		m_aSmSeed.Resize(n);
+		m_aSm.Resize(n);
+		for (int z = 0; z < n; z++)
+		{
+			m_aSmSeed[z] = 0;
+			m_aSm[z] = 0;
+		}
+		int cnt = m_aStI.Count();
+		for (int s = 0; s < cnt; s++)
+		{
+			int c = (m_aStK[s] - m_iJk0) * w + m_aStI[s] - m_iJi0;
+			m_aSmSeed[c] = 1;
+		}
+		m_aSmList.Clear();
+		for (int k = 0; k < h; k++)
+		{
+			for (int i = 0; i < w; i++)
+			{
+				int c2 = k * w + i;
+				bool on = m_aSmSeed[c2] != 0;
+				if (!on && i > 0 && m_aSmSeed[c2 - 1] != 0)
+					on = true;
+				if (!on && i < w - 1 && m_aSmSeed[c2 + 1] != 0)
+					on = true;
+				if (!on && k > 0 && m_aSmSeed[c2 - w] != 0)
+					on = true;
+				if (!on && k < h - 1 && m_aSmSeed[c2 + w] != 0)
+					on = true;
+				if (on)
+				{
+					m_aSm[c2] = 1;
+					m_aSmList.Insert(c2);
+				}
+			}
+		}
+		MarkEvenNeed(w);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A1: the even cells some mask cell reads (its a0 / a1 x b0 / b1 in SlumpCells) - only these get a GroundY
+	protected void MarkEvenNeed(int w)
+	{
+		int ne = m_iEw * m_iEh;
+		m_aEgNeed.Resize(ne);
+		for (int z = 0; z < ne; z++)
+			m_aEgNeed[z] = 0;
+		foreach (int c : m_aSmList)
+		{
+			int i = c % w;
+			int k = c / w;
+			int oi = m_iJi0 + i - m_iEi0;
+			int ok2 = m_iJk0 + k - m_iEk0;
+			int mi = oi % 2;
+			int mk = ok2 % 2;
+			int a0 = (oi - mi) / 2;
+			int b0 = (ok2 - mk) / 2;
+			m_aEgNeed[b0 * m_iEw + a0] = 1;
+			m_aEgNeed[b0 * m_iEw + a0 + mi] = 1;
+			m_aEgNeed[(b0 + mk) * m_iEw + a0] = 1;
+			m_aEgNeed[(b0 + mk) * m_iEw + a0 + mi] = 1;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A1 JOB_PASS: one slump iteration over the mask cells only (SLUMP_ONE_K; flows only between two m_aSok cells,
+	//! and m_aSok is set only inside the mask, so every giver and taker is a list cell). All flows from the old depths,
+	//! then added, as SlumpPass.
+	protected void SlumpPassList()
+	{
+		int w = m_iJi1 - m_iJi0 + 1;
+		int hgt = m_iJk1 - m_iJk0 + 1;
+		float step = MUD_MudSheet.REPOSE * MUD_MudSheet.CELL;
+		int cnt = m_aSmList.Count();
+		for (int z = 0; z < cnt; z++)
+			m_aSdd[m_aSmList[z]] = 0;
+		for (int q = 0; q < cnt; q++)
+		{
+			int v = m_aSmList[q];
+			float da = m_aSd[v];
+			if (m_aSok[v] == 0 || da <= 0)
+				continue;
+			int i2 = v % w;
+			int k2 = v / w;
+			float sa = m_aSg[v] + da;
+			float give = 0;
+			for (int nb = 0; nb < 4; nb++)
+			{
+				int ni = i2;
+				int nk = k2;
+				if (nb == 0)
+					ni++;
+				else if (nb == 1)
+					ni--;
+				else if (nb == 2)
+					nk++;
+				else
+					nk--;
+				if (ni < 0 || ni >= w || nk < 0 || nk >= hgt)
+					continue;
+				int nv = nk * w + ni;
+				if (m_aSok[nv] == 0)
+					continue;
+				float drop = sa - m_aSg[nv] - m_aSd[nv] - step;
+				if (drop <= 0)
+					continue;
+				float f = Math.Min(drop * SLUMP_ONE_K * 0.5, da * 0.25);
+				if (f < 0.0002)
+					continue;
+				m_aSdd[nv] = m_aSdd[nv] + f;
+				give += f;
+			}
+			m_aSdd[v] = m_aSdd[v] - give;
+		}
+		for (int z2 = 0; z2 < cnt; z2++)
+		{
+			int v2 = m_aSmList[z2];
+			m_aSd[v2] = m_aSd[v2] + m_aSdd[v2];
+		}
+		m_iJobI++;
+		if (m_iJobI >= SLUMP_ONE_PASSES)
+			m_iJobStep = JOB_WRITE;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST KIT self-test (StartJob, live layer only, before the op's own stamps): the SELF_TEST_AFTER-th rut op (or the
+	//! next one that stamps and slumps) runs on two copies of the tiles around it - old maths (A1 / A2 off) and new
+	//! (both on) - and the copies are compared. Prints once per game.
+	protected void SelfTestMaybe(MUD_VoxelOp op)
+	{
+		m_iSelfTestN++;
+		if (m_iSelfTestN < SELF_TEST_AFTER)
+			return;
+		if (SelfTest(op) || m_iSelfTestN >= SELF_TEST_AFTER + 50)
+			s_bSelfTestDone = true;     // printed, or 50 ops in a row too big / landed nothing: no line
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Self-test: depth diff (A1 changes only depths) and drag diff (A2 changes only drag) between the two copies
+	protected bool SelfTest(MUD_VoxelOp op)
+	{
+		int t0 = System.GetTickCount();
+		MUD_MudSync a = SelfTestCopy(op, false, false);
+		MUD_MudSync b = SelfTestCopy(op, true, true);
+		if (!a.SelfTestRun(op) || !b.SelfTestRun(op))
+			return false;
+		// every tile either copy holds (a tile only one copy made = plain layer in the other)
+		array<int> keys = {};
+		foreach (int ka, MUD_MudSyncTile ta : a.m_mTiles)
+			keys.Insert(ka);
+		foreach (int kb, MUD_MudSyncTile tb : b.m_mTiles)
+		{
+			if (!a.m_mTiles.Contains(kb))
+				keys.Insert(kb);
+		}
+		int nD = 0;
+		float mD = 0;
+		int nG = 0;
+		float mG = 0;
+		foreach (int key : keys)
+		{
+			MUD_MudSyncTile x = a.m_mTiles.Get(key);
+			MUD_MudSyncTile y = b.m_mTiles.Get(key);
+			for (int c = 0; c < TN; c++)
+			{
+				float dd = Math.AbsFloat(TileVal(x, c, 0) - TileVal(y, c, 0));
+				if (dd > 0.000001)
+				{
+					nD++;
+					if (dd > mD)
+						mD = dd;
+				}
+				float du = Math.AbsFloat(TileVal(x, c, 1) - TileVal(y, c, 1));
+				float dv = Math.AbsFloat(TileVal(x, c, 2) - TileVal(y, c, 2));
+				float dg = Math.Max(du, dv);
+				if (dg > 0.000001)
+				{
+					nG++;
+					if (dg > mG)
+						mG = dg;
+				}
+			}
+		}
+		string p1 = string.Format("MUD sheet cost self-test: cells changed %1, max diff %2 m (A1) | drag cells %3, max diff %4 m (A2)",
+			nD, mD.ToString(-1, 6), nG, mG.ToString(-1, 6));
+		string p2 = string.Format(" | seq %1, box %2 x %3 cells, slump cells old %4 new %5, ground reads old %6 new %7, drag limit cells old %8 new %9",
+			op.m_iSeq, a.m_iJi1 - a.m_iJi0 + 1, a.m_iJk1 - a.m_iJk0 + 1, a.m_iStatSlumpCells, b.m_iStatSlumpCells, a.m_iStatGround, b.m_iStatGround, a.m_iStatDragCells, b.m_iStatDragCells);
+		string p3 = string.Format(" | slump moved cells old %4 new %5 | %1 tiles compared, %2 stamps, %3 ms (test kit, once)", keys.Count(), a.m_iStatStamps, System.GetTickCount(t0), a.m_iStatSlumpMoved, b.m_iStatSlumpMoved);
+		Print(p1 + p2 + p3, LogLevel.NORMAL);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Self-test copy of the layer around op (its box + 1 tile each side), A1 / A2 as given
+	protected MUD_MudSync SelfTestCopy(MUD_VoxelOp op, bool a1, bool a2)
+	{
+		MUD_MudSync cp = new MUD_MudSync();
+		cp.m_bTest = true;
+		cp.m_bA1 = a1;
+		cp.m_bA2 = a2;
+		float span = MUD_MudSheet.TQ * MUD_MudSheet.CELL;
+		int tx0 = Math.Floor(op.m_vLo[0] / span) - 1;
+		int tx1 = Math.Floor(op.m_vHi[0] / span) + 1;
+		int tz0 = Math.Floor(op.m_vLo[2] / span) - 1;
+		int tz1 = Math.Floor(op.m_vHi[2] / span) + 1;
+		if (tx1 - tx0 > 20 || tz1 - tz0 > 20)
+			return cp;     // odd op box: both copies start plain (still a fair old vs new compare)
+		for (int tz = tz0; tz <= tz1; tz++)
+		{
+			for (int tx = tx0; tx <= tx1; tx++)
+			{
+				int key = MUD_MudSheet.TrailKey(tx, tz);
+				MUD_MudSyncTile t = m_mTiles.Get(key);
+				if (t)
+					cp.m_mTiles.Set(key, CopyTile(t));
+			}
+		}
+		return cp;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Self-test: op from start to end on this copy, in one go. True = it stamped and slumped (not too big)
+	protected bool SelfTestRun(MUD_VoxelOp op)
+	{
+		m_aQueue.Insert(op);
+		StartJob();
+		int guard = 0;
+		while (m_Job && guard < 100000)
+		{
+			Step();
+			guard++;
+		}
+		return m_iStatOps > 0 && !m_bJobBig;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected static MUD_MudSyncTile CopyTile(MUD_MudSyncTile t)
+	{
+		MUD_MudSyncTile c = new MUD_MudSyncTile();
+		for (int l = 0; l < TN; l++)
+		{
+			c.m_aD[l] = t.m_aD[l];
+			c.m_aOu[l] = t.m_aOu[l];
+			c.m_aOv[l] = t.m_aOv[l];
+			c.m_aP[l] = t.m_aP[l];
+			c.m_aPT[l] = t.m_aPT[l];
+			c.m_aPV[l] = t.m_aPV[l];
+			c.m_aB[l] = t.m_aB[l];
+		}
+		return c;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Self-test: cell c of tile t, what 0 = depth, 1 / 2 = drag; no tile = the plain layer (THICK, 0)
+	protected static float TileVal(MUD_MudSyncTile t, int c, int what)
+	{
+		if (!t)
+		{
+			if (what == 0)
+				return MUD_MudSheet.THICK;
+			return 0;
+		}
+		if (what == 0)
+			return t.m_aD[c];
+		if (what == 1)
+			return t.m_aOu[c];
+		return t.m_aOv[c];
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! JOB_WRITE: the slumped depths back into the tiles
 	protected void SlumpWrite()
 	{
@@ -1261,10 +1692,15 @@ class MUD_MudSync
 					continue;
 				int l3;
 				MUD_MudSyncTile t3 = TileOf(m_iJi0 + i3, m_iJk0 + k3, false, l3);
+				if (t3.m_aD[l3] != m_aSd[c3])
+					m_iStatSlumpMoved++;
 				t3.m_aD[l3] = m_aSd[c3];
 			}
 		}
-		m_iStatSlumpCells += w * hgt;
+		if (m_bA1)
+			m_iStatSlumpCells += m_aSmList.Count() * SLUMP_ONE_PASSES;
+		else
+			m_iStatSlumpCells += w * hgt;
 		m_iJobStep = JOB_QUANT;
 		m_iJobI = 0;
 	}

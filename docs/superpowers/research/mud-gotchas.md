@@ -478,3 +478,28 @@ Proven in-engine / measured facts for the mud system. Newest first. Add new ones
   steered front tyre. WheelGetPosition(w) is VEHICLE-LOCAL (WB 00:38 log: constant x 1.02 z 2.65 while driving; read
   as world it cut ruts near the map corner = no ruts) - use CoordToParent. Whether its hub follows steering: by eye
   pending (user named the world-read ball first, which cannot sit on the tyre).
+- IDA 2026-10-19 (Exp Diag 1.9, results/2026-10-19-sheet-cost-probes.md D1): IEntity.SetBone (sub_140E3BAE0) needs a
+  MeshObject whose .xob has a skeleton AND its skeleton instance; without either it does nothing, silently. The instance
+  is made by IEntity.GetAnimation() (sub_140E4C680 -> sub_140A47C10) - call it once on a bare entity. SetBone stores a
+  per-bone override (zero angles + trans, scale 1 = clear) and marks the entity dirty; main thread only. Bounds are NOT
+  updated: the MeshObject property 'BoundingBox' is the "override of bounding volume, if object is animated and can
+  exceed its static bounds".
+- IDA 2026-10-19 (D2): SignalsManagerComponent.SetSignalValue only writes a float (no changed flag). ProcAnimSystem
+  evaluates EVERY registered ProcAnim every frame (jobs of 4, worker threads), no distance / visibility / signal-changed
+  test - cost grows with the number of ProcAnim pieces, not with changes. ProcAnimComponent has 'OnFrameUpdate'.
+- IDA 2026-10-19 (D4): SpawnEntityPrefab's native takes an already-loaded Resource and calls the game (no resource
+  load inside); keep one Resource from Resource.Load. The Render diag "Shape instancing" is debug Shapes only.
+- IDA 2026-10-19 (D5): GenericComponent.Deactivate(owner) on a ProcAnimComponent calls ProcAnimSystem::Unregister
+  (vtable +48 = sub_1402A0560) - the component leaves the per-frame list; Activate re-registers it. OnFrameUpdate is a
+  prefab-only property (0 = never registered).
+- IDA 2026-10-19 (D6/D7): a drawn skinned MeshObject copies its bone palette (48 B per bone) every draw, no unchanged
+  skip found (MeshObject draw-prepare sub_140AAF5A0). Pose / bounds code uses fixed 384-bone buffers.
+- IDA 2026-10-19 (D8): IEntity.SetObject with a different VObject or remap builds a NEW MeshObject and releases the old
+  one - the skeleton instance and all SetBone overrides are lost (call GetAnimation + SetBone again). Same object +
+  same remap = no-op.
+- IDA 2026-10-19 (D9): a skeleton mesh is a MeshObjectAnimatedComponent; its bounds follow the bones ONLY while its own
+  flag 0x20 is set, which animation systems set (ProcAnim job when bones moved, doors, Cinematic Tool) - SetBone does
+  not. SetBone-moved meshes keep the bind-pose box: use the MeshObject BoundingBox override.
+- PROVEN 2026-10-19 (all 10361 .emat in the Experimental data pak + exe string search): no world-space normal map
+  option. Normal maps use only "UV set 1" / "UV set 2" (UVSrc*); ApplyWorldNormal is a MatPBRBasicGlass refraction
+  flag; no triplanar / world-UV setting. With no custom shaders, smooth tile seams must come from our vertex normals.

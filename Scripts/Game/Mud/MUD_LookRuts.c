@@ -104,6 +104,7 @@ class MUD_LookRuts
 	protected static int s_iWritten;
 	protected static ref array<int> s_aLead = {};     // MUD_VoxelProbe.LeadAxle: per wheel, 1 = leading axle (cuts)
 	protected static int s_iAligned;        // PER_WHEEL: samples an aligned wheel of the same vehicle left as they were
+	protected static int s_iWorn;           // WEAR COUNT: samples skipped because the server only counts wear there
 	protected static int s_iCaught;
 	protected static int s_iExpired;
 	protected static int s_iReplaced;
@@ -156,7 +157,7 @@ class MUD_LookRuts
 		MUD_GrassCutProbe.Tick(now);  // TEMP grass-cut probe 2026-10-18 (own switch)
 		MUD_RutDebug.Tick();          // diag menu Mud > Ruts and wheels
 		MUD_TrackStamps.Tick(now);    // wheel track decals 2026-10-18 (own switch)
-		if (!ENABLED || !MUD_TestKit.LookRuts())
+		if (!ENABLED || !MUD_VoxelProbe.RUTS || !MUD_TestKit.LookRuts())     // no client look ruts over heightfield ruts (feel test 2026-10-19)
 			return;
 		int t0 = System.GetTickCount();
 		float x0;
@@ -283,7 +284,7 @@ class MUD_LookRuts
 				Print(string.Format("MUD look ruts: 10 s - vehicle-frames %1 (no contact %2), cuts %3, samples written %4, caught up %5, expired %6, dirty marks %7, tiles %8, %9 ms",
 					s_iVeh, s_iNoContact, s_iCuts, s_iWritten, s_iCaught, s_iExpired, s_iDirty, s_mTiles.Count(), s_iMs)
 					+ string.Format(" | look meshes %1 (%2 ms), replaced by a shallower server rut %3 (+ %5 within REPLACE_MIN, no rebuild), segments under the sheet %4 (SHEET_LOOK: cut for the sheet, else skipped)", s_iMeshes, s_iMeshMs, s_iReplaced, s_iUnder, s_iNearCaught)
-					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned), LogLevel.NORMAL);
+					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn), LogLevel.NORMAL);
 			float dlDist = s_fDlDistSum / Math.Max(1, s_iDlMeshN);
 			if (s_iDlCutN > 0 || s_iDlMeshN > 0)
 				Print(string.Format("MUD delay look 10 s (TEMP): wheel -> look cut avg %1 max %2 ms (%3 segments) | wheel -> drawn mesh avg %4 max %5 ms, ~%6 m behind the wheel (%7 meshes) | GAP %8 m, LOOK_MESH_EVERY %9 s",
@@ -319,6 +320,7 @@ class MUD_LookRuts
 			s_iCuts = 0;
 			s_iWritten = 0;
 			s_iAligned = 0;
+			s_iWorn = 0;
 			s_iCaught = 0;
 			s_iExpired = 0;
 			s_iReplaced = 0;
@@ -457,6 +459,11 @@ class MUD_LookRuts
 			float real = MUD_VoxelProbe.FieldFloor(sfi, sfk);
 			if (real < surf)
 				surf = real;
+			if (MUD_VoxelProbe.WearOnly(sfi, sfk))
+			{
+				s_iWorn++;     // WEAR COUNT: the server only counts this pass here - no look cut either
+				continue;
+			}
 			MUD_LookTile tile = s_mTiles.Get(TileKey(FloorDiv(sfi, TS), FloorDiv(sfk, TS)));
 			int n = (sfk - FloorDiv(sfk, TS) * TS) * TS + sfi - FloorDiv(sfi, TS) * TS;
 			// own sample (this vehicle, younger than TTL) = an aligned wheel in its own fresh rut: measure from the uncut
@@ -541,6 +548,7 @@ class MUD_LookRuts
 			int bi = tk % TKEY - TKEY / 2;
 			int bk = tk / TKEY - TKEY / 2;
 			bool expired = false;
+			bool caughtUp = false;
 			for (int n = 0; n < 256; n++)
 			{
 				float y = tile.m_aY[n];
@@ -552,10 +560,13 @@ class MUD_LookRuts
 				if (real <= y + CATCH)
 				{
 					s_iCaught++;
+					if (real > y)
+						caughtUp = true;     // REBUILD 5: the drawn floor moves up to CATCH with no rebuild
 				}
 				else if (real <= y + REPLACE_MIN && now - tile.m_aAt[n] > REPLACE)
 				{
 					s_iNearCaught++;
+					caughtUp = true;     // REBUILD 5: dropped with no rebuild too
 				}
 				else if (real < MUD_VoxelProbe.FLOOR_NONE * 0.5 && now - tile.m_aAt[n] > REPLACE)
 				{
@@ -576,6 +587,8 @@ class MUD_LookRuts
 			}
 			if (expired)
 				s_iDirty += MUD_WorldGroundEntity.LookDirty(bi * TS, bi * TS + TS - 1, bk * TS, bk * TS + TS - 1);
+			else if (caughtUp)
+				MUD_WorldGroundEntity.LookBox(bi * TS, bi * TS + TS - 1, bk * TS, bk * TS + TS - 1);     // partial pass reads it
 			if (tile.m_iN <= 0)
 				gone.Insert(tk);
 		}
@@ -736,6 +749,33 @@ class MUD_LookRuts
 		{
 			for (int i = 0; i < s_iPNx; i++)
 				s_aPTiles.Insert(s_mTiles.Get(TileKey(s_iPBi0 + i, s_iPBk0 + k)));
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PERF IDEA 3 (2026-10-19): MeshFloorP of the n x n vertices from gx0, gz0 (inside the PatchBegin box) in one call:
+	//! fl holds FieldPatchFill's real floor; a look sample under it wins (= MeshFloorP's min). No call per vertex.
+	static void PatchFill(int gx0, int gz0, int n, array<float> fl)
+	{
+		if (s_aPTiles.IsEmpty())
+			return;
+		for (int vz = 0; vz < n; vz++)
+		{
+			int oz = gz0 + vz - s_iPBk0 * TS;
+			int tk = oz / TS;
+			int row = (oz - tk * TS) * TS;
+			int tRow = tk * s_iPNx;
+			for (int vx = 0; vx < n; vx++)
+			{
+				int ox = gx0 + vx - s_iPBi0 * TS;
+				int ti = ox / TS;
+				MUD_LookTile tile = s_aPTiles[tRow + ti];
+				if (!tile)
+					continue;
+				float y = tile.m_aY[row + ox - ti * TS];
+				if (y < fl[vz * n + vx])
+					fl[vz * n + vx] = y;
+			}
 		}
 	}
 

@@ -274,3 +274,26 @@ MUD_VoxelProbe.c (RutWheel / RutFlush, RUT_BEHIND), MUD_Wheels.c
   sheet ingredients as rut-field channels (ridges felt; texture drag, slump, wet look client-only), vanilla 1.9 wet-mud
   particles / muddy vehicles / puddles to probe, and the large-scale catch: rut-field patches are never freed and are not
   counted in the 2000-patch warning (~206 patches per km of ruts).
+
+## OLD RUT ZONE A/B (TEMP, 2026-10-19, v229 = before, NOT COMPILED)
+User idea: old pre-voxel heightfield ruts (v001-v009) felt smoother. DS numbers of the RUTS false run (results/2026-10-19-mesh-vs-voxel-ruts-ds.md)
+did not show it. Side-by-side test: MUD_OldRutZone.c box x 1048-1118, z 2480-2550 (red wire box + 8 m corner poles, rendering machines) -
+wheels inside press heightfield ruts (MUD_WorldGround.Wheels: RutWheelOff + the old Press path), no client look ruts there
+(MUD_LookRuts). Outside: voxel ruts. Craters / trenches / tunnels voxel in both. MUD_OldRutZone.ENABLED false = off.
+- ARCHIVED 2026-10-19: mud_backups/archive/old-rut-zone-2026-10-19 (run 4 result: heightfield ruts cost more; keep voxel).
+
+## WEAR - grass first, dirt after repeated passes (user 2026-10-19, v230 = before; WORKS user-ok DS 20:20, results/2026-10-19-mesh-vs-voxel-ruts-ds.md run 5)
+User: first drive over grass should not break the ground; repeated use does. MUD_VoxelProbe.RUT_FIRST_D 0.15 -> 0 (off), so
+every pass cuts at most RUT_PASS_MAX 0.03 at the centre. MUD_WorldGround.FIELD_SOIL_D 0.03 -> 0.08 (soil look on patch mesh +
+voxel bricks) and RUT_MAT_D 0.05 -> 0.08 (mud gamemat), so dirt + mud grip start at ~pass 3, ragged noise adds up to 0.035.
+Trail rule: a one-pass rut (0.7 x 0.03) counts as a rut to ride in (was 0.05 with FIRST_D off). Knobs: RUT_PASS_MAX = depth per
+pass, FIELD_SOIL_D = passes before dirt.
+
+## WEAR COUNT - first pass changes nothing (perf idea 1, 2026-10-19, v233 = before; NOT COMPILED)
+Plan: docs/superpowers/plans/2026-10-19-rut-wear-perf-plan.md. MUD_RutTile.m_aWear counts passes on a sample with no rut
+floor yet (+ the RUT_RAMP weight, whole 0.01). Below MUD_VoxelProbe.WEAR_PASSES (1) a pass only counts (WearPass): no floor
+write, no FloorDirty / QueueBox = no patch rebuild. Pass 2 cuts 0.03, pass 3 0.06 = dirt (FIELD_SOIL_D / RUT_MAT_D 0.08 ->
+0.06, so dirt still shows on pass 3). J2: snapshot tile text "key:<floor>;<ridge>~<wear>", self-test compares wear, disp
+hash adds it (WEAR_SALT). Trail rule: rear wheels ride any worn track (wear > 0; a full-pass test let them add wear in the
+front wheel's ramp fade). Look ruts skip worn-only samples (WearOnly; 'worn only' count in the look ruts 10 s line).
+Log: 'MUD rut wear 10 s: N samples only worn (no cut), M samples cut'. WEAR_PASSES 0 = off.
