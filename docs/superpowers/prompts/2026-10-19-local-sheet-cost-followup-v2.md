@@ -7,7 +7,7 @@ Replaces `prompts/2026-10-19-local-sheet-cost-followup.md`. Fixed per the review
 
 You are working on the Arma Reforger mud mod (branch `claude/upbeat-lovelace-q0w022`). A cloud session did the
 research (no Workbench, game, DS or IDA there). Your job is the part that needs this machine: build a few switches,
-run the DS launches and one Workbench probe session, answer four IDA questions, write the results down. The mud sheet
+run the DS launches and one Workbench probe session, answer one open IDA question, write the results down. The mud sheet
 stays PARKED - this is measurement, not un-parking.
 
 ## Read first
@@ -60,6 +60,10 @@ B2 Launch 2: A1 + A2 on (DS and client same build), A5 on. 6 runs. Read the 'MUD
 B3 SERVER_LAYER off on the DS: ask me whether to do it as a DS-only restart in launch 2 or as launch 3.
 B4 Vehicle count: the robot drives only the local truck (`MUD_StutterRobot.Tick`). Ask me: peer clients with drivers,
    or the `fake_rut_ops` stand-in (per-op cost only, not "per remote truck"). Do not improvise.
+B5 Skinned draw cost (only if C1 shows skinned tiles work and I still want the route - ask): in launch 2, as its own
+   phase with nothing else changing and no driving, spawn N = 300 static skinned tiles in view, then the same N static
+   script meshes; render + frame ms for each, >= 6 x 5 s rows each. Also read the 'MUD prof parts' (the B2 switches stay
+   as they are) - read parts, not the MUD total, since A5 shares the launch.
 Rows per 5 s (time, fps, MUD ms, parts) with checksums, as in the 2026-10-18 docs.
 
 ## Part C - ONE Workbench probe session (function, look, counts; no ms)
@@ -69,28 +73,27 @@ C1 Skinned tile (research sec 15.3): import a 1.5 x 1.5 m tile skinned to 11 x 1
    - SetBone on one bone (+0.3 m) - does it show? Without GetAnimation - does it silently do nothing (IDA says so)?
    - SetBoneMatrix with a tilted frame from neighbour heights - does shading follow?
    - Move bones 0.5 m out of the bind box, look away and back: culled? Then with the MeshObject `BoundingBox` override.
-   - 300 tiles, bones set once, then left alone: `System.MemoryAllocationKB()` delta (per tile); does anything look
-     like per-frame work (diag counters)? ms comes later on the DS.
+   - 300 tiles, bones set once, then left alone: `System.MemoryAllocationKB()` delta (per tile). Per-frame cost:
+     IDA D6 says every drawn skinned object copies 48 B per bone every frame - the ms is measured on the DS (B5), not
+     here. Skinned STORED tiles are ranked low now (research sec 15.8); the live-window use is what this probe is for.
 C2 ONE live ProcAnim piece (not a pool): 2 bones, .pap TranslateSet + .siga input "pressed", script
-   `SignalsManagerComponent.AddOrFindSignal` + `SetSignalValue`. Also: does `GenericComponent.Deactivate(owner)` on the
-   ProcAnimComponent stop it from moving (= the per-frame bit, D5)?
+   `SignalsManagerComponent.AddOrFindSignal` + `SetSignalValue`. Then `GenericComponent.Deactivate(owner)`: the piece
+   must stop following the signal (IDA D5: it leaves ProcAnimSystem's list), and `Activate(owner)` must bring it back.
 C3 Static rut pieces (sec 15.2 design A, B): a 1.5 m piece .xob with 2-3 variants (fresh / pressed / deep) placed from
    op segments on the felt floor (`MUD_WorldGroundEntity.DugUndug`). 100 `SpawnEntityPrefabLocal` with a held
    Resource vs 100 pooled `SetTransform` + `Update`; variant swap = `SetObject` + `Update`; memory per 1000 pieces.
+   A swap drops any bone overrides (IDA D8): a skinned piece (design B) changes "pressed" by SetBone, never by a swap.
+   After a swap on a skinned piece, `GetAnimation()` + bones again.
    Look in low sun.
 C4 Parallax: a 0.30 m sheet tile with a HeightMap + ParallaxScale dirt emat vs the normal 0.15 m tile. My eyes.
 D3 count test (sec 15.4): fixed camera, Statistics > General = all and MeshObject stats = count / mesh, screenshots at
    0 / 100 / 1000 pieces of ONE .xob, 1000 pieces of 10 .xob, 1000 unique script MeshObjects, plus memory deltas.
    Report whether General shows a draw-call / batch line at all.
 
-## Part D - IDA (same Experimental Diag exe)
-D5 Does `GenericComponent.Deactivate` on a ProcAnimComponent clear the bit the ProcAnim job tests (`+156 & 4`,
-   sub_1402A1080)? Is there any other script path to `OnFrameUpdate`?
-D6 An entity with a skeleton instance whose bones did not change: any per-frame work (bone palette upload, skinning
-   prep), or only after the dirty mark (`0x20000000` / MeshObject `0x100000`)?
-D7 Bone limits: max bones per skeleton / per skin / per draw (import or render asserts, strings).
-D8 `SetObject` on an entity that already has a skeleton instance: kept, rebuilt, or dropped (overrides lost)?
-Answer like results/2026-10-19-sheet-cost-probes.md (address, finding, confidence).
+## Part D - IDA
+D5-D8 are answered (results/2026-10-19-sheet-cost-probes.md "Part D, round 2"). One open follow-up, only if time
+allows: D9 who calls the MeshObject bounds path with flag `0x20` (animated bounds from the current bones,
+`sub_140A472A0`) - if the renderer does, skinned tiles need no `BoundingBox` override.
 
 ## Write at the end
 - `docs/superpowers/results/2026-10-19-sheet-cost-ds-session.md` (Part B) and append Parts C / D to

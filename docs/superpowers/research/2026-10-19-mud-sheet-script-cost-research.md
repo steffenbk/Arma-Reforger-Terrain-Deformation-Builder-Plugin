@@ -783,3 +783,38 @@ With 1-2 in hand, sec 7's budget test can be run; with 4-6, the cheap-look route
 - D7 [IDA, medium]: 384-bone stack buffers in the pose / bounds code; 121 bones fit. No limit string found.
 - D8 [IDA]: SetObject (different object or remap) makes a new MeshObject - bone overrides lost. A + B on one piece do
   not mix.
+
+### 15.8 What D5-D8 change (cloud session, after 15.7)
+
+D6 is the big one: every DRAWN skinned object copies 48 B per bone every frame, changed or not [IDA, medium]. That
+cost scales with bones x visible entities, so it hits big skeletons and many tiles, not small pieces.
+
+| use | bones | visible count (assumed) | palette per frame | verdict |
+|---|---|---|---|---|
+| skinned stored tiles, 11 x 11 | 121 | 460-620 (today's stored mesh count) | 2.7-3.6 MB | worse than today: a stored script mesh is built once and then costs nothing per frame; a skinned tile trades that for a per-frame copy forever |
+| skinned stored tiles, 6 x 6 | 36 | 460-620 | 0.8-1.1 MB | still a per-frame cost for ground that does not change |
+| skinned LIVE tiles, 1.5 m, 11 x 11 | 121 | ~16-64 | 0.1-0.4 MB | affordable; this is where tiles change every 0.1 s |
+| rut pieces, design B | 4 | ~1000 | ~0.2 MB | affordable |
+| rut pieces, design C (live ProcAnim) | 2 | 10-20 live, rest parked | ~0 | parking with Deactivate removes the per-frame eval (D5) |
+Sizes from D6 (48 B per bone); the ms per MB on this engine is unmeasured [inf].
+
+Re-rank:
+- **Skinned stored tiles: down to low.** Static ground should stay a static mesh (built once, no per-frame cost).
+  The memory saving (shared mesh) does not pay for a per-frame palette copy over hundreds of tiles.
+- **Skinned live tiles: the only skinned-tile use left, and a look trade.** The live window changes every 0.1 s and is
+  small, so the palette cost is small - but the live window is exactly where texture drag and the touched-cell dirt
+  material show, and a fixed .xob has neither. If the user accepts that, a live skinned tile that is "baked" into a
+  normal script mesh when it leaves the window (one rebuild, then static, skeleton gone) is the shape of it. D8 says
+  the swap drops the bones - fine here, the baked mesh replaces them.
+- **Rut pieces: design C is now complete** (live ProcAnim near the wheels, `Deactivate` to park, `Activate` to wake -
+  D5), design B is fine at 4 bones (~0.2 MB/frame for 1000 drawn pieces), design A stays the only zero-per-frame
+  option. A and B cannot share one piece: a variant swap (`SetObject`) wipes the bones (D8) - for B, "pressed" is a
+  bone change, not a swap.
+- Unchanged: A1 / A2 and SERVER_LAYER off stay first (DS launches); natives purge waits for the bench.
+- D7: 121 bones fit under the 384-bone buffers; animated bounds may be automatic (flag 0x20 caller not traced) - C1's
+  cull test still decides whether `BoundingBox` is needed.
+
+Measurement this adds: the per-frame cost of drawn skinned objects is now the deciding number for any skinned route.
+WB cannot give ms (TESTING RULES), so it goes to a DS client: N static skinned tiles (or pieces) in view vs the same
+N static script meshes, render + frame ms. Put it in the DS launch that already runs (launch 2), as its own phase with
+nothing else changing, or skip it if the user drops skinned tiles.
