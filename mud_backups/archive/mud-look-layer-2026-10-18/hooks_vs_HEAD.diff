@@ -1,0 +1,579 @@
+diff --git a/Scripts/Game/Mud/MUD_FinePatch.c b/Scripts/Game/Mud/MUD_FinePatch.c
+index c8658cc..270c52b 100644
+--- a/Scripts/Game/Mud/MUD_FinePatch.c
++++ b/Scripts/Game/Mud/MUD_FinePatch.c
+@@ -52,6 +52,10 @@ class MUD_FinePatch
+ 	bool m_bFloorWait;          // RUT FIELD settle (MUD_WorldGroundEntity.FLOOR_SETTLE): only floor dirt, held until quiet
+ 	float m_fFloorFirstAt;      // m_fTime of the first held floor dirt (max wait)
+ 	float m_fFloorDirtAt;       // m_fTime of the newest floor dirt (quiet)
++	bool m_bLookDirty;          // client look ruts (MUD_LookRuts): mesh-only dirt, may build while the floor settle holds
++	bool m_bLookNear;           // mud look layer (MUD_LookLayer): within LOOK_RADIUS of the camera (hysteresis) - fine look mesh
++	bool m_bLookGate;           // mud look layer: mesh dirt from entering / leaving the radius (builds past the settle hold, asleep too)
++	bool m_bLookOwed;           // mud look layer: built plain while busy (LOOK_QUIET) - the look build follows once quiet
+ 	float m_fFieldSeenAt;       // RUT FIELD: m_fTime it was last in MUD_WorldGroundEntity.FieldDue's range (keeps a floor-only patch)
+ 	bool m_bTraceHidden;       // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
+ 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
+diff --git a/Scripts/Game/Mud/MUD_WorldGround.c b/Scripts/Game/Mud/MUD_WorldGround.c
+index 362acd9..a97ada2 100644
+--- a/Scripts/Game/Mud/MUD_WorldGround.c
++++ b/Scripts/Game/Mud/MUD_WorldGround.c
+@@ -101,6 +101,17 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	// the rut tiles don't, so FreeIdle frees it like an undeformed one once nothing is near (FieldDue keeps the ones in
+ 	// range); FieldDue rebuilds it when a camera / player / vehicle comes near. false = kept for the match (v100 .. v111).
+ 	static const bool FLOOR_FREE = true;
++	// MUD LOOK LAYER (user go 2026-10-17, MUD_LookLayer.c, docs/features/mud-look/README.md): rut patches within
++	// LOOK_RADIUS of the camera draw the sheet look on a 0.125 m mesh (client only, mesh only). Dev on; master list Lane 2:
++	// decide on / off for release after PERF. false = the plain mesh everywhere (as before).
++	static const bool LOOK_LAYER = true;
++	static const float LOOK_RADIUS = 20;    // m from the camera to the patch square (user 2026-10-17)
++	static const float LOOK_HYST = 2;       // m more before a look patch goes back to the plain mesh (no flip)
++	static const float LOOK_CHECK = 0.5;    // s between radius checks
++	// user 2026-10-18 "tanking fps" (peer log 00:17: 99 look builds in 10 s, mean 30 ms - look ruts mark the patch every
++	// 0.1 s): a patch whose last mesh build is under LOOK_QUIET s old builds PLAIN; the look follows once it is quiet
++	static const float LOOK_QUIET = 1.5;
++	static const int COST_LOOK = 30;        // budget (ms) for one look mesh build (peer log 2026-10-18: mean 30) - PERF measures it
+ 	static const int PVERTS = 33;
+ 	static const int SKIN = 4;          // skin cells per patch side
+ 	static const int FINE = 8;          // fine cells per skin cell side
+@@ -418,10 +429,10 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	[Attribute("0.6", UIWidgets.EditBox, "HEAT / HEDP (shaped charge, the warhead fires a penetrator) digs this share of the depth: the jet goes into the target, not the ground. A 1.0 m crater -> 0.6 m.", category: "Craters")]
+ 	protected float m_fCraterHeatFactor;
+ 
+-	[Attribute("0.15", UIWidgets.EditBox, "Crater variation: depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
++	[Attribute("0.3", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17 'more variation'): depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
+ 	protected float m_fCraterDepthJitter;
+ 
+-	[Attribute("0.15", UIWidgets.EditBox, "Crater variation: outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
++	[Attribute("0.35", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17; voxel craters roll 20-100 % of it each): outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
+ 	protected float m_fCraterShapeJitter;
+ 
+ 	[Attribute("0.17", UIWidgets.EditBox, "Rim height as a share of the crater depth", category: "Craters")]
+@@ -523,6 +534,13 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	protected ref array<int> m_aFieldDue = {};                  // of those, in range at the last check (FieldDue)
+ 	protected ref array<float> m_aFieldDueDist = {};
+ 	protected float m_fFieldCheckAt;
++	protected ref MUD_LookLayer m_Look;     // mud look layer buffers (render machines, LOOK_LAYER only)
++	protected float m_fLookCheckAt;
++	protected int m_iLookInRange;
++	protected int m_iLookBuilds;
++	protected int m_iLookMs;
++	protected int m_iLookWorst;
++	protected int m_iLookBusy;      // mesh builds that went plain because the patch was busy (LOOK_QUIET)
+ 	protected int m_iSeq;                                       // server: number of the next live message
+ 	protected ref array<int> m_aNetKeys = {};                   // server: patch keys with unsent changes
+ 	protected ref array<ref MUD_NetMsg> m_aHeld = {};           // client: live messages not applied yet
+@@ -727,6 +745,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			s_Inst = null;
+ 		s_aEarly.Clear();   // not into the next play session
+ 		MUD_VoxelProbe.Clear();    // TEMP probe 2026-10-12
++		MUD_LookRuts.Reset();     // client look ruts: no tiles / tracks into the next session
+ 		MUD_VoxelHouse.Clear();    // TEMP probe 2026-10-13
+ 		// Entities are still alive here (probe 2026-10-09 13:12: 107 of 107). Same order as FreePatch: body, geoms,
+ 		// entity. Deleting the entity first and then freeing its geoms corrupted the heap on play stop (12:56).
+@@ -828,6 +847,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		m_bGroove = m_bRender && !m_RutMaterial.IsEmpty();
+ 		m_RplComponent = RplComponent.Cast(FindComponent(RplComponent));
+ 		m_Buf = new MUD_FineBuffers();
++		if (LOOK_LAYER && m_bRender)
++			m_Look = new MUD_LookLayer();
+ 		if (!m_RutMudMaterial.IsEmpty())
+ 		{
+ 			m_RutMudRes = Resource.Load(m_RutMudMaterial);
+@@ -870,6 +891,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		if (m_iNPX * m_iNPZ > 262144)
+ 			Print("MUD world: more than 262144 patches - JIP order keys overflow (Task 10)", LogLevel.ERROR);
+ 		s_Inst = this;
++		MUD_LookRuts.Reset();
+ 		m_iMemStartKB = System.MemoryAllocationKB();
+ 		SCR_ExplosionAmmoEffect.GetOnExplosionAmmoEffect().Insert(OnExplosion);
+ 		m_bExplosionHooked = true;
+@@ -887,6 +909,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			m_bReady = Setup();
+ 			if (m_bReady)
+ 			{
++				MUD_PinLift.Run(this);    // pin cut-out: trees / rocks / props on holes get the skipped terrain y, before op replay
+ 				// per-player messages from before this entity existed go first (they came first)
+ 				for (int e = s_aEarly.Count() - 1; e >= 0; e--)
+ 					m_aHeld.InsertAt(s_aEarly[e], 0);
+@@ -906,15 +929,20 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		if (MUD_TestKit.TEST_KIT)
+ 			MUD_JoltProbe.Tick(timeSlice, IsProxy(), this);    // test kit (2026-10-17, back from the archive): MP robot / snap probe
+ 		MUD_VoxelProbe.Tick(m_fTime);    // TEMP probe 2026-10-12
++		MUD_KeepScan.Tick(m_fTime);    // TEMP tool 2026-10-17 run 2: keep mask incl. asphalt / concrete terrain (pin cut-out)
+ 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet
+ 		MUD_VoxelHouse.Tick();    // TEMP probe 2026-10-13
+ 		Wheels(timeSlice);
++		if (m_bRender && m_bReady)
++			MUD_LookRuts.Tick(m_fTime, m_fRutStep, m_fRutBaseDepth, m_fRutDepthPerTon, m_fRutMaxDepth);   // client look ruts
+ 		AheadView();
+ 		int tW = System.GetTickCount(t0);
+ 		// after the wheels every job checks the frame budget (Fix B: one new patch + a rebuild in one
+ 		// frame was 10-18 ms, measured 2026-10-09 14:12 Exp 192624)
+ 		Ahead(t0);
+ 		int tA = System.GetTickCount(t0);
++		if (m_Look)
++			LookRange();
+ 		Rebuild(t0);
+ 		if (m_bNavRefresh && !IsProxy())
+ 			m_Nav.Tick(m_fTime, m_fNavQuiet, m_fNavMaxWait, m_bDebug);
+@@ -4101,6 +4129,41 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		}
+ 	}
+ 
++	//------------------------------------------------------------------------------------------------
++	//! Client look ruts (MUD_LookRuts): mesh-only dirt on the patches holding global fine vertices [gx0..gx1] x
++	//! [gz0..gz1] - no collider, no net, no new patches; builds past the floor settle hold (Rebuild). Patches marked.
++	static int LookDirty(int gx0, int gx1, int gz0, int gz1)
++	{
++		if (!s_Inst || !s_Inst.m_bReady || !s_Inst.m_bRender)
++			return 0;
++		return s_Inst.MarkLookDirty(gx0, gx1, gz0, gz1);
++	}
++
++	//------------------------------------------------------------------------------------------------
++	protected int MarkLookDirty(int gx0, int gx1, int gz0, int gz1)
++	{
++		int marked = 0;
++		for (int pz = PatchLo(gz0, m_iNPZ); pz <= PatchHi(gz1, m_iNPZ); pz++)
++		{
++			for (int px = PatchLo(gx0, m_iNPX); px <= PatchHi(gx1, m_iNPX); px++)
++			{
++				MUD_FinePatch p = m_mPatches.Get(pz * m_iNPX + px);
++				if (!p)
++					continue;
++				p.m_bMeshDirty = true;
++				p.m_bLookDirty = true;
++				if (!p.m_bQueued)
++				{
++					p.m_bQueued = true;
++					p.m_fQueuedAt = m_fTime;
++					m_aDirty.Insert(p.m_iKey);
++				}
++				marked++;
++			}
++		}
++		return marked;
++	}
++
+ 	//------------------------------------------------------------------------------------------------
+ 	//! RUT FIELD: MarkDirty without the blur reach (the floor is not blurred) and without the net rect
+ 	protected int MarkFloorDirty(int gx0, int gx1, int gz0, int gz1)
+@@ -4274,8 +4337,16 @@ class MUD_WorldGroundEntity : GenericEntity
+ 				m_aDirty.Remove(i);
+ 				continue;
+ 			}
+-			if (p.m_iBuild > 0 || p.m_bAsleep)
+-				continue;   // building: its last steps use the newest heights; asleep: its wake does
++			if (p.m_iBuild > 0)
++				continue;   // building: its last steps use the newest heights
++			if (p.m_bAsleep)
++			{
++				// asleep: its wake does - except the look layer's radius change (mesh only, the camera walked up to an
++				// old rut with no vehicle near)
++				if (p.m_bLookGate && m_bRender && p.m_bMeshDirty && m_fTime - p.m_fMeshAt >= m_fMeshInterval && (!mp || p.m_fMeshAt < mp.m_fMeshAt))
++					mp = p;
++				continue;
++			}
+ 			if (p.m_bFloorWait)
+ 			{
+ 				// FLOOR_SETTLE: held until quiet or the max wait, then released to the normal mesh / collider pace
+@@ -4283,6 +4354,9 @@ class MUD_WorldGroundEntity : GenericEntity
+ 				bool waitedOut = m_fTime - p.m_fFloorFirstAt >= FLOOR_MAX_WAIT;
+ 				if (!quiet && !waitedOut)
+ 				{
++					// client look ruts: the MESH may build now (look floor shows), the collider keeps waiting
++					if ((p.m_bLookDirty || p.m_bLookGate) && m_bRender && p.m_bMeshDirty && m_fTime - p.m_fMeshAt >= m_fMeshInterval && (!mp || p.m_fMeshAt < mp.m_fMeshAt))
++						mp = p;
+ 					m_iSettleHeld++;
+ 					continue;
+ 				}
+@@ -4304,7 +4378,11 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		{
+ 			int meshCost = COST_INDEX;
+ 			if (FindIdx(mp))
++			{
+ 				meshCost = COST_MESH;
++				if (m_Look && mp.m_bLookNear && (mp.m_bLookGate || m_fTime - mp.m_fMeshAt >= LOOK_QUIET))
++					meshCost = COST_LOOK;     // = BuildMesh's busy rule: only a real look build costs this
++			}
+ 			if (MayRun(t0, m_iMeshSkip, meshCost))
+ 			{
+ 				m_iMeshSkip = 0;
+@@ -4317,7 +4395,11 @@ class MUD_WorldGroundEntity : GenericEntity
+ 				}
+ 				else
+ 				{
++					bool lookMesh = mp.m_bLookDirty;
+ 					BuildMesh(mp);
++					mp.m_bLookGate = false;
++					if (lookMesh)
++						MUD_LookRuts.NoteMesh(System.GetTickCount(tm));     // look ruts 10 s line: client rebuild cost
+ 					mp.m_fMeshAt = m_fTime;
+ 					mp.m_fQueuedAt = m_fTime;     // test kit: waits from its last build
+ 					m_sFrameRebuild += string.Format("mesh %1 ", System.GetTickCount(tm));
+@@ -5623,7 +5705,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	{
+ 		float depth = full * (1 + m_fCraterDepthJitter * Math.RandomFloat(-1, 1));
+ 		float cap = Math.Min(m_fCraterStackDepth, full * m_fCraterStackFactor);
+-		float stretch = Math.Clamp(m_fCraterShapeJitter, 0, 0.5);
++		// own share per crater (user 2026-10-17 'more variation'): some near round, some strong oval / lobes
++		float stretch = Math.Clamp(m_fCraterShapeJitter * Math.RandomFloat(0.2, 1), 0, 0.5);
+ 		float lobeW = Math.RandomFloat01();
+ 		float turn2 = Math.RandomFloat(0, Math.PI2);
+ 		float turn3 = Math.RandomFloat(0, Math.PI2);
+@@ -6089,6 +6172,20 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	//! the skin chunk's (0..1 per 64 m), so the terrain-look material lines up with the skin around it.
+ 	protected void BuildMesh(MUD_FinePatch p)
+ 	{
++		if (m_Look && p.m_bLookNear)
++		{
++			// busy (built under LOOK_QUIET s ago, e.g. look ruts cutting every 0.1 s): plain now, look once quiet
++			if (!p.m_bLookGate && m_fTime - p.m_fMeshAt < LOOK_QUIET)
++			{
++				p.m_bLookOwed = true;
++				m_iLookBusy++;
++			}
++			else if (BuildMeshLook(p))
++			{
++				p.m_bLookOwed = false;
++				return;
++			}
++		}
+ 		if (m_bBandMesher && BuildMeshBand(p))
+ 			return;
+ 		int t0 = System.GetTickCount();
+@@ -6101,6 +6198,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		bool rfOn = RutFieldOn(p);     // RUT FIELD: as BuildMeshBand (band overflow falls back here)
+ 		int rfX0 = p.m_iPx * PCELLS;
+ 		int rfZ0 = p.m_iPz * PCELLS;
++		if (!rfOn)
++			rfOn = MUD_LookRuts.InBox(rfX0, rfX0 + PCELLS, rfZ0, rfZ0 + PCELLS);     // client look ruts (mesh only)
+ 		for (int vz = 0; vz < PVERTS; vz++)
+ 		{
+ 			for (int vx = 0; vx < PVERTS; vx++)
+@@ -6120,7 +6219,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 				float rfD = d;     // groove reveal input: a field rut shows soil only from FIELD_SOIL_D deep (as v097)
+ 				if (rfOn)
+ 				{
+-					float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + vx, rfZ0 + vz) - p.m_aBase[v];
++					float rfF = MUD_LookRuts.MeshFloor(rfX0 + vx, rfZ0 + vz) - p.m_aBase[v];     // + client look ruts
+ 					if (rfF < 0)
+ 						rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+ 					if (rfF < d)
+@@ -6201,6 +6300,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			Print(string.Format("MUD vcflags: ground patch %1 (8 = NOSHADOW)", p.m_Ent.SetVComponentFlags(0)), LogLevel.NORMAL);
+ 		p.m_MeshRes = res;
+ 		p.m_bMeshDirty = hideOwed;     // ahead ruts: rebuild again (Mesh Interval) until every hidden change shows
++		p.m_bLookDirty = false;
+ 		m_iMeshBuilds++;
+ 		int gridMs = System.GetTickCount(t0);
+ 		m_iMeshMs += gridMs;
+@@ -6210,6 +6310,273 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			m_iGridMeshWorst = gridMs;
+ 	}
+ 
++	//------------------------------------------------------------------------------------------------
++	//! MUD LOOK LAYER: the 0.125 m look mesh of a rut patch near the camera (MUD_LookLayer.c). Felt per vertex =
++	//! exactly what BuildMesh draws (same rules, ahead-ruts hold included); the look reads only the replicated rut
++	//! floor (FieldFloor, not the client look ruts), the base heights and the edge lock, +- 3 fine verts round the
++	//! patch. False = no rut floor here or the mesh failed: the plain paths build it.
++	protected bool BuildMeshLook(MUD_FinePatch p)
++	{
++		if (!RutFieldOn(p))
++			return false;
++		int t0 = System.GetTickCount();
++		MUD_LookIn li = m_Look.m_In;
++		int rfX0 = p.m_iPx * PCELLS;
++		int rfZ0 = p.m_iPz * PCELLS;
++		bool hideOwed = false;
++		for (int v = 0; v < PVERTS * PVERTS; v++)
++		{
++			int vx = v % PVERTS;
++			int vz = v / PVERTS;
++			float d = p.m_aH[v];
++			if (m_bAheadRuts && m_fTime - p.HideAt(v) < HIDE_HOLD)
++			{
++				if (Math.AbsFloat(d - p.Show(v)) > 0.0005)
++					hideOwed = true;
++				d = p.Show(v);
++			}
++			else
++			{
++				p.SetShow(v, d);
++			}
++			float rfD = d;
++			float rfF = MUD_LookRuts.MeshFloor(rfX0 + vx, rfZ0 + vz) - p.m_aBase[v];     // felt = BuildMesh, look ruts too
++			if (rfF < 0)
++				rfF = rfF * p.m_aEdgeLock[v];
++			if (rfF < d)
++			{
++				d = rfF;
++				float rfS = rfF + FIELD_SOIL_D - m_fRevealDepth;
++				if (rfS < rfD)
++					rfD = rfS;
++			}
++			if (MUD_VoxelProbe.RUT_RIDGES && Math.AbsFloat(p.m_aSmooth[v]) < MUD_VoxelProbe.RUT_RIDGE_FLAT)
++			{
++				float rgF = MUD_VoxelProbe.FieldRidge(rfX0 + vx, rfZ0 + vz);
++				if (rgF < MUD_VoxelProbe.FLOOR_NONE * 0.5)
++				{
++					float rgD = (rgF - p.m_aBase[v]) * p.m_aEdgeLock[v];
++					if (rgD > d)
++						d = rgD;
++				}
++			}
++			li.m_aFeltV[v] = p.m_aBase[v] + d;
++			li.m_aRevV[v] = rfD;
++			li.m_aBaseV[v] = p.m_aBase[v];
++			li.m_aLockV[v] = p.m_aEdgeLock[v];
++		}
++		// rut floor depth (edge-locked) on the fine verts +- 3 round the patch: the look's only floor input
++		for (int jz = 0; jz < 39; jz++)
++		{
++			for (int jx = 0; jx < 39; jx++)
++			{
++				int gx = rfX0 - 3 + jx;
++				int gz = rfZ0 - 3 + jz;
++				float dep = 0;
++				float f = MUD_VoxelProbe.FieldFloor(gx, gz);
++				if (gx >= 0 && gz >= 0 && f < MUD_VoxelProbe.FLOOR_NONE * 0.5)
++				{
++					float lb;
++					float lk;
++					if (LookBaseLock(p, gx, gz, lb, lk) && lb > f)
++						dep = (lb - f) * lk;
++				}
++				li.m_aDepV[jz * 39 + jx] = dep;
++			}
++		}
++		// fine cell diagonals +- 3 round the patch, per skin cell (its own or a neighbour patch's m_aCell)
++		for (int cz = 0; cz < 38; cz++)
++		{
++			int gcz = rfZ0 - 3 + cz;
++			for (int cx = 0; cx < 38; cx++)
++			{
++				int gcx = rfX0 - 3 + cx;
++				li.m_aDiag[cz * 38 + cx] = LookDiag(p, gcx, gcz);
++			}
++		}
++		for (int c = 0; c < 16; c++)
++			li.m_aCell[c] = p.m_aCell[c];
++		float step = m_fFine * 0.5;
++		m_Look.Compute(step);
++		int chunkPatches = MUD_CoarseSkinEntity.CELLS / SKIN;
++		int ux = (p.m_iPx - (p.m_iPx / chunkPatches) * chunkPatches) * PCELLS;
++		int uz = (p.m_iPz - (p.m_iPz / chunkPatches) * chunkPatches) * PCELLS;
++		float uvDiv = chunkPatches * PCELLS;
++		float skirt = m_fBandSkirt;
++		if (skirt <= 0)
++			skirt = 0.3;
++		m_Look.Assemble(step, ux, uz, uvDiv, m_bGroove, m_fRevealDepth, m_fRevealBlend, m_fRevealGap, skirt, VOX | LOOK);
++		MUD_LookIdx ix = m_Look.Indices(TLBR, VOX | LOOK);
++
++		Resource res;
++		if (m_bGroove)
++		{
++			int numVerts2[] = {4745, 4225};
++			int numIndices2[] = {26112, 24576};
++			string materials2[] = {m_Material, m_RutMaterial};
++			res = MeshObject.Create(2, numVerts2, numIndices2, materials2, 0);
++		}
++		else
++		{
++			int numVerts[] = {4745};
++			int numIndices[] = {26112};
++			string materials[] = {m_Material};
++			res = MeshObject.Create(1, numVerts, numIndices, materials, 0);
++		}
++		if (!res || !res.GetResource())
++			return false;     // the plain path builds it (and reports a material that did not load)
++		MeshObject mesh = res.GetResource().ToMeshObject();
++		// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
++		mesh.UpdateIndices(0, ix.m_aIdx);
++		mesh.UpdateVerts(0, m_Look.m_Buf.m_aVerts, m_Look.m_Buf.m_aUVs);
++		if (m_bGroove)
++		{
++			mesh.UpdateIndices(1, ix.m_aIdx);       // its first NI: the surface without skirts
++			mesh.UpdateVerts(1, m_Look.m_Buf.m_aUnder, m_Look.m_Buf.m_aGrooveUVs);
++		}
++		p.m_Ent.SetObject(mesh, "");
++		p.m_Ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
++		p.m_MeshRes = res;
++		p.m_bMeshDirty = hideOwed;
++		p.m_bLookDirty = false;
++		m_iMeshBuilds++;
++		int ms = System.GetTickCount(t0);
++		m_iMeshMs += ms;
++		m_iLookBuilds++;
++		m_iLookMs += ms;
++		if (ms > m_iLookWorst)
++			m_iLookWorst = ms;
++		return true;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Look layer: undug y + edge lock at global fine vertex gx, gz - p's arrays, a built neighbour patch's, else the
++	//! skin (BaseAt) and EdgeLock - the same values a built patch holds (m_aBase = BaseAt, m_aEdgeLock = EdgeLock before
++	//! buildings), so a neighbour that is missing or still building gives the same look. False = no ground known there.
++	protected bool LookBaseLock(MUD_FinePatch p, int gx, int gz, out float outBase, out float outLock)
++	{
++		int px = gx / PCELLS;
++		int pz = gz / PCELLS;
++		if (px >= m_iNPX || pz >= m_iNPZ)
++			return false;
++		MUD_FinePatch q = p;
++		if (px != p.m_iPx || pz != p.m_iPz)
++			q = m_mPatches.Get(pz * m_iNPX + px);
++		if (q && (q == p || q.m_iBuild == 0))
++		{
++			int qv = (gz - pz * PCELLS) * PVERTS + gx - px * PCELLS;
++			outBase = q.m_aBase[qv];
++			outLock = q.m_aEdgeLock[qv];
++			return true;
++		}
++		bool ok;
++		outBase = BaseAt(gx, gz, ok);
++		outLock = EdgeLock(gx, gz);
++		return ok;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Look layer: 1 = the fine cell gcx, gcz is split tl-br (its skin cell's TLBR bit; the skin's own cell when the
++	//! neighbour patch is missing or still building), 0 = bl-tr or kept terrain
++	protected int LookDiag(MUD_FinePatch p, int gcx, int gcz)
++	{
++		if (gcx < 0 || gcz < 0)
++			return 0;
++		int sx = gcx / FINE;
++		int sz = gcz / FINE;
++		int px = sx / SKIN;
++		int pz = sz / SKIN;
++		if (px >= m_iNPX || pz >= m_iNPZ)
++			return 0;
++		MUD_FinePatch q = p;
++		if (px != p.m_iPx || pz != p.m_iPz)
++			q = m_mPatches.Get(pz * m_iNPX + px);
++		if (!q || (q != p && q.m_iBuild > 0))
++		{
++			float h00;
++			float h10;
++			float h01;
++			float h11;
++			bool tlbr;
++			ResourceName mat;
++			if (m_Skin.CellShape(sx, sz, h00, h10, h01, h11, tlbr, mat) && tlbr)
++				return 1;
++			return 0;
++		}
++		int cell = q.m_aCell[(sz - pz * SKIN) * SKIN + sx - px * SKIN];
++		if (cell >= 0 && (cell & TLBR) != 0)
++			return 1;
++		return 0;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Look layer, every LOOK_CHECK s: rut patches (m_sFieldPatches) entering LOOK_RADIUS of the camera or leaving
++	//! LOOK_RADIUS + LOOK_HYST get mesh-only dirt (m_bLookGate). The camera decides only WHETHER, never the shape.
++	protected void LookRange()
++	{
++		if (!m_bRender || m_fTime < m_fLookCheckAt)
++			return;
++		m_fLookCheckAt = m_fTime + LOOK_CHECK;
++		vector cam[4];
++		GetWorld().GetCurrentCamera(cam);
++		int inRange = 0;
++		foreach (int key : m_sFieldPatches)
++		{
++			MUD_FinePatch p = m_mPatches.Get(key);
++			if (!p)
++				continue;
++			float dist = PatchDist(p.m_iPx, p.m_iPz, cam[3]);
++			bool inR = dist <= LOOK_RADIUS;
++			if (p.m_bLookNear)
++				inR = dist <= LOOK_RADIUS + LOOK_HYST;
++			if (inR)
++				inRange++;
++			if (inR == p.m_bLookNear)
++			{
++				// owed look (built plain while busy): once quiet, one look build
++				if (!inR || !p.m_bLookOwed || p.m_bMeshDirty || p.m_iBuild > 0 || !p.m_Ent || m_fTime - p.m_fMeshAt < LOOK_QUIET)
++					continue;
++				p.m_bLookOwed = false;
++			}
++			else
++			{
++				p.m_bLookNear = inR;
++				p.m_bLookOwed = false;
++				if (p.m_iBuild > 0 || !p.m_Ent)
++					continue;     // still building: its cover step builds the mesh with the new flag
++			}
++			p.m_bMeshDirty = true;
++			p.m_bLookGate = true;
++			if (!p.m_bQueued)
++			{
++				p.m_bQueued = true;
++				p.m_fQueuedAt = m_fTime;
++				m_aDirty.Insert(p.m_iKey);
++			}
++		}
++		m_iLookInRange = inRange;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Look layer 10 s line (render machines only; a DS has no m_Look). Build ms only means something in the PERF
++	//! session (dedicated server + standalone game), never in Workbench.
++	protected void LookStats()
++	{
++		float mean = 0;
++		if (m_iLookBuilds > 0)
++		{
++			mean = m_iLookMs;
++			mean = mean / m_iLookBuilds;
++		}
++		Print(string.Format("MUD look: patches in range %1, builds %2, mean %3 ms, worst %4 ms, index misses %5 (radius %6 m), plain while busy %7",
++			m_iLookInRange, m_iLookBuilds, mean, m_iLookWorst, m_Look.m_iIdxMisses, LOOK_RADIUS, m_iLookBusy), LogLevel.NORMAL);
++		m_iLookBusy = 0;
++		m_iLookBuilds = 0;
++		m_iLookMs = 0;
++		m_iLookWorst = 0;
++		m_Look.m_iIdxMisses = 0;
++	}
++
+ 	//------------------------------------------------------------------------------------------------
+ 	//! Dedicated server: a 2-triangle mesh spanning the patch so traces find it (MUD_BoundsMesh.c).
+ 	//! Built once: 30 m below the lowest base covers floor, slab and plate (depth boxes deeper than ~25 m
+@@ -6553,6 +6920,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		bool rfOn = RutFieldOn(p);
+ 		int rfX0 = p.m_iPx * PCELLS;
+ 		int rfZ0 = p.m_iPz * PCELLS;
++		if (!rfOn)
++			rfOn = MUD_LookRuts.InBox(rfX0, rfX0 + PCELLS, rfZ0, rfZ0 + PCELLS);     // client look ruts (mesh only)
+ 		for (int v = 0; v < PVERTS * PVERTS; v++)
+ 		{
+ 			float d = p.m_aH[v];
+@@ -6568,7 +6937,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			{
+ 				int rfVx = v % PVERTS;
+ 				int rfVz = v / PVERTS;
+-				float rfF = MUD_VoxelProbe.FieldFloor(rfX0 + rfVx, rfZ0 + rfVz) - p.m_aBase[v];
++				float rfF = MUD_LookRuts.MeshFloor(rfX0 + rfVx, rfZ0 + rfVz) - p.m_aBase[v];     // + client look ruts
+ 				if (rfF < 0)
+ 					rfF = rfF * p.m_aEdgeLock[v];     // edge lock as a press: 0 at kept terrain (road) -> no gap there
+ 				if (rfF < d)
+@@ -6696,6 +7065,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		m_iCsMeshRes += System.GetTickCount(csRes);
+ 		p.m_MeshRes = res;
+ 		p.m_bMeshDirty = hideOwed;     // ahead ruts: rebuild again (Mesh Interval) until every hidden change shows
++		p.m_bLookDirty = false;
+ 		m_iMeshBuilds++;
+ 		int ms = System.GetTickCount(t0);
+ 		m_iMeshMs += ms;
+@@ -8063,6 +8433,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		m_fSinceStats = 0;
+ 		m_iStatFrames = 0;
+ 		PatchCounts(fps);
++		if (m_Look)
++			LookStats();
+ 		if (m_iMadeAhead + m_iMadeStamp + m_iFreed + m_iMeshBuilds + m_iColBuilds + m_iSlept + m_iWoken + m_iCraters + m_iCraterSkips + m_iDigs + m_iNetMsgs + m_iNetGot == 0)
+ 			return;
+ 		Print(string.Format("MUD world: last 10 s - made %1 ahead + %2 by stamps, freed %3, meshes %4 (%5 ms), colliders %6 (%7 ms), smoothing %8 ms, skin swaps %9 ms",

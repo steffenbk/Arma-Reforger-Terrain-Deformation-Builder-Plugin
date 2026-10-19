@@ -37,3 +37,11 @@ def test_main_exit_codes(tmp_path, capsys):
     assert co.main([str(s), str(c)]) == 1
     assert "MISMATCH field seq 3" in capsys.readouterr().out
     assert co.main([str(s), str(e)]) == 2
+
+
+def test_read_hashes_sheet_lines():
+    log = ("12:00:01.000  SCRIPT       : MUD sheet hash seq 7: 123 (box 30 x 41 cells at cell 6640 18200)\n"
+           "12:00:01.100  SCRIPT       : MUD sheet hash seq 8: -1 (box 200 x 9 cells at cell 6600 18200)\n"
+           "12:00:01.200  SCRIPT       : MUD disp hash seq 7 kind 4: 5 (1 written, 0 cleared)\n")
+    h = co.read_hashes(log.splitlines())
+    assert h == {("sheet", 7): (4, 123), ("sheet", 8): (4, -1), ("disp", 7): (4, 5)}

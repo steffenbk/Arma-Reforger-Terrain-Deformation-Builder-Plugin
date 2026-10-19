@@ -2,6 +2,9 @@
 
 Reads every 'MUD field hash seq N kind K: H ...' line (voxel field, test kit) and every 'MUD disp hash seq N kind K:
 H ...' line (rut floor, MUD_VoxelProbe DISP hash) and compares them op by op (same seq on both machines).
+Synced mud sheet Stage 2 (2026-10-18): also every 'MUD sheet hash seq N: H ...' line (MUD_MudSync, the sheet's sync
+layer: kind 4 rut ops; since Stage 4 also crater / dig ops kinds 0-3). A DS draws no sheet, so for sheet hashes pass two CLIENT logs (client A, client B) or a
+WB host log and a client log; 'server' / 'client' below then just mean the first / second log.
 
 Usage: python compare_op_hashes.py <server console.log> <client console.log>
 Exit 0 = every op both logs have is equal, 1 = differences, 2 = no hash lines in a log.
@@ -11,6 +14,7 @@ import re
 import sys
 
 LINE = re.compile(r"MUD (field|disp) hash seq (\d+) kind (\d+): (-?\d+)")
+SHEET = re.compile(r"MUD sheet hash seq (\d+): (-?\d+)")
 
 
 def read_hashes(lines):
@@ -20,6 +24,10 @@ def read_hashes(lines):
         m = LINE.search(line)
         if m:
             out[(m.group(1), int(m.group(2)))] = (int(m.group(3)), int(m.group(4)))
+            continue
+        m = SHEET.search(line)
+        if m:
+            out[("sheet", int(m.group(1)))] = (4, int(m.group(2)))
     return out
 
 
@@ -39,7 +47,7 @@ def main(argv):
         with open(path, encoding="utf-8", errors="replace") as f:
             hashes.append(read_hashes(f.read().splitlines()))
     if not hashes[0] or not hashes[1]:
-        print("no 'MUD field/disp hash seq' lines in %s" % [p for p, h in zip(argv, hashes) if not h])
+        print("no 'MUD field/disp/sheet hash seq' lines in %s" % [p for p, h in zip(argv, hashes) if not h])
         return 2
     r = compare(hashes[0], hashes[1])
     print("ops in both %d, mismatched %d, only server %d, only client %d"

@@ -2,6 +2,181 @@
 
 **Status: SHIPPED.** Short page - add to it when we work on this feature.
 
+## Lessons for the voxel ruts (from the mud sheet work, 2026-10-18)
+
+Measured on the dedicated server unless marked otherwise; detail in research/2026-10-18-mud-mesh-cost-research-findings.md
+and research/2026-10-18-fixes-2-4-and-brainstorm.md.
+1. Mesh loops: hand-inline small helpers, read per-vertex flags once into a local int array, skip untouched cells
+   = 1.10 -> 0.88 ms per tile build (-20 %, DS 16:16, same output checked). Bench recipe: N old + N new builds of
+   the same data between two GetTickCount calls, compare the output count. Same recipe fits the patch mesh /
+   collider builders and DispEmit.
+2. Build what is next to the wheels first: wheel tiles first took the sheet delay from up to 9 s to ~80 ms
+   (DS 12:24). A per-item rebuild limit (0.25 s) raised fps 58-72 -> 73-90 (DS 15:37) but must leave the
+   near-wheel items free, or a "wave" chases the truck (DS 15:47 fix).
+3. Measure lateness with a delay meter (wheel stamp -> drawn). Look ruts today: wheel -> look cut avg 400-530 ms,
+   max 1.5-3 s (DS 16:16 / 16:27) - that is the gap behind the wheels.
+4. Rut op cost: RelaxFloor is 5-6 ms per op; the crude cut (no relax, no ridges) took one op 15.7 -> 9.8 ms on the
+   client and 14.4 -> 7.7 ms on the server (DS 13:38). The server 'MUD rut floor' Print was 2.2 ms per op (now
+   behind OP_LOG). Re-ground exact + FLOOR_SPREAD removed the dirty-rebuild spikes (DS 13:52 / 14:11).
+5. Skipping patch collider rebuilds under 2 cm change: only 0-4 skips per 10 s - not worth it (DS 16:16).
+6. Far LOD works: far meshes at half resolution, back to full when the camera comes within 17 m (DS 16:16) -
+   a candidate for far patch meshes.
+7. Two systems drawing one visible surface (patch mesh + sheet tile, separate queues) gave pops and a height step
+   that build order + a 1 cm lift did NOT cure (DS 16:26, user) - cause unproven. Keep one owner per surface.
+8. Enforce: at most 64 locals in scope per method, parameters included (compile 2026-10-18).
+
+Next (2026-10-18): wheel-to-rut track mark - prompt docs/superpowers/prompts/2026-10-18-wheel-to-rut-decal.md (new chat).
+
+## Wheel-to-rut track mark (started 2026-10-18, v207 = before, NOT COMPILED)
+- Step 1 DECAL PROBE: TEMP MUD_DecalProbe.c (ENABLED, called first in MUD_LookRuts.Tick = rendering machines only).
+  8 tries, 2 s apart, wheel 0 of the vehicle nearest the camera: CreateDecal on the contact entity / our patch
+  entity, CreateDecal2 on the patch, TrackDecalFactory.AddPoint on the patch; CONTROLS: the vehicle body, a script
+  quad with MatPBRMulti (DirtCover_01), a script quad with MatTerrainObject. Log 'MUD decal probe N/8'. Tries are
+  >= 0.6 m apart (engine dedupes a same-material decal within ~0.32 m). Materials have no NoDecals line (checked
+  default_MatTerrainObj1.emat, DirtCover_01.emat). Patch decals vanish on the next patch rebuild (IDA) - look right away.
+- Found: vanilla Wheeled_Base.et already has native tyre tracks (VehicleWheelEffectComponent SlidingTrackMaterial
+  {AE248EE9E164EB4B}Assets/Decals/TrackDecal.emat); IDA 2026-10-16 says track decals start only on the terrain entity.
+- Quick wins in the same build: MUD_VoxelProbe.OP_LOG false (per-op 'MUD voxel probe / rut field / rut floor' lines
+  gone, hash lines unaffected), MUD_WorldGround.COL_SKIP_SMALL false. Loop speedups (quick win 3) not started.
+- Fallback if decals fail: own ribbon mesh per wheel (wheel contact -> look rut start), a few mm over the patch mesh.
+- PROBE RESULT (WB 2026-10-18 ~20:50, user eyes; the return value is always null, mud-gotchas): decals SHOW on our
+  ground (MUD_CoarseChunkEntity / MUD_FinePatchEntity) and on the road, spray-mod call at the wheel; the mortar one too.
+  They VANISH when the rut cut gets close (patch rebuild, as IDA said). Grass / clutter is not removed, so the mark is
+  hard to see in grass.
+- Step 2 GRASS-CUT PROBE (2026-10-18, v208 = before, NOT COMPILED): TEMP MUD_GrassCutProbe.c (MUD_DecalProbe now
+  false), called from MUD_LookRuts.Tick. Every 4 s, 15 sets, beside the vehicle nearest the camera (out of the
+  wheels' own grass flattening): A left 3 m = Prefabs/Mud/MudGrassCutDecal.et (GenericEntity + DecalEntity child,
+  ClutterOccluder 1, red Blood10, as RoadForger's track prefabs); B right 3 m = Prefabs/Mud/MudGrassCutMesh.et
+  (GenericEntity + MeshObject ClutterOccluder 1 / clip plane 2, as RoadForger's Flower_hider) + our 0.6 x 3 m dirt
+  strip via SetObject; C right 5.5 m = the same strip on a plain GenericEntity = control. Log 'MUD grass cut N/15'
+  (traced entity under each). Marks live 180 s. Read: B no grass + C grass = the flag survives SetObject.
+  Prefab .meta files hand-written (as MudTunnelProbe_*); if 'prefab not loaded' shows, WB has not registered them.
+  RUN 1 (WB 20:55-20:58, log + user): all marks made 15/15 (our chunk / patch, road). A (DecalEntity occluder) shows on
+  asphalt ONLY - offroad it is drawn on the holed heightmap under our ground, as feared. B (occluder-mesh strip) shows
+  offroad and on asphalt; C too (user corrected 2026-10-18: both strips showed offroad, not only B).
+  Run 2 change: C = MudGrassCutMeshOff.et (same prefab, ClutterOccluder 0) so B vs C differ only in the flag.
+  RUN 2 (WB 21:00, compile 21:00:12, user eyes): grass pokes through B AND C -> ClutterOccluder on the prefab
+  MeshObject does NOT cut grass once SetObject puts our mesh in (or occluders do not work over our ground at all -
+  unresolved; no control with a real xob on our ground yet). Grass under A (invisible offroad) not judged.
+- RoadForger decal look (read 2026-10-18): spawnable prefabs = GenericEntity + DecalEntity child (ClutterOccluder 1,
+  scale ~8.4, FarPlane 2-5). Their emats are MatPBRDecal: vanilla Road_Dirt_01_BCR / Road_Dirt_02_NMO / Road_Dirt_01_H
+  + an OpacityMap = a black / white track-shaped mask (Assets/Road textures/*.tif -> edds), AlphaTest 0.4,
+  AlphaMul 2.2, BlendMode AlphaBlend, DecalCategory Static, SurfaceProperties grass_road1.gamemat. The DecalEntity
+  prefabs hide under our ground offroad (run 1 A), but the EMAT can go into World.CreateDecal, which draws on our
+  ground (probe run 2) -> track-shaped decal stamps.
+- Step 3 TRACK STAMPS (2026-10-18, NOT COMPILED, texture not imported yet): MUD_TrackStamps.c (ENABLED, LOG), called
+  from MUD_LookRuts.Tick (MUD_GrassCutProbe now false). Every wheel within 80 m of the camera: one CreateDecal per
+  1.0 m rolled, on the contact entity, at the middle of the last step, angle = heading + ANGLE_OFF (0; untested
+  which way the texture's V points), SIZE 1.4 m, LIFE 120 s. Material Assets/Mud/MUD_TrackDecal.emat
+  {4253A1BA2A9FAF38} = RoadForger's Double_small car.emat minus TCModRotate and DecalCategory Static (Blood10 has
+  neither), OpacityMap Assets/Mud/MUD_TrackMask.edds {EBA6950208263F29} (hand-written meta) from MUD_TrackMask.tif =
+  RoadForger Singles/Left_track.tif, track blob cropped + centered in a 512 square (track 0.39 of the width).
+  Log 'MUD track stamps: N made'. Known before testing: stamps vanish when the patch rebuilds; grass pokes through.
+- DECAL TRACK MARK PARKED 2026-10-18 (user, before testing step 3): all three probes / stamps ENABLED false, files kept.
+  Focus instead: voxel / look ruts that form right at the wheels (see 'Ruts at the wheel').
+
+## Ruts at the wheel (started 2026-10-18, v209 = before)
+Goal (user): the client look rut forms right at the wheels (instead of a decal mark). Today (WB delay meter, logs
+2026-10-18 20:58-21:11, driving): wheel -> drawn look mesh ~1.2-2.2 s, ~4-8 m behind; wheel -> look cut ~0.5-1 s
+(the cut waits for the REARMOST wheel to be GAP 0.4 m past - by design, visual only; spikes = stops / reversing).
+- Step 1 SPLIT DELAY METER (TEMP, NOT COMPILED): one 'MUD delay split 10 s (TEMP)' line next to 'MUD delay look'.
+  mark = patch state at its first look mark after its last mesh (ready / building / asleep; MISSING = no fine patch
+  there, counted every mark: the look floor is not drawn at all). wait = patch-frames a look-dirty patch's mesh did
+  not build, by reason: building, asleep, sheet, every (LOOK_MESH_EVERY 0.25 / Mesh Interval not up), lost (another
+  patch got the frame's one mesh), budget (MayRun no), index (index-list job first). mark -> built = cut to mesh
+  (queue = rebuild queue, other = a patch's own build steps). Code: MUD_LookRuts NoteMark / NoteWait / NoteBuilt,
+  MUD_WorldGround MarkLookDirty + Rebuild + both mesh builders, MUD_FinePatch.m_fLookCutAt. WB numbers = where the
+  wait goes, not perf (TESTING RULES).
+  RESULT (WB 21:28-21:30, results/2026-10-18-look-rut-delay-split.md, full table): mesh side ~0.1 s (mark -> built
+  median 105 ms, MISSING 0); the delay is the cut rule (wait for the rearmost wheel + GAP 0.4 m). ~7 m behind the front
+  wheel, inference ~1.3 m behind the rear wheel at ~6 m/s.
+- Step 2 PER_WHEEL look cut (user rule 2026-10-18, v210 = before, NOT COMPILED): MUD_LookRuts.PER_WHEEL true - each
+  wheel's segment is cut once THAT wheel is GAP 0.4 m past it (front wheel cuts at once). A sample this vehicle wrote
+  within TTL (MUD_LookTile.m_aOwn = MUD_LookTrack.m_iId) is measured from the uncut ground and only goes deeper if the
+  new cut is deeper - aligned rear wheels add no step; off the front's rut (turning) they cut as usual. Log: 'MUD look
+  ruts' line ends 'PER_WHEEL 1, aligned (no extra step) N'. Watch: rear wheels may look a few cm high over the front's
+  look rut (visual only, server collider); 'replaced' may rise if the server stacks overlapping cuts and we no longer do.
+  RESULT (WB, user screenshot 2026-10-18 ~21:36): look ruts show behind each wheel, but the wheels float over them
+  and they still come in late; white / sky-coloured triangles at the rut ends (cause unproven - maybe gaps at a patch
+  edge next to an unlowered neighbour).
+- Step 3 REAL CUT AT THE WHEEL (v211 = before, NOT COMPILED): MUD_VoxelProbe.RUT_BEHIND false (server cuts the
+  segments the wheels just drove, every RUT_EVERY_MS 250 ms - tyres sink into their own rut); look cut GAP 0.4 -> 0.2,
+  EVERY 0.1 -> 0.05. User tests on a LIVE server (old stutter was DS / own PC only). Next knob if still late:
+  LOOK_MESH_EVERY 0.25 (perf cap).
+  WB 21:42 (user): ruts form, but at speed the rear wheel floats then drops. Log 21:43:33: floor settle held the
+  collider (12 max-wait releases, 1383 held patch-frames / 10 s, oldest dirty 0.84 s) - ops never go quiet while
+  driving. Step 4 (v212 = before, NOT COMPILED): MUD_WorldGround.FLOOR_SETTLE false. If still late: speed-scaled
+  RUT_EVERY_MS, or cut ahead of the wheel by speed x delay.
+- Step 5 RAGGED DIRT EDGE (v213 = before, NOT COMPILED; user: step 4 much better, but dirt pops in with no grass ->
+  dirt transition): MUD_WorldGround.RAGGED - the groove reveal threshold gets world-fixed noise (RevealT / RagNoise,
+  both mesh paths), so rut rims turn to dirt in broken patches. Knobs RAG_D 0.035, RAG_BLEND 0.03, RAG_CELLS 3,
+  RAG_WHITE 0.35. No extra mesh builds. Voxel brick ground keeps its hard edge. Next if still poppy: short ease drop.
+  WB (user): a little better.
+- Step 6 LOOK CUT UNDER THE TYRE (v214 = before, NOT COMPILED; user: if it happened under the wheels we could mask
+  it): MUD_LookRuts.LEAD - each wheel lays its look segment LEAD_MIN 0.1 + speed x LEAD_S 0.2 (max LEAD_MAX 1.5) m
+  ahead and cuts it at once, so the drawn dirt lands under the tyre. Trade-offs: dirt ahead of the tyre after a hard
+  stop; tyre may look a few cm high over the rut until the server rut lands.
+  WB 21:59 (user: somewhat better, still slow): meter wheel -> drawn avg ~0.2 s, max ~0.4 s; waits = LOOK_MESH_EVERY
+  cap + one mesh per frame (perf limits). User pick: LEAD_S 0.2 -> 0.4, LEAD_MAX 1.5 -> 2 (no extra builds), NOT
+  COMPILED. Paid option if still slow: LOOK_MESH_EVERY 0.1 / 2 meshes per frame, judged on a live server only.
+- Step 7 SKIRT DEPTH (v217 = before, NOT COMPILED; user: much better, still see-through gaps while driving):
+  BuildMeshBand skirt = max(Band Skirt 0.3, Rut Max Depth 0.35 + Reveal Gap x 3 + 0.1) = 0.54 m. Inference (not
+  proven): a rut drawn on one patch before its neighbour opens a seam crack deeper than the old 0.3 m skirt. Check:
+  gaps only on 8 m patch lines? gone now? Collider build uses skirt 0 (unchanged).
+- Step 8 RUT RAMP (v221 = before, NOT COMPILED; user 2026-10-18 DS: 'when we make the ruts it shouldnt bump so much'):
+  CarveFloor cut full depth up to the tyre every 250 ms flush and stopped dead = a step under the tyre each flush
+  (inference: the pumping). MUD_VoxelProbe.RUT_RAMP: each op fades its cut out over the last RUT_RAMP_LEN 1 m of each
+  wheel chain and in over 1 m behind the chain start (RampChains / RampW / RampBehind). Weights add to 1 (offline check:
+  0 mismatches in 2000 random points, op lengths 0.5-2.5 m), so final depth is unchanged. Op data only (J2 safe).
+  Tune: RUT_RAMP_LEN longer = smoother, shorter = more pumping. false = old behaviour.
+- DS 2026-10-18 23:40 (steps 7-8 + perf batch compiled): only 2 net corrections in the whole drive (bumps = our ground,
+  not netcode); seams mismatched 0; 'replaced by a shallower server rut' 15 (was 160-322). User still sees under the
+  ground when driving fast - cause OPEN (needs the user's description).
+- Step 9 LEAD AXLE RUTS (user decision, v223 = before, NOT COMPILED): MUD_VoxelProbe.RUT_LEAD_AXLE - only the leading
+  axle cuts (front wheels forward, rear wheels reversing; vehicle-local z within RUT_AXLE_TOL 0.5 m), server feel
+  ruts and client look ruts alike (LeadAxle; trailing wheels RutWheelOff). One pass per drive-through now, not two.
+- Step 10 RUT PASS MAX (user 'first rut smooth', v223 = before, NOT COMPILED): one pass cuts at most 0.06 m (was
+  max(0.08, 0.4 x cap) = 0.11 m for 8 t), CarveFloor and the look cut alike; ruts deepen with traffic up to the cap.
+- Step 11 LOOK SPREAD (user: holes right at / just ahead of the wheels at speed, v224 = before, NOT COMPILED):
+  inference - lazy patches (made, skin still draws them) only went live when the SERVER floor reached them
+  (FloorFinish -> floor spread); the client look rut, up to LEAD_MAX 2 m ahead, reached them first, so the live
+  neighbour drew the groove up to their border and the skirtless skin left an open step. MarkLookDirty now sends a
+  lazy / building patch to the floor spread too (MUD_WorldGround.LOOK_SPREAD). Ruled out: skirt winding (proto test
+  264 / 264 skirt tris face out on a border rut patch), mesher holes (log missing 0, overflow 0), MISSING patches (0).
+  Check: 'floor spread: N patches (look M)' in 'MUD patches:'; holes gone at speed.
+  DS 2026-10-19 00:01 (steps 9-11 compiled): user 'much better', holes gone; client driving 90-107 fps, MUD script
+  ~1.1-2.5 ms/frame (was ~3.9 at 22:31); server MUD 2.1-3.0 ms; floor spread look adds 0-6 per 10 s.
+- Step 12 FIRST PASS TO DIRT (user: 'the first rut should go down to the dirt and then slowly after each pass we go
+  deeper', v225 = before, NOT COMPILED): MUD_VoxelProbe.RUT_FIRST_D 0.15 (user: 0.10 -> 0.12 -> 0.15) x profile on the first pass (6 cm left grass
+  patches: the groove is full dirt from ~0.09 m with RAG_D noise), then RUT_PASS_MAX 0.03 per pass (was 0.06) up to the
+  cap. Rule by depth so far, not pass count; server cuts plain RUT_FIRST_D (adds up under RUT_RAMP), look tops up.
+  Fix 2026-10-19 (user screenshot: spotty dirt in a turn): the server first cut used cf (= fall x ramp weight) without
+  / rw, so it got w x w = half depth where two ops fade over each other. Offline sim Tools/rut_first_pass_sim.py (one
+  wheel, ops every 250 ms, RampBehind straight back): before - slow r 7 m turn min 0.07 m, 100 % of the centre line
+  under the 0.09 m dirt line; straight 4 m/s 50 %. After - min 0.13-0.15 m, 0 % under 0.09 on all four cases.
+- Step 13 TRAIL CUT (user 00:14 screenshot: turning, the rear wheels run inside the front rut on grass; v226 = before,
+  NOT COMPILED): a trailing wheel also cuts when the ground 0.5 m ahead of it is not a rut >= 0.7 x RUT_FIRST_D deep
+  (MUD_VoxelProbe.RUT_TRAIL_CUT / InLeadRut; server = real floor, look = MeshFloor). Straight = rear wheels still ride.
+  Open: no hysteresis - a wheel at the rut edge may switch on / off and leave short faded bits (watch turn entry / exit).
+  WB 00:19 (user): rear wheels cut driving STRAIGHT too, turn ruts still off the wheels - cause unknown (no counter).
+  TEMP probe (MUD_VoxelProbe.TRAIL_PROBE, test kit): 'MUD trail probe:' line every 0.5 s per side - depth 0.5 m ahead
+  of a trailing wheel, in rut yes / no, deepest rut across +-0.8 m and its side offset. Archive it after.
+- RUT / WHEEL DEBUGGER (user 2026-10-19, NOT COMPILED): Scripts/Game/Mud/MUD_RutDebug.c, Diag exe / WB only, diag menu
+  GameCode > Mud > Ruts and wheels: wheel role spheres (green leads / orange off-rut cuts / blue rides; solid server,
+  wire look) + arrow to the TRAIL probe point, rut-across line (red = deepest), rut pieces 4 s (yellow server op, cyan
+  look), depth dots 3 m (server or drawn floor), DbgUI text table. LeadAxle now gives 2 for a TRAIL CUT wheel.
+  WB 00:30 trail-probe log (209 lines, one long right turn ~15-25 m radius): server side 'depth ahead' 0 on every
+  line, deepest rut at side -0.5 .. -0.8 m (left = outside of the turn) = rear wheels track inside the front rut,
+  TRAIL CUT correct there. Look side often 'in rut 1' at side 0.0 = its OWN look cut (laid up to LEAD_MAX 2 m
+  ahead) - on / off flicker. Fix (NOT COMPILED): InLeadRut reads the real rut floor on both sides.
+  User: contact balls do not follow the steered front tyres. Debugger TEMP: magenta / violet = WheelGetPosition read
+  as world / local + wheel names + steering in the table - find the call that sits on the tyre.
+- Step 14 RUT AT THE HUB (user 2026-10-19: the contact ball does not follow the steered tyre; v227 = before):
+  first build read WheelGetPosition as world (user named the magenta ball) -> NO ruts; WB 00:38 log: the value is
+  vehicle-local (constant x 1.02 z 2.65). Now CoordToParent (NOT COMPILED).
+  MUD_VoxelProbe.RutPoint = hub x / z on the contact height, used by server RutWheel, look ruts, LeadAxle, TRAIL CUT
+  and the debugger. Physics code (wheel hold, touch) keeps the contact point.
+
 ## Files (Scripts/Game/Mud)
 MUD_VoxelProbe.c (RutWheel / RutFlush, RUT_BEHIND), MUD_Wheels.c
 
@@ -60,6 +235,35 @@ MUD_VoxelProbe.c (RutWheel / RutFlush, RUT_BEHIND), MUD_Wheels.c
   patches (v111 = before).
   F4 (built 2026-10-16, not compiled, v113 = before): rut floor uses m_aEdgeLock (no buildings) in patches, LockAt
   and bricks (FieldEdgeLocked in Displace) - same on every machine; a rut may now cut inside the building margin.
+
+## Client look ruts (MUD_LookRuts.ENABLED true, built 2026-10-17, NOT COMPILED, v172 = before)
+- User 2026-10-17: ruts close to the wheel and at once on the client; the server keeps its batched RUT_BEHIND cut.
+- Every rendering machine (clients, WB host; not a DS) cuts a LOCAL look floor GAP 0.4 m behind the rearmost wheel of
+  each moving vehicle within 150 m of the camera (CarveFloor's rule, no relax / ridges), every 0.1 s per vehicle.
+  Patch MESHES draw min(rut floor, look floor) (MeshFloor in BuildMesh / BuildMeshBand); colliders, hashes, ops, JIP
+  never see it. Look-dirty patches build their mesh past the FLOOR_SETTLE hold. A sample drops when the real floor
+  reaches it (CATCH 0.02, no rebuild) or after TTL 8 s (rebuild). Plain RUT FIELD ground only (no voxel column).
+- Hooks: MUD_VoxelProbe.LookOrigin / LookBase, MUD_WorldGroundEntity.LookDirty + Rebuild bypass, MUD_FinePatch.m_bLookDirty.
+- PER-WHEEL GAP (user 2026-10-18, v174 = before): each wheel's look rut is cut GAP 0.4 m behind THAT wheel (front
+  ruts show under the truck, not after the rear wheels pass). Look only; the felt server rut keeps 1.5 m behind the
+  rearmost wheel. Rear tyres may hover over the drawn groove until the server rut lands (user accepted). NOT COMPILED.
+  2026-10-18 later: GAP 0.4 -> -0.05 (user: 'show right under the tyre') - a segment is cut as soon as it is made.
+  REVERTED 2026-10-18 with the look layer (user stopped the look work): MUD_LookRuts.c = v174 again (rearmost wheel,
+  GAP 0.4). Never tested on its own. The per-wheel version is in checkpoint v176.
+- R4 2026-10-18 (research/2026-10-18-mud-zone-rut-perf.md, NOT COMPILED): SHEET_SKIP true = no look ruts where the
+  mud sheet draws (the sheet shows the track); 10 s line adds 'segments under the sheet (skipped)'. Server R1 the same
+  day: under the sheet the felt rut op goes every 750 ms instead of 250 (RUT_SHEET_MS).
+- PERF 2026-10-18 (DS, research/2026-10-18-sheet-alternatives-and-perf.md sec 9-10): look ruts = ~1.9 ms/frame off the
+  zone (~25 look meshes / s at ~5.4 ms). look_ruts 0 test: much better fps but the user saw ruts pop in late -> keep them.
+  NOT COMPILED (v191 = before): L2 MUD_WorldGroundEntity.LOOK_MESH_EVERY 0.25 s (look-only patch mesh rebuild rate, was
+  0.1); L3 MUD_LookRuts.REPLACE_MIN 0.03 (a server rut within 3 cm of the look floor drops the sample with no rebuild;
+  10 s line '(+ N within REPLACE_MIN, no rebuild)').
+- Log: 'MUD look ruts: 10 s - ...' (no contact = moving vehicles without wheel contacts, e.g. proxies; expired = the
+  server cut less than the guess -> mesh pops up).
+- Risks: client mesh rebuild cost (perf on DS / game only); proxy vehicles may give no contacts (unverified).
+- MP run 1 (2026-10-17, results/2026-10-17-look-ruts-mp.md): works on the own truck; look meshes up to ~75 ms/s
+  while driving; 15-30 % samples expired -> REPLACE 3 s fix (not compiled); client crashed on leaving (unresolved).
+  Settings switch: look_ruts 1/0 in the CLIENT $profile:MUD_TestKit.txt (A/B still to run).
 
 ## Open
 - Rut field Stage 5 JIP (user: later): late join after a rutted drive + crater crossing a rut. Robot code is

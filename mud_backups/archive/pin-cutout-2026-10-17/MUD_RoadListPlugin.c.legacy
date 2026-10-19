@@ -1,0 +1,70 @@
+#ifdef WORKBENCH
+//! Pin cut-out (2026-10-17): lists every RoadEntity of the open world for MUD_KeepScan (play), which keeps terrain
+//! under real roads but not under trails. A trail = RoadEntity whose Material contains 'trail' (RG_Trail*_01.et:
+//! Type Path, Width 1.75, Trail*_01.emat). In play a RoadEntity has no prefab, name, material or width (probe
+//! 2026-10-17), so the scan tells them apart by world origin. Open MudArland in the World Editor, run this once.
+//! Lines in $profile:mud_roads.txt:
+//!   MUD road <trail 0|1> <x> <y> <z> width <w> mat <material>
+//!   MUD roads done roads <n> trails <t>
+[WorkbenchPluginAttribute(
+	name: "MUD List Roads",
+	description: "Write every road of this world (origin, trail flag) to $profile:mud_roads.txt for MUD_KeepScan",
+	wbModules: { "WorldEditor" },
+	awesomeFontCode: 0xF018)]
+class MUD_RoadListPlugin : WorkbenchPlugin
+{
+	static const string FILE = "$profile:mud_roads.txt";
+
+	//------------------------------------------------------------------------------------------------
+	override void Run()
+	{
+		WorldEditor worldEditor = Workbench.GetModule(WorldEditor);
+		if (!worldEditor)
+			return;
+		WorldEditorAPI api = worldEditor.GetApi();
+		if (!api)
+			return;
+
+		FileHandle f = FileIO.OpenFile(FILE, FileMode.WRITE);
+		if (!f)
+		{
+			Print("MUD roads: cannot open " + FILE, LogLevel.ERROR);
+			return;
+		}
+		int roads;
+		int trails;
+		int noEnt;
+		for (int i, count = api.GetEditorEntityCount(); i < count; i++)
+		{
+			IEntitySource src = api.GetEditorEntity(i);
+			if (!src || src.GetClassName() != "RoadEntity")
+				continue;
+			IEntity e = api.SourceToEntity(src);
+			if (!e)
+			{
+				noEnt++;
+				continue;
+			}
+			ResourceName mat;
+			src.Get("Material", mat);
+			float width;
+			src.Get("Width", width);
+			string low = mat;
+			low.ToLower();
+			int trail = 0;
+			if (low.Contains("trail"))
+			{
+				trail = 1;
+				trails++;
+			}
+			vector o = e.GetOrigin();
+			f.WriteLine(string.Format("MUD road %1 %2 %3 %4 width %5 mat %6", trail, o[0], o[1], o[2], width, mat));
+			roads++;
+		}
+		string done = string.Format("MUD roads done roads %1 trails %2", roads, trails);
+		f.WriteLine(done);
+		f.Close();
+		Print(string.Format("%1 (sources without an entity %2) -> %3", done, noEnt, FILE));
+	}
+}
+#endif // WORKBENCH

@@ -1,0 +1,247 @@
+//! TEMP probe 2026-10-17 (cut out the terrain PIN cells under trees, rocks and every other non-building RELATIVE_Y
+//! root, and roads with a 'trail' material; user: buildings keep theirs). SP / WB host only, TEST_KIT.
+//! 20 s after Play, once:
+//! 1. counts RELATIVE_Y roots by class (whole map) and how many sit on a skin hole cell -> 'MUD pin probe: class ...'
+//! 2. lifts the nearest RELATIVE_Y standing tree AND the nearest other non-building RELATIVE_Y root with physics
+//!    (rock ...) within 40 m by LIFT m (SetOrigin + Update); horizontal traces through each at old base + 1 m and
+//!    old base + LIFT + 1 m before and 1 s after -> 'MUD pin probe: lift ...' (does the collision move with the
+//!    model?). Both stay lifted: walk under / into them.
+//! 3. lists every distinct RoadEntity a WORLD trace finds in a 300 m square around the player with its materials
+//!    -> 'MUD pin probe: road ...' (which roads carry a 'trail' .emat?)
+//! Archive with its one call in MUD_WorldGroundEntity.EOnFrame when done.
+class MUD_PinProbe
+{
+	static const bool ON = false;     // 2026-10-17: done (rock kept collision, user) - archive with the pin cut-out
+	static const float START_S = 20;
+	static const float LIFT = 3;
+	static const float ROAD_HALF = 150;     // m: road sample square half size
+	static const float ROAD_STEP = 4;       // m: road sample spacing
+
+	protected static ref MUD_PinProbe s_Inst;
+	protected static BaseWorld s_World;
+	protected float m_fT0 = -1;
+	protected int m_iStep;
+	protected ref array<IEntity> m_aLifted = {};    // [0] tree, [1] other (null = none found)
+	protected ref array<vector> m_aOld = {};
+	protected bool m_bWantTree;
+	protected float m_fLiftAt;
+	protected ref array<IEntity> m_aFound = {};
+	protected ref TraceParam m_Trace = new TraceParam();
+
+	//------------------------------------------------------------------------------------------------
+	static void Tick(float time)
+	{
+		if (!ON || !MUD_TestKit.TEST_KIT || System.IsConsoleApp() || RplSession.Mode() == RplMode.Client)
+			return;
+		BaseWorld world = GetGame().GetWorld();
+		if (!world)
+			return;
+		if (!s_Inst || s_World != world)
+		{
+			s_Inst = new MUD_PinProbe();
+			s_World = world;
+		}
+		s_Inst.Step(world, time);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Step(BaseWorld world, float time)
+	{
+		if (m_fT0 < 0)
+			m_fT0 = time;
+		if (m_iStep == 0 && time - m_fT0 >= START_S)
+		{
+			IEntity player = SCR_PlayerController.GetLocalControlledEntity();
+			if (!player)
+				return;
+			m_iStep = 1;
+			Counts(world);
+			Lift(world, player.GetOrigin(), true);
+			Lift(world, player.GetOrigin(), false);
+			Roads(world, player.GetOrigin());
+			m_fLiftAt = time;
+			return;
+		}
+		if (m_iStep == 1 && time - m_fLiftAt >= 1)
+		{
+			m_iStep = 2;
+			for (int i = 0; i < m_aLifted.Count(); i++)
+			{
+				IEntity e = m_aLifted[i];
+				if (!e)
+					continue;
+				vector old = m_aOld[i];
+				Print(string.Format("MUD pin probe: lift after 1 s: %1 origin %2, hit at old base + 1: %3, hit at new base + 1: %4",
+					PrefabOf(e), e.GetOrigin(), Hit(world, e, old, old[1] + 1), Hit(world, e, old, old[1] + LIFT + 1)), LogLevel.NORMAL);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool AddRelY(IEntity e)
+	{
+		if (!e.GetParent() && (e.GetFlags() & EntityFlags.RELATIVE_Y))
+			m_aFound.Insert(e);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Counts(BaseWorld world)
+	{
+		int t0 = System.GetTickCount();
+		m_aFound.Clear();
+		world.QueryEntitiesByAABB(Vector(-500, -500, -500), Vector(14000, 1500, 14000), AddRelY);
+		MUD_CoarseSkinEntity skin = MUD_CoarseSkinEntity.GetInstance();
+		float x0;
+		float z0;
+		int ncx;
+		int ncz;
+		if (skin)
+			skin.GetGrid(x0, z0, ncx, ncz);
+		map<string, int> byClass = new map<string, int>();
+		map<string, int> onHole = new map<string, int>();
+		int trees;
+		foreach (IEntity e : m_aFound)
+		{
+			string c = e.ClassName();
+			if (BaseTree.Cast(e))
+			{
+				c = "BaseTree(" + c + ")";
+				trees++;
+			}
+			else if (Building.Cast(e))
+				c = "Building(" + c + ")";
+			byClass.Set(c, byClass.Get(c) + 1);
+			vector o = e.GetOrigin();
+			if (skin && skin.IsHoleCell(Math.Floor((o[0] - x0) / 2.0), Math.Floor((o[2] - z0) / 2.0)))
+				onHole.Set(c, onHole.Get(c) + 1);
+		}
+		Print(string.Format("MUD pin probe: %1 RELATIVE_Y roots, %2 trees, %3 classes (%4 ms)", m_aFound.Count(), trees, byClass.Count(), System.GetTickCount(t0)), LogLevel.NORMAL);
+		foreach (string cls, int n : byClass)
+			Print(string.Format("MUD pin probe: class %1 roots %2 on hole cells %3", cls, n, onHole.Get(cls)), LogLevel.NORMAL);
+		m_aFound.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool RoadOnly(notnull IEntity e)
+	{
+		return e.Type() == RoadEntity;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Roads(BaseWorld world, vector p)
+	{
+		array<IEntity> seen = {};
+		array<int> hits = {};
+		for (float x = p[0] - ROAD_HALF; x <= p[0] + ROAD_HALF; x += ROAD_STEP)
+		{
+			for (float z = p[2] - ROAD_HALF; z <= p[2] + ROAD_HALF; z += ROAD_STEP)
+			{
+				m_Trace.Start = Vector(x, p[1] + 200, z);
+				m_Trace.End = Vector(x, p[1] - 200, z);
+				m_Trace.Flags = TraceFlags.WORLD;
+				m_Trace.LayerMask = EPhysicsLayerPresets.Projectile;
+				m_Trace.TraceEnt = null;
+				if (world.TraceMove(m_Trace, RoadOnly) >= 1 || !m_Trace.TraceEnt || m_Trace.TraceEnt.Type() != RoadEntity)
+					continue;
+				int i = seen.Find(m_Trace.TraceEnt);
+				if (i < 0)
+				{
+					seen.Insert(m_Trace.TraceEnt);
+					hits.Insert(1);
+				}
+				else
+					hits[i] = hits[i] + 1;
+			}
+		}
+		Print(string.Format("MUD pin probe: %1 road entities in %2 m around %3", seen.Count(), ROAD_HALF * 2, p), LogLevel.NORMAL);
+		for (int r = 0; r < seen.Count(); r++)
+		{
+			IEntity e = seen[r];
+			string mats = "";
+			VObject vo = e.GetVObject();
+			if (vo)
+			{
+				string materials[256];
+				int n = vo.GetMaterials(materials);
+				for (int m = 0; m < n; m++)
+					mats += " " + materials[m];
+			}
+			string parent = "(none)";
+			if (e.GetParent())
+				parent = e.GetParent().ClassName() + " " + PrefabOf(e.GetParent());
+			Print(string.Format("MUD pin probe: road '%1' prefab %2 parent %3 hits %4 at %5 mats:%6",
+				e.GetName(), PrefabOf(e), parent, hits[r], e.GetOrigin(), mats), LogLevel.NORMAL);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected static string PrefabOf(IEntity e)
+	{
+		EntityPrefabData pd = e.GetPrefabData();
+		if (pd && pd.GetPrefabName() != "")
+			return pd.GetPrefabName();
+		return "(no prefab)";
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool AddTarget(IEntity e)
+	{
+		if (e.GetParent() || (e.GetFlags() & EntityFlags.RELATIVE_Y) == 0 || Building.Cast(e) || !e.GetPhysics())
+			return true;
+		bool tree = BaseTree.Cast(e) != null;
+		if (tree == m_bWantTree)
+			m_aFound.Insert(e);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void Lift(BaseWorld world, vector p, bool tree)
+	{
+		m_bWantTree = tree;
+		m_aFound.Clear();
+		world.QueryEntitiesByAABB(p - Vector(40, 60, 40), p + Vector(40, 60, 40), AddTarget);
+		float best = 1e9;
+		IEntity pick;
+		foreach (IEntity e : m_aFound)
+		{
+			float d = vector.DistanceSqXZ(e.GetOrigin(), p);
+			if (d < best && !MUD_GroundFollow.IsStump(e))
+			{
+				best = d;
+				pick = e;
+			}
+		}
+		m_aFound.Clear();
+		string what = "other root";
+		if (tree)
+			what = "tree";
+		if (!pick)
+		{
+			Print("MUD pin probe: lift - no RELATIVE_Y " + what + " within 40 m", LogLevel.WARNING);
+			return;
+		}
+		vector old = pick.GetOrigin();
+		bool lo0 = Hit(world, pick, old, old[1] + 1);
+		bool hi0 = Hit(world, pick, old, old[1] + LIFT + 1);
+		pick.SetOrigin(old + Vector(0, LIFT, 0));
+		pick.Update();
+		m_aLifted.Insert(pick);
+		m_aOld.Insert(old);
+		Print(string.Format("MUD pin probe: lift %1 %2 (%3) at %4 by %5 m, %6 m away. Before: hit at old base + 1: %7, at new base + 1: %8. Now origin %9",
+			what, PrefabOf(pick), pick.ClassName(), old, LIFT, Math.Sqrt(best), lo0, hi0, pick.GetOrigin()), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A horizontal ENTS trace at height y across old x, z (2 m each side, along x) hits e
+	protected bool Hit(BaseWorld world, IEntity e, vector old, float y)
+	{
+		m_Trace.Start = Vector(old[0] - 2, y, old[2]);
+		m_Trace.End = Vector(old[0] + 2, y, old[2]);
+		m_Trace.Flags = TraceFlags.ENTS;
+		m_Trace.LayerMask = EPhysicsLayerPresets.Projectile;
+		m_Trace.TraceEnt = null;
+		world.TraceMove(m_Trace, null);
+		return m_Trace.TraceEnt == e;
+	}
+}

@@ -26,6 +26,80 @@ class MUD_JoltProbe
 	protected static float s_fSince;
 	protected static int s_iFrames;
 	protected static float s_fWorstDt;
+	// TEMP snap-distance probe (2026-10-18, H1 follow-up): ring of recently changed rut floor samples on this machine
+	// (MUD_VoxelProbe.FloorChanged, in op order) - each snap logs how close each wheel was to one and how old it was
+	static const int FLOOR_RING = 4096;
+	static const int FLOOR_KEEP_MS = 6000;
+	protected static ref array<float> s_aFlX = {};
+	protected static ref array<float> s_aFlZ = {};
+	protected static ref array<int> s_aFlT = {};
+	protected static int s_iFlNext;
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD_VoxelProbe.FloorChanged: the rut floor sample at world x, z changed now
+	static void NoteFloor(float x, float z)
+	{
+		int now = System.GetTickCount();
+		if (s_aFlX.Count() < FLOOR_RING)
+		{
+			s_aFlX.Insert(x);
+			s_aFlZ.Insert(z);
+			s_aFlT.Insert(now);
+			return;
+		}
+		s_aFlX.Set(s_iFlNext, x);
+		s_aFlZ.Set(s_iFlNext, z);
+		s_aFlT.Set(s_iFlNext, now);
+		s_iFlNext++;
+		if (s_iFlNext >= FLOOR_RING)
+			s_iFlNext = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! per contact wheel: m to the nearest floor sample changed in the last FLOOR_KEEP_MS, and its age in s
+	protected static string RutNear(VehicleWheeledSimulation sim)
+	{
+		int now = System.GetTickCount();
+		string s = "MUD corr rut near:";
+		float bestAll = 1000;
+		float bestAge = -1;
+		int near05;
+		for (int w = 0; w < sim.WheelCount(); w++)
+		{
+			if (!sim.WheelHasContact(w))
+				continue;
+			vector cp = sim.WheelGetContactPosition(w);
+			float best = 1000000;
+			int bestT = 0;
+			for (int i = 0; i < s_aFlX.Count(); i++)
+			{
+				if (now - s_aFlT[i] > FLOOR_KEEP_MS)
+					continue;
+				float dd = (s_aFlX[i] - cp[0]) * (s_aFlX[i] - cp[0]) + (s_aFlZ[i] - cp[2]) * (s_aFlZ[i] - cp[2]);
+				if (dd < best)
+				{
+					best = dd;
+					bestT = s_aFlT[i];
+				}
+			}
+			if (best >= 1000000)
+			{
+				s += string.Format(" w%1 none,", w);
+				continue;
+			}
+			float d = Math.Sqrt(best);
+			float age = (now - bestT) * 0.001;
+			s += string.Format(" w%1 %2 m %3 s,", w, d.ToString(-1, 2), age.ToString(-1, 2));
+			if (d < bestAll)
+			{
+				bestAll = d;
+				bestAge = age;
+			}
+			if (d < 0.5)
+				near05++;
+		}
+		return s + string.Format(" | nearest %1 m (%2 s old), wheels within 0.5 m %3", bestAll, bestAge, near05);
+	}
 
 	//------------------------------------------------------------------------------------------------
 	static void Tick(float dt, bool proxy, MUD_WorldGroundEntity g)
@@ -132,7 +206,7 @@ class MUD_JoltProbe
 					MUD_FrameLog.MarkCorrection(bodyJump);
 				float visJump = vector.Distance(vis, pVis + step);
 				int left;
-				if (s_mTrace.Find(veh, left) && left > 0)
+				if (MUD_VoxelProbe.OP_PRINTS && s_mTrace.Find(veh, left) && left > 0)     // perf plan A1: no trace lines on perf runs
 				{
 					vector pre;
 					s_mBase.Find(veh, pre);
@@ -159,10 +233,11 @@ class MUD_JoltProbe
 					string ground = string.Format(" | wheels %1/%2 on: ours %3 road %4 | collider vs newest heights %5 m, collider changed %6 s ago, wheels on dirty patches %7 | at %8",
 						contacts, count, ours, road, pend, age, dirtyN, vis);
 					Print(head + input + ground);
+					Print(RutNear(sim));
 					s_mBase.Set(veh, pOff);
 					s_mTrace.Set(veh, 6);
 				}
-				else if (visJump > 0.1 && visJump < 5)
+				else if (MUD_VoxelProbe.OP_PRINTS && visJump > 0.1 && visJump < 5)
 				{
 					Print(string.Format("MUD corr visual only: %1 mine %2 proxy %3 | visual jump %4 m, body jump %5 m, %6 m/s, dt %7",
 						veh.GetID(), veh == mine, proxy, visJump, bodyJump, speed, dt));

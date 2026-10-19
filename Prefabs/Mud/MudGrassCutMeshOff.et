@@ -1,0 +1,10 @@
+GenericEntity {
+ ID "C3A81F0E92D7465B"
+ components {
+  MeshObject "{D5E2903A7B16C84F}" {
+   CastShadow 0
+   CastFarShadow 0
+   ClutterOccluder 0
+  }
+ }
+}

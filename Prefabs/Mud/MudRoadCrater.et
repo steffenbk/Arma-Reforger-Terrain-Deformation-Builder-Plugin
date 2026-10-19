@@ -1,0 +1,9 @@
+GenericEntity {
+ ID "4D5552524F414431"
+ components {
+  MUD_RoadCraterComponent "{4D5552524F414432}" {
+  }
+  RplComponent "{4D5552524F414433}" {
+  }
+ }
+}

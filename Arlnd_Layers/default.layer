@@ -9,6 +9,17 @@ MUD_DepthBoxEntity MUD_DepthBox_0_5 {
 MUD_MudZoneEntity {
  coords 997.397 39 2729.715
 }
+GenericEntity : "{033BA33972BC0946}Prefabs/Decaltest/Long_track_1.et" {
+ coords 1121.453 39.254 2662.102
+ {
+  DecalEntity {
+   ID "66A17AE0DB0429D6"
+   coords 1.11 0 -3.143
+   angles -69.187 180 -180
+   scale 6.36
+  }
+ }
+}
 GenericEntity : "{21D83950DF36F250}Prefabs/Props/Military/Sandbags/Sandbag_01_long_burlap.et" {
  coords 997.93 39 2662.291
 }

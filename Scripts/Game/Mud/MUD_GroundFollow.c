@@ -21,9 +21,15 @@ class MUD_GroundFollow
 	static const float REST_TRACE = 0.3;    // m: down trace from the base for a non-ground support
 	static const float MAX_PROP = 20;       // m: bigger footprints are never hidden (power lines, walls of a site)
 	static const float QUERY_Y = 60;        // m: the box query reaches this far above / below the undug ground
+	static const float TRUNK_R = 0.5;       // m: a stump is tested on its trunk (origin +- this), not its world box
+	static const int WHY_MAX = 40;
+	static const int WATCH_MS = 1000;       // standing trees over a hole: rechecked this often for the stump model
+	static const int WATCH_MAX = 500;       // most watched trees (oldest dropped)          // TEST_KIT: 'why' lines per op (floating stumps left, 2026-10-17)
 
 	protected static ref MUD_GroundFollow s_Inst;
 	protected ref array<IEntity> m_aFound = {};
+	protected ref array<IEntity> m_aWatch = {};              // standing trees with a floating trunk (weak)
+	protected bool m_bWatching;
 	protected ref array<IEntity> m_aHid = {};                // props this hid (weak: a deleted one reads null)
 	protected ref array<ref array<int>> m_aHidLayers = {};   // per hidden prop: body layer, then each geom's layer
 	protected ref TraceParam m_Trace = new TraceParam();
@@ -35,6 +41,10 @@ class MUD_GroundFollow
 	protected int m_iPoint;
 	protected int m_iMoved;
 	protected int m_iFired;
+	protected int m_iWhy;
+	protected float m_fTop;                                  // Floating: highest new ground under the footprint
+	protected vector m_vLo;                                  // TEST_KIT: op box, for the child 'why' lines
+	protected vector m_vHi;
 
 	//------------------------------------------------------------------------------------------------
 	//! Any machine, GoLive: the op of kind (0-3) with x, z box lo / hi went live. lift: fill only, how much the
@@ -44,6 +54,76 @@ class MUD_GroundFollow
 		if (!s_Inst)
 			s_Inst = new MUD_GroundFollow();
 		s_Inst.Run(lo, hi, kind, lift);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A tree in its last destruction phase = the stump is left: its model is the last phase's m_sPhaseModel
+	//! (t_picea_abies_3f.et: 2 phases, last = *_dst_base.xob). The model swap runs on every machine (vanilla
+	//! GoToDamagePhase, streamed / JIP too). SCR_DestructibleEntity is an engine class: no mod hook (compile 2026-10-17).
+	static bool IsStump(IEntity e)
+	{
+		if (!BaseTree.Cast(e))
+			return false;
+		SCR_DestructibleEntityClass prefabData = SCR_DestructibleEntityClass.Cast(e.GetPrefabData());
+		VObject vo = e.GetVObject();
+		if (!prefabData || !vo)
+			return false;
+		int n = prefabData.GetNumDestructionPhases();
+		if (n < 2)
+			return false;
+		SCR_BaseDestructionPhase phase = SCR_BaseDestructionPhase.Cast(prefabData.GetDestructionPhase(n - 1));
+		if (!phase)
+			return false;
+		ResourceName model;
+		string remap;
+		if (!phase.GetPhaseModelAndRemap(model, remap))
+			return false;
+		string name = FilePath.StripExtension(FilePath.StripPath(model));
+		return name != "" && vo.GetResourceName().Contains(name);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Watched standing trees (a blast destroys the tree after the op went live; a joiner streams the stump state
+	//! later): a stump -> Prop (hides it if still over the hole); off the list when deleted or the hole is filled
+	protected static void WatchTickS()
+	{
+		if (s_Inst)
+			s_Inst.WatchTick();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void WatchTick()
+	{
+		m_iHidden = 0;
+		m_iWhy = 0;
+		for (int i = m_aWatch.Count() - 1; i >= 0; i--)
+		{
+			IEntity e = m_aWatch[i];
+			if (!e || e.IsDeleted())
+			{
+				m_aWatch.Remove(i);
+				continue;
+			}
+			float base;
+			bool floating;
+			if (!Floating(e, e.GetOrigin(), base, floating) || !floating)
+			{
+				m_aWatch.Remove(i);
+				continue;
+			}
+			if (!IsStump(e))
+				continue;
+			m_aWatch.Remove(i);
+			int was = m_iHidden;
+			Prop(e);
+			if (m_iHidden > was)
+				Print(string.Format("MUD ground follow: stump %1 at %2 is over a hole - hidden", PrefabOf(e), e.GetOrigin()), LogLevel.NORMAL);
+		}
+		if (m_aWatch.IsEmpty() && m_bWatching)
+		{
+			GetGame().GetCallqueue().Remove(WatchTickS);
+			m_bWatching = false;
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -63,6 +143,9 @@ class MUD_GroundFollow
 		m_iPoint = 0;
 		m_iMoved = 0;
 		m_iFired = 0;
+		m_iWhy = 0;
+		m_vLo = lo;
+		m_vHi = hi;
 		ShowBack(lo, hi);
 		vector qlo = Vector(lo[0], cy - QUERY_Y, lo[2]);
 		vector qhi = Vector(hi[0], cy + QUERY_Y, hi[2]);
@@ -100,10 +183,16 @@ class MUD_GroundFollow
 	//! or characters
 	protected bool Add(IEntity e)
 	{
+		if (e && e.GetParent() && MUD_TestKit.TEST_KIT && e.GetVObject() && !ParticleEffectEntity.Cast(e) && !MUD_Surface.IsOurs(e))
+			WhyChild(e);
 		if (!e || e.GetParent() || MUD_Surface.IsOurs(e) || Building.Cast(e) || ChimeraCharacter.Cast(e))
 			return true;
 		if (GenericTerrainEntity.Cast(e) || DecalEntity.Cast(e))
 			return true;
+		// the blast's own effects (dirt throw, smoke) sit on the ground the crater drops: hiding them killed the
+		// vanilla dirt-throw (WB 2026-10-17: '1 props hidden' on every crater)
+		if (ParticleEffectEntity.Cast(e) || PrefabOf(e).Contains("Debris"))
+			return true;     // + flying blast debris (Explosion_Debris_Dirt.et, WB 2026-10-17)
 		m_aFound.Insert(e);
 		return true;
 	}
@@ -141,7 +230,8 @@ class MUD_GroundFollow
 
 	//------------------------------------------------------------------------------------------------
 	//! A static world prop: hidden + collision off when the ground under its whole footprint (origin and the 4
-	//! bottom corners of its world box) dropped more than HIDE_GAP under its base
+	//! bottom corners of its world box) dropped more than HIDE_GAP under its base. Trees: only a destroyed one (the
+	//! stump is left), tested on its trunk (user 2026-10-17: standing trees stay).
 	protected void Prop(IEntity e)
 	{
 		if (!e.GetPhysics() && !e.GetVObject())
@@ -151,18 +241,56 @@ class MUD_GroundFollow
 		vector o = e.GetOrigin();
 		float base;
 		bool floating;
-		if (!Floating(e, o, base, floating) || !floating)
+		if (BaseTree.Cast(e) && !IsStump(e))
+		{
+			// a standing tree stays (user 2026-10-17); watched in case the blast destroys it after this op
+			if (m_aWatch.Find(e) < 0 && Floating(e, o, base, floating) && floating)
+			{
+				if (m_aWatch.Count() >= WATCH_MAX)
+					m_aWatch.RemoveOrdered(0);
+				m_aWatch.Insert(e);
+				if (!m_bWatching)
+				{
+					GetGame().GetCallqueue().CallLater(WatchTickS, WATCH_MS, true);
+					m_bWatching = true;
+				}
+			}
 			return;
-		if (!NearGround(Vector(o[0], base, o[2])) || RestsOnOther(e, Vector(o[0], base, o[2])))
+		}
+		m_fTop = 0;
+		if (!Floating(e, o, base, floating))
+		{
+			Why(e, base, "too big or a footprint corner on unconverted ground");
 			return;
+		}
+		if (!floating)
+		{
+			if (base - m_fTop > 0.05)
+				Why(e, base, "not floating (gap <= HIDE_GAP at the highest footprint point)");
+			return;
+		}
+		if (!NearGround(Vector(o[0], base, o[2])))
+		{
+			Why(e, base, "base > ON_GROUND over the undug ground");
+			return;
+		}
+		if (RestsOnOther(e, Vector(o[0], base, o[2])))
+		{
+			Why(e, base, "rests on " + m_Trace.TraceEnt.ClassName());
+			return;
+		}
 		if (e.FindComponent(RplComponent))
 		{
+			Why(e, base, "has RplComponent");
 			m_iRplLeft++;
 			return;
 		}
 		int flags = e.GetFlags();
 		if ((flags & EntityFlags.VISIBLE) == 0)
-			return;     // hidden by someone else
+		{
+			Why(e, base, "already hidden by someone else");
+			return;
+		}
 		array<int> layers = {};
 		Physics ph = e.GetPhysics();
 		if (ph)
@@ -179,6 +307,8 @@ class MUD_GroundFollow
 		m_aHid.Insert(e);
 		m_aHidLayers.Insert(layers);
 		m_iHidden++;
+		if (MUD_TestKit.TEST_KIT)
+			Print(string.Format("MUD ground follow: hid %1 %2 at %3", e.ClassName(), PrefabOf(e), o), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -227,15 +357,25 @@ class MUD_GroundFollow
 		floating = false;
 		vector mins;
 		vector maxs;
-		e.GetWorldBounds(mins, maxs);
-		if (maxs[0] - mins[0] > MAX_PROP || maxs[2] - mins[2] > MAX_PROP)
-			return false;
-		bool point = maxs[0] - mins[0] < 0.05 && maxs[2] - mins[2] < 0.05;
-		if (point)
-			m_iPoint++;
+		bool point;
 		base = o[1];
-		if (!point)
-			base = Math.Max(o[1], mins[1]);
+		if (BaseTree.Cast(e))
+		{
+			// the world box of a stump is roots + leftovers (3 m wide, 4 m under the origin, WB 2026-10-17): use the trunk
+			mins = Vector(o[0] - TRUNK_R, o[1], o[2] - TRUNK_R);
+			maxs = Vector(o[0] + TRUNK_R, o[1], o[2] + TRUNK_R);
+		}
+		else
+		{
+			e.GetWorldBounds(mins, maxs);
+			if (maxs[0] - mins[0] > MAX_PROP || maxs[2] - mins[2] > MAX_PROP)
+				return false;
+			point = maxs[0] - mins[0] < 0.05 && maxs[2] - mins[2] < 0.05;
+			if (point)
+				m_iPoint++;
+			else
+				base = Math.Max(o[1], mins[1]);
+		}
 		float top = -100000;
 		int pts = 5;
 		if (point)
@@ -259,7 +399,50 @@ class MUD_GroundFollow
 			top = Math.Max(top, y);
 		}
 		floating = base - top > HIDE_GAP;
+		m_fTop = top;
 		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT: why a prop over the op was left (floating stumps, 2026-10-17). Origin y, bounds bottom, base,
+	//! highest new ground under the footprint, undug ground at the origin.
+	protected void Why(IEntity e, float base, string why)
+	{
+		if (!MUD_TestKit.TEST_KIT || m_iWhy >= WHY_MAX || ParticleEffectEntity.Cast(e))
+			return;
+		vector o = e.GetOrigin();
+		vector mins;
+		vector maxs;
+		e.GetWorldBounds(mins, maxs);
+		if (!BaseTree.Cast(e) && maxs[0] - mins[0] < 0.3 && maxs[2] - mins[2] < 0.3)
+			return;     // leaves, debris
+		m_iWhy++;
+		float undug = 0;
+		MUD_WorldGroundEntity.UndugY(o[0], o[2], undug);
+		Print(string.Format("MUD ground follow why: %1 %2 at %3 - %4 | origin y %5, bounds y %6 .. %7, base %8, top %9",
+			e.ClassName(), PrefabOf(e), o, why, o[1], mins[1], maxs[1], base, m_fTop) + string.Format(", undug %1, size %2 x %3", undug, maxs[0] - mins[0], maxs[2] - mins[2]), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT: a child entity (skipped by Add) with its origin in the op box: logged with its root
+	protected void WhyChild(IEntity e)
+	{
+		vector o = e.GetOrigin();
+		if (o[0] < m_vLo[0] || o[0] > m_vHi[0] || o[2] < m_vLo[2] || o[2] > m_vHi[2])
+			return;
+		IEntity root = e.GetRootParent();
+		m_fTop = 0;
+		MUD_VoxelProbe.TopAt(o[0], o[2], m_fTop);
+		Why(e, o[1], "CHILD of " + root.ClassName() + " " + PrefabOf(root) + " (Add skips children)");
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected static string PrefabOf(IEntity e)
+	{
+		EntityPrefabData pd = e.GetPrefabData();
+		if (pd && pd.GetPrefabName() != "")
+			return FilePath.StripPath(pd.GetPrefabName());
+		return "(no prefab)";
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -280,13 +463,13 @@ class MUD_GroundFollow
 		m_Self = e;
 		m_Trace.Start = p + Vector(0, 0.05, 0);
 		m_Trace.End = p - Vector(0, REST_TRACE, 0);
-		m_Trace.Flags = TraceFlags.ENTS | TraceFlags.WORLD;
+		m_Trace.Flags = TraceFlags.ENTS;     // no WORLD: the hidden vanilla terrain stays at the old ground y (WB 2026-10-17: stumps 'rest on' it)
 		m_Trace.LayerMask = EPhysicsLayerPresets.Projectile;
 		m_Trace.Exclude = e;
 		m_Trace.TraceEnt = null;
 		float frac = world.TraceMove(m_Trace, NotGround);
 		m_Self = null;
-		return frac < 1 && m_Trace.TraceEnt != null;
+		return frac < 1 && m_Trace.TraceEnt != null && NotGround(m_Trace.TraceEnt);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -295,3 +478,4 @@ class MUD_GroundFollow
 		return e != m_Self && !MUD_Surface.IsOurs(e) && !GenericTerrainEntity.Cast(e);
 	}
 }
+

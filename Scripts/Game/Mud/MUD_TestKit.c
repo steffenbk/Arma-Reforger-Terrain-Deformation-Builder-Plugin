@@ -21,12 +21,18 @@ class MUD_TestKit
 	static const float FAKE_RUT_CAP = 0.3;      // deepest (a ~9 t truck: 0.08 + 9 x 0.025, max 0.35)
 	// default: > 0 = a client holds at most this many out-of-order ops instead of 20000 (Stage 3, J1 test)
 	static const int JIP_TEST_CAP = 0;
+	// default: 1 = client look ruts on (MUD_LookRuts), 0 = off - A/B on one build (CLIENT file, restart the game)
+	static const int LOOK_RUTS = 1;
+	// default: > 0 = CLIENT render A/B - stored mud sheet meshes hidden / shown every this many s (MUD_MudSheet.RenderAB)
+	static const float SHEET_HIDE_AB = 0;
 
 	protected static bool s_bLoaded;
 	protected static int s_iFakeRutOps;
 	protected static float s_fFakeRutX;
 	protected static float s_fFakeRutZ;
 	protected static int s_iJipTestCap;
+	protected static int s_iLookRuts;
+	protected static float s_fSheetHideAB;
 
 	//------------------------------------------------------------------------------------------------
 	static int FakeRutOps()
@@ -57,6 +63,20 @@ class MUD_TestKit
 	}
 
 	//------------------------------------------------------------------------------------------------
+	static bool LookRuts()
+	{
+		Load();
+		return s_iLookRuts != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static float SheetHideAB()
+	{
+		Load();
+		return s_fSheetHideAB;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Once: the defaults, then (TEST_KIT) SETTINGS_FILE 'key = value' lines ('#' = comment). Logs what this run uses.
 	protected static void Load()
 	{
@@ -67,6 +87,8 @@ class MUD_TestKit
 		s_fFakeRutX = FAKE_RUT_X;
 		s_fFakeRutZ = FAKE_RUT_Z;
 		s_iJipTestCap = JIP_TEST_CAP;
+		s_iLookRuts = LOOK_RUTS;
+		s_fSheetHideAB = SHEET_HIDE_AB;
 		if (!TEST_KIT)
 			return;
 		string from = SETTINGS_FILE;
@@ -105,14 +127,18 @@ class MUD_TestKit
 						s_fFakeRutZ = val.ToFloat();
 					else if (key == "jip_test_cap")
 						s_iJipTestCap = val.ToInt();
+					else if (key == "look_ruts")
+						s_iLookRuts = val.ToInt();
+					else if (key == "sheet_hide_ab")
+						s_fSheetHideAB = val.ToFloat();
 					else
 						Print("MUD test kit: unknown setting '" + key + "' in " + SETTINGS_FILE, LogLevel.WARNING);
 				}
 				f.Close();
 			}
 		}
-		Print(string.Format("MUD test kit: settings from %1 - fake rut ops %2 at %3 %4 (no player), jip test cap %5",
-			from, s_iFakeRutOps, s_fFakeRutX, s_fFakeRutZ, s_iJipTestCap), LogLevel.NORMAL);
+		Print(string.Format("MUD test kit: settings from %1 - fake rut ops %2 at %3 %4 (no player), jip test cap %5, look ruts %6, sheet hide A/B %7 s",
+			from, s_iFakeRutOps, s_fFakeRutX, s_fFakeRutZ, s_iJipTestCap, s_iLookRuts, s_fSheetHideAB), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -131,6 +157,10 @@ class MUD_TestKit
 		f.WriteLine("# jip_test_cap: CLIENT - hold at most this many out-of-order ops instead of 20000 (J1 test).");
 		f.WriteLine("# Set it in the JOINING client's own file. 0 = off.");
 		f.WriteLine(string.Format("jip_test_cap = %1", JIP_TEST_CAP));
+		f.WriteLine("# look_ruts: CLIENT - 1 = draw ruts right behind the wheels at once (mesh only), 0 = off (A/B).");
+		f.WriteLine(string.Format("look_ruts = %1", LOOK_RUTS));
+		f.WriteLine("# sheet_hide_ab: CLIENT - > 0 = hide / show the stored mud sheet meshes every this many s (render A/B).");
+		f.WriteLine(string.Format("sheet_hide_ab = %1", SHEET_HIDE_AB));
 		f.Close();
 	}
 }

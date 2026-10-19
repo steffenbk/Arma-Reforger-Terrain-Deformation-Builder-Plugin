@@ -15,7 +15,8 @@ Proven engine facts: [../superpowers/research/mud-gotchas.md](../superpowers/res
 | Craters | SHIPPED | [craters](craters/README.md) |
 | Trenches, shovel, tunnels | SHIPPED | [trenches-tunnels](trenches-tunnels/README.md) |
 | MP sync, ahead system, JIP | SHIPPED (JIP lazy queues open) | [mp-sync](mp-sync/README.md) |
-| Mud sheet + ONE GRID (mud zones) | PARKED 2026-10-15 | [mud-sheet](mud-sheet/README.md) |
+| Mud look layer (client-only look on the felt rut) | PARKED 2026-10-18 (code removed, archived) | [mud-look](mud-look/README.md) |
+| Mud sheet + ONE GRID (mud zones) | PARKED 2026-10-18 (ENABLED false, v206 = last state; lessons for voxel ruts in its README) | [mud-sheet](mud-sheet/README.md) |
 | AI navmesh refresh | OFF (dead end) | [ai-navmesh](ai-navmesh/README.md) |
 
 Checkpoints: `mud_backups/checkpoint.ps1` (save / list / restore), stored in

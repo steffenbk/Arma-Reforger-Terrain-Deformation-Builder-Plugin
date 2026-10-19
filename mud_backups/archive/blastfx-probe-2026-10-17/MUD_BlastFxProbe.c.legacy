@@ -1,0 +1,53 @@
+//! TEMP probe 2026-10-17 (TEST_KIT): why the vanilla mortar dirt-throw is missing. Per shell / rocket / grenade warhead
+//! it logs which vanilla effect parts the spawned warhead still has (our Warhead_Base.et override adds
+//! MUD_WarheadComponent) and what a trace down through the blast point hits: ENTS | WORLD (our ground entities
+//! too) and WORLD only (what a projectile sees - mud-gotchas line 7), each with entity class, y and gamemat.
+//! Called from MUD_WarheadComponent.EOnInit. Archive when done.
+class MUD_BlastFxProbe
+{
+	static const bool ON = true;
+
+	//------------------------------------------------------------------------------------------------
+	static void Log(IEntity owner)
+	{
+		if (!ON || !MUD_TestKit.TEST_KIT || !owner)
+			return;
+		EntityPrefabData data = owner.GetPrefabData();
+		if (!data)
+			return;
+		string prefab = data.GetPrefabName();
+		if (!prefab.Contains("Shell") && !prefab.Contains("Rocket") && !prefab.Contains("Grenade"))
+			return;     // every bullet hit spawns a bare Warhead_Base too
+		vector o = owner.GetOrigin();
+		bool hit = owner.FindComponent(HitEffectComponent) != null;
+		bool trig = owner.FindComponent(BaseTriggerComponent) != null;
+		bool snd = owner.FindComponent(SoundComponent) != null;
+		float undug = -999;
+		MUD_WorldGroundEntity.UndugY(o[0], o[2], undug);
+		Print(string.Format("MUD blastfx: %1 at %2 undug %3 | HitEffect %4 Trigger %5 Sound %6 flags %7", prefab, o, undug, hit, trig, snd, owner.GetFlags()), LogLevel.NORMAL);
+		Print("MUD blastfx:   ENTS|WORLD " + Down(owner, o, TraceFlags.ENTS | TraceFlags.WORLD), LogLevel.NORMAL);
+		Print("MUD blastfx:   WORLD only " + Down(owner, o, TraceFlags.WORLD), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected static string Down(IEntity owner, vector o, TraceFlags flags)
+	{
+		TraceParam p = new TraceParam();
+		p.Start = o + Vector(0, 3, 0);
+		p.End = o - Vector(0, 3, 0);
+		p.Flags = flags;
+		p.LayerMask = EPhysicsLayerPresets.Projectile;
+		p.Exclude = owner;
+		float f = owner.GetWorld().TraceMove(p, null);
+		if (f >= 1)
+			return "no hit within 3 m";
+		string ent = "(none)";
+		if (p.TraceEnt)
+			ent = p.TraceEnt.ClassName();
+		string mat = "(none)";
+		if (p.SurfaceProps)
+			mat = p.SurfaceProps.GetResourceName();
+		float y = o[1] + 3 - f * 6;
+		return string.Format("hit %1 y %2 (%3 m under the blast) mat %4", ent, y, o[1] - y, mat);
+	}
+}

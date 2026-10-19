@@ -5,9 +5,18 @@
 - Feature detail (voxel bricks, papers plan, ruts, MP ahead system, mud sheet + ONE GRID, AI navmesh) lives in
   docs/features/<name>/README.md (moved out of this file 2026-10-15). Current state: all ground ops are voxel
   (MUD_VoxelProbe, v035 voxel ruts); the heightfield (MUD_WorldGround + MUD_FinePatch) is the base ground.
-  MUD SHEET PARKED 2026-10-15 (MUD_MudSheet.ENABLED false, v083) - docs/features/mud-sheet/README.md.
+  MUD SHEET PARKED AGAIN 2026-10-18 (MUD_MudSheet.ENABLED false, v206 = last state) - docs/features/mud-sheet/README.md
+  (lessons for the voxel ruts at its top). Focus now: voxel ruts.
+- TERRAIN RULE (user 2026-10-17): real terrain stays ONLY under asphalt / concrete (terrain gamemat), buildings,
+  power poles and real roads; everything else (trees, bushes, rocks, decals, props, trails) is holed. Holed RELATIVE_Y
+  roots are lifted at load by MUD_PinLift. Tool chain: docs/features/heightfield-ground/README.md.
+- ARMOR RULES (user 2026-10-18, whole-map cut plan): PvP only (AI pathing never matters). Roads (asphalt, dirt, trails,
+  runway concrete) + asphalt / concrete terrain are ARMORED: no ruts / shovel / tunnels under them (armor blocks the
+  whole column) until a blast breaks the spot - then it is dirt. Vanilla roads float over craters and hide only whole,
+  so cratered roads get OUR road copy (plan 7A, Data/Mud/mud_roads.c).
 - Proven gotchas: docs/superpowers/research/mud-gotchas.md. Read it before ground, physics or net work; add new proven facts there.
 - MP robot test setup (proven 2026-10-11; robot/JoltProbe/FrameLog BACK in Scripts/Game/Mud since 2026-10-17 behind MUD_TestKit.TEST_KIT; archive copy kept): DS (Workbench peer tool, already passes -logLevel debug; a DS can't log server NVMC) or WB host (USER starts WB with -logLevel debug - Claude's Start-Process gives IdentityID 0 = host log 'Another connected player with the same identity found', client dropped, then 'Resources are leaking' assert on close (2026-10-15); "Start only clients" first, then Play "Server localhost + PeerTool"; keep WB window in front or it stalls). PeerPlugin1 params need -logLevel debug. Spawn a fresh truck after start. Robot: driver seat, stopped, hold Space 3 s -> 20 s reverse circle. Logs: My Games/{ArmaReforgerWorkbench,PeerPlugin1,server}/logs; snaps = 'MUD corr: ... mine 1' lines; framelogs */profile/MUD_framelog_*.csv. Snap rate varies a lot between 3-run blocks - use >= 6 runs per setting.
+- Git: working-tree deletions are NOT committed on purpose - stage with 'git add --ignore-removal .'.
 - Vehicle MP debugging: the Diag exe has a menu Vehicles > "Vehicle Networking and Reconciliation" (path correction, recorded paths, sim I/O diags, SimState CSV to $logs:VehicleWheeledStateDebug). Use it before writing script probes.
 - Checkpoints (this project only, user 2026-10-11): mud_backups/checkpoint.ps1 (save "name" -> next version v001, v002 ... / list / restore 3 or restore "name-part"). Stored in C:\Users\Steffen\Documents\A_documents\Github\Terrain deformation\Versions backup (future GitHub repo); ALL new backups go there, not mud_backups. Claude saves one before every big or risky change and after the user confirms something works. Restore saves a "before-restore" first. Covers Scripts, Prefabs, Configs, Common, Missions, Data, root .ent/.et + *_Layers; NOT worlds/Assets/Terrain.
 - TESTING RULES (user 2026-10-16): (1) Group tests into combined SESSIONS per build (one launch per environment,

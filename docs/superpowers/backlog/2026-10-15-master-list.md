@@ -13,7 +13,12 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
 - Voxel bricks (MUD_VoxelProbe / MUD_VoxelNet): all ops voxel (SURFACE_OPS true), voxel ruts v035 (RUTS true,
   RUT_BEHIND 3 m) - CODE. User: "by far the smoothest" (v035), fine on their test server, 100+ fps (USER 2026-10-15).
 - Mud sheet (MUD_MudSheet, client-only look) inside MUD_MudZoneEntity boxes - PARKED 2026-10-15 (ENABLED false,
-  v083). Notes: docs/features/mud-sheet/README.md. Feature index: docs/features/README.md.
+  v083). UN-PARKED 2026-10-18 as the LOOK-ONLY synced sheet (user go, freeze exception): Stage 1 passed WB
+  2026-10-18 (v177 = before, v178 = works); Stage 2 (sync layer MUD_MudSync from rut ops + own-stamp
+  prediction) built + op split over frames, works in WB (v179 = before, v181 = works); Stage 3 BUILT, NOT COMPILED
+  (v182 = before): camera radius 40 m, sparse tiles, no pre-build, LAZY RUT MESH (real rut patch mesh hidden under
+  the sheet, rebuilt lazily; colliders immediate); Stage 5 late joiners BUILT, NOT COMPILED (v185 = before; server keeps the layer, J2 snapshot carries it); Stages 3 + 4 WORK WB (v184): op clearing -
+  craters / digs clear the sync layer from the ops (same holes on every client, digs past 40 m kept); Stages 2-5 = op sync + prediction, memory, op clearing, late joiners. Notes: docs/features/mud-sheet/README.md. Feature index: docs/features/README.md.
 - Trenches / shovel / tunnels (Ctrl+F, F, T), camera ease, AI navmesh refresh (off).
 
 ## Lane 1 - make it solid in MP (do in this order)
@@ -52,6 +57,18 @@ Labels: CODE (read in our script today), LOG (measured), USER (user saw it), INF
   crater code before working on them.
 
 ## Parked ideas (not now - add here, don't start)
+- MUD SHEET / MUD ZONES / ALL-OFFROAD SHEET (parked by user 2026-10-18, ENABLED false, v206 = last state): open = driven / undriven height step + tile pop (survived LIFT_BY_DRAWN), sync tiles never freed. Lessons: docs/features/mud-sheet/README.md top.
+- PREMADE RUT PIECES (user 2026-10-18): one rut mesh made once, placed (pooled entities) at each wheel stamp instead of
+  rebuilding tiles. Limit (code read): a sunken piece is hidden under the lifted A2 patch / sheet, so it cannot replace
+  the tile rebuild; fits as a look-only bridge for the newest 1-2 m behind each wheel until the tile catches up.
+  Unverified: several entities sharing one MeshObject.
+- Hybrid sheet feel LOOSE ENDS (parked by user 2026-10-18 14:15, 'functional, loop back later'; v200; results/2026-10-18-h1-snap-probe.md
+  runs 1-5): ease look never rated; H2 guess may run deeper than the server (front + rear wheel cut twice) -> rise
+  after 3 s; tyres may look to float over the guess (SHEET_GAP 0.1); real-cut drop still median 4 cm; H4 drag. The
+  server OP_LOG Print = 2.2 ms per rut op (Lane 2 OP_LOG switch covers it). H3 = sheet on all offroad (own plan).
+- Mud look layer (client-only 0.125 m look mesh near the camera; user go 2026-10-17, STOPPED + removed 2026-10-18:
+  ~30 ms per build, fps tanked, holes near the ruts unexplained). Findings + retry conditions:
+  docs/features/mud-look/README.md; code: mud_backups/archive/mud-look-layer-2026-10-18.
 - Tunnel darkness (user 2026-10-17 'put a pin in it'): off via MUD_VoxelProbe TUNNEL_DARK / DARK_MAT false. Resume
   notes: docs/features/trenches-tunnels/README.md (ambient-on-walls cause proven, graded IBL materials untested).
 - Crater size + look fine-tune (user 2026-10-17: "we will fine tune this at a later point"): old big preset stays for

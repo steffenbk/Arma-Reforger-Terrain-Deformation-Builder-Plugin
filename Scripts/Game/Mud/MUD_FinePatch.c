@@ -52,6 +52,14 @@ class MUD_FinePatch
 	bool m_bFloorWait;          // RUT FIELD settle (MUD_WorldGroundEntity.FLOOR_SETTLE): only floor dirt, held until quiet
 	float m_fFloorFirstAt;      // m_fTime of the first held floor dirt (max wait)
 	float m_fFloorDirtAt;       // m_fTime of the newest floor dirt (quiet)
+	bool m_bLookDirty;          // client look ruts (MUD_LookRuts): mesh-only dirt, may build while the floor settle holds
+	float m_fLookSince = -1;    // TEMP delay meter 2026-10-18: m_fTime the oldest undrawn look segment's wheel passed (-1 none)
+	float m_fLookSpeed;         // TEMP delay meter: vehicle speed (m/s) of that cut
+	float m_fLookCutAt = -1;    // TEMP split delay meter: m_fTime of the first look mark since the last mesh build (-1 none)
+	bool m_bSheetHid;           // LAZY RUT MESH (MUD_MudSheet.LAZY_RUT_MESH): mesh hidden under the mud sheet, rebuilds held
+	bool m_bSheetCov;           // ... last answer of MUD_MudSheet.Covers for this patch (MUD_WorldGroundEntity.SheetCovered)
+	float m_fSheetAt = -100;    // ... m_fTime of that answer
+	int m_iSheetGen = -1;       // ... MUD_MudSheet.CoverGen at that answer
 	float m_fFieldSeenAt;       // RUT FIELD: m_fTime it was last in MUD_WorldGroundEntity.FieldDue's range (keeps a floor-only patch)
 	bool m_bTraceHidden;       // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
@@ -59,6 +67,7 @@ class MUD_FinePatch
 	bool m_bAsleep;             // deformed, no vehicle near: no collider (skin collider under it), mesh kept
 	float m_fMeshAt = -100;
 	float m_fColAt = -100;
+	float m_fColBuiltAt = -100; // PAPER TEST 3: m_fTime of the last collider body actually built (m_fColAt also moves on a skip)
 	float m_fColChangeAt = -100;  // TEMP probe 2026-10-11: m_fTime a collider rebuild last moved a vertex
 	float m_fNearAt;            // m_fTime a vehicle was last near
 	// patch-local vertex rect whose m_aSmooth is stale (-1 = clean)

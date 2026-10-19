@@ -1,0 +1,22 @@
+GenericEntity {
+ ID "E9BD72E17500B9FF"
+ components {
+  Hierarchy "{1BFE412938C2DD62}" {
+  }
+ }
+ {
+  DecalEntity {
+   ID "FDD156C12F6342E5"
+   components {
+    Hierarchy "{220CE46B8EC489EA}" {
+    }
+   }
+   coords 0 0.5 0
+   angles -90 0 0
+   scale 2
+   FarPlane 2
+   ClutterOccluder 1
+   Mat "{9EE38D3540663BCF}Assets/Decals/Blood/Decal_Blood10.emat"
+  }
+ }
+}
