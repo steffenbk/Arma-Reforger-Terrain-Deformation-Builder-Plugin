@@ -24,7 +24,7 @@ Research and measure first, write it up, then build behind switches. Stop and re
    measured crater table. The end of it is the latest state (B5 / B6 / B7).
 3. `docs/superpowers/prompts/2026-10-20-local-mud-lab-stage2.md` (what stage 2 was asked) and
    `docs/superpowers/research/2026-10-20-sheet-local-edges-craters.md` (the edge / crater research).
-4. `docs/features/README.md`, then the feature READMEs for voxel ruts, mud sheet, heightfield ground.
+4. `docs/features/README.md`, then `docs/features/{ruts,mud-sheet,voxel-ground,craters,trenches-tunnels,heightfield-ground}/README.md`.
 5. `docs/superpowers/research/mud-gotchas.md`: Enforce limits (64 locals per scope incl. params, string.Format max 9
    values, '%' on its own int line, 256 KB per class), MeshObject rules, J2 rules.
 6. `.remember/remember.md`: the "Decisions / gotchas" list (proven facts with dates).
