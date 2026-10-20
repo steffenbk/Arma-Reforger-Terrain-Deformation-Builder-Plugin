@@ -1655,6 +1655,7 @@ class MUD_VoxelProbe
 			return;
 		}
 		s_mPending.Insert(seq, text);
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.Recv(text, s_mPending.Count());     // stage 2 B1 crater log
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3644,6 +3645,7 @@ class MUD_VoxelProbe
 			return false;
 		}
 		m_iSeq++;
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.Issued(back.m_iSeq, back.m_iKind, back.m_vWp);     // stage 2 B1 crater log
 		Submit(back);
 		if (RplSession.Mode() != RplMode.None)
 			MUD_WorldGroundEntity.VoxelBroadcast(text);
@@ -4063,6 +4065,7 @@ class MUD_VoxelProbe
 
 	protected bool SubmitBody(MUD_VoxelOp op)
 	{
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.Submitted(op.m_iSeq, op.m_iKind);     // stage 2 B1 crater log
 		// synced mud sheet op split (2026-10-18): the sync layer's open op work ends before this op changes the
 		// ground (its ground reads must not see a later op; no-op on a DS / with nothing open)
 		MUD_MudSync.Flush();
@@ -6779,6 +6782,7 @@ class MUD_VoxelProbe
 			+ string.Format(" (%1 kept their body, %2 look-only builds skipped)", m_iBatchMeshOnly, m_iBatchSkipped)
 			+ string.Format(" | scan: gather %1 ms, poly %2 ms, %3 samples scanned, checks %4 (%5 bad), checked full %6 ms vs band %7 ms", m_iBatchGatherMs, m_iBatchPolyMs,
 			m_iBatchScanned, m_iScanChecked, m_iScanBad, m_iBatchFullMs, m_iBatchBandMs) + DispBatch(), LogLevel.NORMAL);
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.GoLive(m_iBatchFrames, m_iBatchWorst, System.GetTickCount(t0), voxMs);     // stage 2 B1 crater log
 	}
 
 	//------------------------------------------------------------------------------------------------

@@ -21,6 +21,7 @@ class MUD_WarheadComponent : ScriptComponent
 	//------------------------------------------------------------------------------------------------
 	override void EOnInit(IEntity owner)
 	{
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.Boom(owner.GetOrigin());     // stage 2 B1 crater log
 		MUD_WorldGroundEntity ground = MUD_WorldGroundEntity.GetInstance();
 		if (ground)
 			ground.OnWarheadBlast(owner);

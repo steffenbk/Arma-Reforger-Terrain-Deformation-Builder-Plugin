@@ -6032,6 +6032,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				Print(string.Format("MUD world: crater skipped (charge %1 kg <= min %2) at %3", kg, m_fCraterMinTnt, outMat[0]));
 			return;
 		}
+		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.SrvHit(outMat[0], kg);     // stage 2 B1 crater log
 		int t0 = System.GetTickCount();
 		Crater(outMat[0], kg, heat);
 		int ms = System.GetTickCount(t0);

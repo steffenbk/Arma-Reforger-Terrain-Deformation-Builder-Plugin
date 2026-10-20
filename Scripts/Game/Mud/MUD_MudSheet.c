@@ -952,6 +952,8 @@ class MUD_MudSheet
 	//------------------------------------------------------------------------------------------------
 	protected void Frame(float time)
 	{
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.Tick();     // stage 2 B1 crater log: prints finished craters
 		int tPre = System.GetTickCount();
 		int bPre = s_iBandMsAll;     // stage 2 A1: BuildNowSlots' BandTile
 		if (m_bNowDue)
@@ -1955,10 +1957,24 @@ class MUD_MudSheet
 			if (m_aSlotNow[t] == 0)
 				continue;
 			m_aSlotNow[t] = 0;
-			if (m_aSlotZone[t] == 0 || t >= m_aTileEnt.Count() || !m_aTileEnt[t] || !SlotTraced(t))
-				continue;
 			int ti = t % TILES;
 			int tk = t / TILES;
+			bool traceNow = false;
+			if (CRATER_TRACE_NOW && m_aSlotZone[t] != 0 && t < m_aTileEnt.Count() && m_aTileEnt[t] && !SlotTraced(t))
+			{
+				TraceSlotNow(ti, tk);     // stage 2 B2 (O1a): its missing cells now, built below
+				traceNow = true;
+			}
+			if (m_aSlotZone[t] == 0 || t >= m_aTileEnt.Count() || !m_aTileEnt[t] || !SlotTraced(t))
+			{
+				if (MUD_TestKit.TEST_KIT)
+					CraterSkip(t, x0 + ti, z0 + tk);     // stage 2 B1 crater log
+				continue;
+			}
+			if (MUD_TestKit.TEST_KIT && traceNow)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TRACED_NOW, x0 + ti, z0 + tk, true);
+			else if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_LIVE_BUILT, x0 + ti, z0 + tk, true);
 			if (m_aSlotBand[t] != 0)
 			{
 				m_aSlotBand[t] = 0;
@@ -1974,6 +1990,90 @@ class MUD_MudSheet
 			m_aSlotWhy[t] = 0;
 			m_aSlotWait[t] = 0;
 			m_aSlotBuiltMs[t] = Math.Round(m_fLast * 1000);
+			built++;
+		}
+		return built;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B2 CRATER_TRACE_NOW (O1a): live slot ti, tk - every untraced even cell traced now and the cells between
+	//! filled, as Grounds would (Trace reads HoleGround over our holes), so BuildNowSlots builds it in the go-live frame
+	protected void TraceSlotNow(int ti, int tk)
+	{
+		int i0 = ti * TQ;
+		int k0 = tk * TQ;
+		for (int k = k0; k <= k0 + TQ; k += 2)
+		{
+			for (int i = i0; i <= i0 + TQ; i += 2)
+			{
+				if (m_F.m_aGs[k * N + i] != 0)
+					continue;
+				Trace(i, k);
+				m_iUntraced--;
+				m_bIdxDirty = true;
+			}
+		}
+		for (int fk = k0; fk <= k0 + TQ; fk += 2)
+		{
+			for (int fi = i0; fi <= i0 + TQ; fi += 2)
+				FillAround(fi, fk);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B1 crater log (TEST_KIT): why BuildNowSlots skipped now-slot t (world tile tx, tz)
+	protected void CraterSkip(int t, int tx, int tz)
+	{
+		if (m_aSlotZone[t] == 0)
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_UNBORN, tx, tz, false);
+		else if (t >= m_aTileEnt.Count() || !m_aTileEnt[t])
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_NOENT, tx, tz, true);
+		else
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_UNTRACED, tx, tz, true);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B3 CRATER_TAPER_NOW (O1b), right after BuildNowSlots: the BW_HOLE entries at the front of m_aOneBuild
+	//! (DigNow's taper neighbours) are built in the go-live frame too, up to TAPER_NOW_MAX tiles / TAPER_NOW_MS ms;
+	//! the rest stay in front for FlushOneBuild (logged). Same build as FlushOneBuild (no A5 rendered gate).
+	protected int TaperNow()
+	{
+		int t0 = System.GetTickCount();
+		int built = 0;
+		while (!m_aOneBuild.IsEmpty())
+		{
+			int key = m_aOneBuild[0];
+			int qWhy;
+			if (!m_mQWhy.Find(key, qWhy) || qWhy != BW_HOLE)
+				break;
+			if (built >= TAPER_NOW_MAX || System.GetTickCount(t0) >= TAPER_NOW_MS)
+			{
+				int left = 0;
+				for (int q = 0; q < m_aOneBuild.Count(); q++)
+				{
+					int lw;
+					if (!m_mQWhy.Find(m_aOneBuild[q], lw) || lw != BW_HOLE)
+						break;
+					left++;
+				}
+				Print(string.Format("MUD sheet taper now: cap hit after %1 tiles / %2 ms, %3 hole tiles left for the next frame", built, System.GetTickCount(t0), left), LogLevel.NORMAL);
+				break;
+			}
+			m_aOneBuild.RemoveOrdered(0);
+			m_mQWhy.Remove(key);
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Ent)
+				continue;
+			int tx = Math.Round(key / 20000.0);
+			int tz = key - tx * 20000;
+			if (IsLive(tx, tz))
+				continue;
+			if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TAPER_NOW, tx, tz, false);
+			m_iBuildWhy = BW_HOLE;
+			Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
+			if (res)
+				st.m_Res = res;
 			built++;
 		}
 		return built;
@@ -4362,9 +4462,14 @@ class MUD_MudSheet
 	{
 		if (!ENABLED || !s_Inst)
 			return;
+		int tCt = System.GetTickCount();
+		if (MUD_TestKit.TEST_KIT && blastR > 0)
+			MUD_CraterTrace.SheetHit(wp);     // stage 2 B1 crater log
 		s_Inst.m_bMarkNow = s_Inst.m_bLocal;     // SHEET LOCAL: slots a hole marks build in the blast frame (DoDigNow)
 		s_Inst.QueueChange(lo, hi, wp, blastR);
 		s_Inst.m_bMarkNow = false;
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.SheetMs(System.GetTickCount(tCt));
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -4975,6 +5080,8 @@ class MUD_MudSheet
 				m_aOneBuild.RemoveOrdered(at);
 			m_aOneBuild.InsertAt(key, 0);
 			m_mQWhy.Set(key, BW_HOLE);
+			if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TAPER, tx, tz, true);     // stage 2 B1 crater log
 			return;
 		}
 		if (!m_aOneBuild.Contains(key))
@@ -5566,8 +5673,11 @@ class MUD_MudSheet
 	{
 		if (!ENABLED || !s_Inst)
 			return;
+		int tCt = System.GetTickCount();
 		s_Inst.m_bNowDue = true;
 		s_Inst.StepNow();
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.SheetMs(System.GetTickCount(tCt));     // stage 2 B1: the sheet part of the go-live frame
 	}
 
 	protected void DoDigNow()
@@ -5588,6 +5698,8 @@ class MUD_MudSheet
 		m_bMarkNow = false;
 		if (m_bLocal)
 			tiles += BuildNowSlots();     // SHEET LOCAL: holed live slots in the blast frame
+		if (m_bLocal && CRATER_TAPER_NOW)
+			tiles += TaperNow();     // stage 2 B3: the hole's taper tiles too
 		m_aNowLo.Clear();
 		m_aNowHi.Clear();
 		Print(string.Format("MUD mud sheet: dig now: %1 voxel changes, %2 tiles in %3 ms", boxes, tiles, System.GetTickCount(t0)), LogLevel.NORMAL);
@@ -5677,6 +5789,10 @@ class MUD_MudSheet
 								hit = true;
 								continue;
 							}
+							if (MUD_TestKit.TEST_KIT && m_mEase.Contains(PassKey(m_iX0 + i, m_iZ0 + k)))
+								MUD_CraterTrace.EaseHit();     // stage 2 B1 crater log
+							if (CRATER_EASE_DROP)
+								EaseDrop(m_iX0 + i, m_iZ0 + k);     // stage 2 B4 (O1c): EaseTick must not write the old floor back
 							m_F.m_aG[v] = ny;
 							if (dy > MOVED)
 							{
@@ -5734,6 +5850,8 @@ class MUD_MudSheet
 							hit = true;
 							continue;
 						}
+						if (CRATER_EASE_DROP)
+							EaseDrop(tx * TQ + li, tz * TQ + lk);     // stage 2 B4: no ease may carry the old floor into it
 						d.m_aG[l] = ny2;
 						if (dy2 > MOVED)
 						{
@@ -5765,6 +5883,8 @@ class MUD_MudSheet
 				Resource res = BuildTile(st.m_Ent, d, tx, tz, false);
 				if (res)
 					st.m_Res = res;
+				if (MUD_TestKit.TEST_KIT && d.m_iLow != 0)
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_LOW, tx, tz, false);     // stage 2 B1 crater log
 				done++;
 				if (m_bLocal)
 				{
@@ -5835,13 +5955,19 @@ class MUD_MudSheet
 					done++;
 					continue;
 				}
+				if (MUD_TestKit.TEST_KIT && !m_mTrail.Contains(TrailKey(tx, tz)) && m_mFar.Contains(TrailKey(tx, tz)))
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_FAR, tx, tz, false);     // stage 2 B1 crater log
 				MUD_MudSheetStore st = TrailGet(TrailKey(tx, tz));     // MUD LAB part D: a compact one comes back first
+				if (MUD_TestKit.TEST_KIT && st && st.m_Ent)
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_STORED, tx, tz, true);
 				if (!st || !st.m_Ent)
 				{
 					// CAMERA RADIUS: no mesh here - SYNC: the sync layer cleared it (Stage 4, MUD_MudSync.ClearOp), the
 					// tile is built bare on approach; without SYNC the blown cells go into a kept store
 					if (!SYNC && RadiusOn() && TileInZone(tx, tz))
 						BlastKept(st, tx, tz, wp, r);
+					if (MUD_TestKit.TEST_KIT && (st || TileInZone(tx, tz)))
+						MUD_CraterTrace.Tile(MUD_CraterTrace.C_DATA, tx, tz, false);     // stage 2 B1 crater log
 					continue;
 				}
 				MUD_MudSheetTileData d = st.m_D;
@@ -8199,6 +8325,8 @@ class MUD_MudSheet
 			EdgeRecord(d, tx, tz, res != null);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
 			m_aBuildsBy[m_iBuildWhy] = m_aBuildsBy[m_iBuildWhy] + 1;
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.Built(tx, tz, m_iBuildWhy, res != null);     // stage 2 B1 crater log
 		m_iBuildWhy = BW_RESTORE;
 		int bms = System.GetTickCount(tB);
 		m_iSt10Builds++;
