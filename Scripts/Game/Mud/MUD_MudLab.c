@@ -184,11 +184,51 @@ class MUD_LabMode
 	int ModeMsAll() { return 0; }
 }
 
-//! Sheet local: the parked MUD_MudSheet, client-only, deposit band (part B)
+//! Sheet local: the parked MUD_MudSheet, client-only, deposit band (part B). Its own 'MUD sheet builds' line comes from
+//! MUD_MudSheet.Log10 every 10 s while it runs.
 class MUD_LabSheetLocal : MUD_LabMode
 {
+	protected int m_iFrAt = -1;     // MUD_Prof / sheet running totals at the last Log10s
+	protected int m_iWhAt;
+	protected int m_iUpAt;
+	protected int m_iStAt;
+	protected int m_iSlAt;
+	protected int m_iBaAt;
 	override string Name() { return "sheet local"; }
-	override int Presets() { return 0; }
+	override int Presets() { return MUD_MudSheet.LAB_PRESETS; }
+	override void Enter(int preset)
+	{
+		MUD_MudSheet.LabSet(preset, "key");
+		Snap();
+	}
+	override void Exit() { MUD_MudSheet.LabSet(0, "key"); }
+	override string Label()
+	{
+		return string.Format("band in %1 m, fade %2 m", MUD_MudSheet.BAND_IN, MUD_MudSheet.BAND_FADE);
+	}
+	override int ModeMsAll() { return MUD_Prof.PartAll(MUD_Prof.SHEET) + MUD_Prof.PartAll(MUD_Prof.SHEET_SYNC); }
+	override string Log10s()
+	{
+		float pf = Math.Max(1, MUD_Prof.FramesAll() - m_iFrAt);
+		float wh = (MUD_Prof.PartAll(MUD_Prof.SH_WHEELS) - m_iWhAt) / pf;
+		float up = (MUD_Prof.PartAll(MUD_Prof.SH_UPLOAD) - m_iUpAt) / pf;
+		float st = (MUD_Prof.PartAll(MUD_Prof.SH_STORED) - m_iStAt) / pf;
+		float sl = (MUD_MudSheet.SlumpMsAll() - m_iSlAt) / pf;
+		float ba = (MUD_MudSheet.BandMsAll() - m_iBaAt) / pf;
+		string s = MUD_MudSheet.LabCounts() + string.Format(" | sh wheels %1 / upload %2 / stored %3 / slump %4 / band %5 ms per frame",
+			wh.ToString(-1, 2), up.ToString(-1, 2), st.ToString(-1, 2), sl.ToString(-1, 2), ba.ToString(-1, 2));
+		Snap();
+		return s;
+	}
+	protected void Snap()
+	{
+		m_iFrAt = MUD_Prof.FramesAll();
+		m_iWhAt = MUD_Prof.PartAll(MUD_Prof.SH_WHEELS);
+		m_iUpAt = MUD_Prof.PartAll(MUD_Prof.SH_UPLOAD);
+		m_iStAt = MUD_Prof.PartAll(MUD_Prof.SH_STORED);
+		m_iSlAt = MUD_MudSheet.SlumpMsAll();
+		m_iBaAt = MUD_MudSheet.BandMsAll();
+	}
 }
 
 //! D2: MUD_WorldGroundEntity.PRESS_LIFT (pressed lift, its own 'MUD pressed lift' 10 s line keeps running)

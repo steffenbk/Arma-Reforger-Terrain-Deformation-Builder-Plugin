@@ -61,8 +61,8 @@ class MUD_MudZoneEntity : GenericEntity
 	//! the sheet's own top look shows there and the voxels under it need no grass (user 2026-10-15)
 	static bool SheetCovers(float x, float z)
 	{
-		if (!MUD_MudSheet.ENABLED)
-			return false;
+		if (!MUD_MudSheet.ENABLED || !MUD_MudSheet.SYNC)
+			return false;     // MUD LAB sheet local (SYNC false): the sheet never changes rut behaviour
 		float t = MUD_MudSheet.TILE_M;
 		return TileCovered(Math.Floor(x / t), Math.Floor(z / t));
 	}
