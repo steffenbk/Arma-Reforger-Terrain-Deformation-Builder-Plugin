@@ -127,6 +127,8 @@ class MUD_MudLab
 			return;
 		DbgUI.Begin("MUD lab (numpad 3)", 20, 120);
 		DbgUI.Text(string.Format("step %1 of %2: %3", s_iStep, StepCount(), txt));
+		if (s_iMode >= 0 && s_aModes[s_iMode].Label2() != "")
+			DbgUI.Text(s_aModes[s_iMode].Label2());
 		DbgUI.End();
 	}
 
@@ -176,6 +178,7 @@ class MUD_LabMode
 	void Exit() {}
 	void Tick(float time) {}
 	string Label() { return ""; }
+	string Label2() { return ""; }     // second on-screen line (empty = none)
 	//! 'tiles <n> built <n> kept <n> | <extras>' for the 10 s line (built = with a mesh, kept = data only)
 	string Log10s() { return ""; }
 	//! running total of this mode's own ms (MUD_Prof parts or its own meter), never reset
@@ -218,7 +221,11 @@ class MUD_LabSheetLocal : MUD_LabMode
 	}
 	override string Label()
 	{
-		return string.Format("band in %1 m, fade %2 m | levers (numpad 0): %3 | fixes (numpad *): %4", MUD_MudSheet.BAND_IN, MUD_MudSheet.BAND_FADE, MUD_MudSheet.LeverNames(), MUD_MudSheet.FixNames());
+		return string.Format("band in %1 m, fade %2 m | levers (numpad 0): %3", MUD_MudSheet.BAND_IN, MUD_MudSheet.BAND_FADE, MUD_MudSheet.LeverNames());
+	}
+	override string Label2()
+	{
+		return string.Format("FIX SET (numpad *): %1 of %2 - %3", MUD_MudSheet.FixSet(), MUD_MudSheet.FIX_SETS, MUD_MudSheet.FixNames());
 	}
 	override int ModeMsAll() { return MUD_Prof.PartAll(MUD_Prof.SHEET) + MUD_Prof.PartAll(MUD_Prof.SHEET_SYNC); }
 	override string Log10s()

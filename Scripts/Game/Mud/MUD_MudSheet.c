@@ -3308,6 +3308,12 @@ class MUD_MudSheet
 
 	//------------------------------------------------------------------------------------------------
 	//! TEST_KIT numpad * while sheet local runs: the next fix set (FixApply)
+	static int FixSet()
+	{
+		return s_iFixSet;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	static void LabFixStep(string why)
 	{
 		int s = s_iFixSet + 1;
