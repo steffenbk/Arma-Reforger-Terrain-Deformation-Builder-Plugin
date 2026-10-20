@@ -1570,7 +1570,9 @@ class MUD_MudSheet
 				if (m_aSlotZone[t] == 0)
 					continue;
 				live++;
-				if (t < m_aTileRes.Count() && m_aTileRes[t])
+				// stage 2 D: a null build ('nothing to draw') hides the entity but leaves the old m_aTileRes - count only
+				// slots whose last build gave a mesh (BuildTileMesh sets VISIBLE then)
+				if (t < m_aTileRes.Count() && m_aTileRes[t] && m_aTileEnt[t] && (m_aTileEnt[t].GetFlags() & EntityFlags.VISIBLE) != 0)
 					liveBuilt++;
 			}
 		}
