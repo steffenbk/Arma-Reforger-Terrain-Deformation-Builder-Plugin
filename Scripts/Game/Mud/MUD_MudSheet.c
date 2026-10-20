@@ -2461,7 +2461,9 @@ class MUD_MudSheet
 		if (m_mOwn.IsEmpty())
 			return false;
 		float t;
-		if (!m_mOwn.Find(OwnKey(Math.Round(p[0] / CELL), Math.Round(p[2] / CELL)), t))
+		int gi = Math.Round(p[0] / CELL);
+		int gk = Math.Round(p[2] / CELL);
+		if (!m_mOwn.Find(OwnKey(gi, gk), t))
 			return false;
 		return m_fLast - t <= OWN_S;
 	}
@@ -2553,6 +2555,8 @@ class MUD_MudSheet
 	//! (a live tile: the window's).
 	protected bool OpCell(int i, int k, float t, float lat, float latS, float nose, float half, float band, float h, float drag, vector dir, vector side, float time, int veh)
 	{
+		if (i < 0 || k < 0)
+			return false;     // off the map side (int division would put it in tile 0 at a negative index)
 		int tx = i / TQ;
 		int tz = k / TQ;
 		MUD_MudSheetTileData d = OpTile(tx, tz, true);
@@ -2676,6 +2680,8 @@ class MUD_MudSheet
 	//! stamp: a deposit band source too
 	protected void OpSet(int gi, int gk, float dd, float ou, float ov, bool stamp)
 	{
+		if (gi < 0 || gk < 0)
+			return;
 		int tx1 = gi / TQ;
 		int tz1 = gk / TQ;
 		int ri = gi - tx1 * TQ;
