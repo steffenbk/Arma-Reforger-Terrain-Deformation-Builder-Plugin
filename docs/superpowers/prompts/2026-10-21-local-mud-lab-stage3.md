@@ -92,6 +92,15 @@ Research and measure first, write it up, then build behind switches. Stop and re
    frame: ahead dig, pre-build close, patch colliders, the voxel bricks showing a bit late), trenches / shovel.
 2. Rank the ideas by measured ms saved per effort. Stop and let me pick before you build any of Part C.
 
+## Part D - MP checks for the crater fixes (fix sets 13-15)
+1. **JIP join with many craters.** A joiner replays every op; each replayed crater passes MUD_MudSheet.TakeOp, where B5
+   (PreNote) listens. Prove in the log what happens on a join with 30+ craters on the sheet ruts: one huge ahead dig
+   in one frame, or the 32-entry limit in PreNote calling PreForget and dropping some (sheet holes missing). If it is a
+   problem, fix it behind a switch (e.g. pre-build only for live craters, not replayed ones). Client only, no op /
+   J2 change.
+2. **Two players, same crater.** Two clients side by side, both with sheet local and set 15: same hole, same rut look,
+   no truck floating or sinking on either. Ground under the wheels must match on both (it comes from the same data).
+
 ## Report after each launch
 What was built (switch names, fix set numbers), what the log says (tables, not just summaries), what is not done or not
 measured, and a numbered checklist for my next test.
