@@ -218,6 +218,13 @@ class MUD_MudSync
 	//! MUD_VoxelProbe.Submit, every machine, in seq order: a rut op. No-op with the sheet off (a DS: SERVER_LAYER).
 	static void RutOp(MUD_VoxelOp op)
 	{
+		if (MUD_MudSheet.ENABLED && !MUD_MudSheet.SYNC)
+		{
+			// MUD LAB part E: sheet local - the op's segments go straight into the sheet's tile data (client only)
+			if (RplSession.Mode() != RplMode.Dedicated)
+				MUD_MudSheet.OpStamps(op);
+			return;
+		}
 		if (!OnHere())
 			return;
 		if (op.m_iKind != 4 || op.m_aSegA.IsEmpty() || op.m_iSeq <= s_iSnapTo)
@@ -250,6 +257,13 @@ class MUD_MudSync
 	//! joins the op queue (worked a row per step; Flush at the next Submit ends it before the ground changes again).
 	static void ClearOp(MUD_VoxelOp op)
 	{
+		if (MUD_MudSheet.ENABLED && !MUD_MudSheet.SYNC)
+		{
+			// MUD LAB part E: sheet local - the sheet takes craters / digs at their go-live (GroundChanged); counted only
+			if (RplSession.Mode() != RplMode.Dedicated)
+				MUD_MudSheet.OpClear(op);
+			return;
+		}
 		if (!OnHere())
 			return;
 		if (!op || op.m_iKind < 0 || op.m_iKind > 3 || op.m_iSeq <= s_iSnapTo)

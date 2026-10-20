@@ -224,7 +224,7 @@ class MUD_LabSheetLocal : MUD_LabMode
 		float sl = (MUD_MudSheet.SlumpMsAll() - m_iSlAt) / pf;
 		float ba = (MUD_MudSheet.BandMsAll() - m_iBaAt) / pf;
 		string s = MUD_MudSheet.LabCounts() + string.Format(" | sh wheels %1 / upload %2 / stored %3 / slump %4 / band %5 ms per frame | levers %6",
-			wh.ToString(-1, 2), up.ToString(-1, 2), st.ToString(-1, 2), sl.ToString(-1, 2), ba.ToString(-1, 2), MUD_MudSheet.LeverNames());
+			wh.ToString(-1, 2), up.ToString(-1, 2), st.ToString(-1, 2), sl.ToString(-1, 2), ba.ToString(-1, 2), MUD_MudSheet.LeverNames()) + MUD_MudSheet.OpLog();
 		Snap();
 		return s;
 	}

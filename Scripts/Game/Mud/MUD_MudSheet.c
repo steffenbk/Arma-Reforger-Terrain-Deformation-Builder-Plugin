@@ -323,6 +323,24 @@ class MUD_MudSheet
 	protected int m_iFarOut;
 	protected int m_iFarCap;
 	protected int m_iFarLow;
+	// MUD LAB part E (SHEET LOCAL only): remote trucks from the rut ops ("sync-lite", MUD_MudSync.RutOp -> OpStamps)
+	static const float OP_SPEED = 5;            // m/s: an op has no speed with the op tag off
+	static const float OP_RADIUS = 0.5;         // m: wheel radius for TyreHalf (no tyre in the op)
+	static const int OP_VEH = -1;               // GRADUAL pass vehicle of op stamps (own vehicles are >= 1)
+	static const float COVER_R = 0.3;           // m: an op segment this near an own recent stamp is skipped
+	static const float OWN_S = 20;              // s an own stamp covers op segments (the op's round trip, generous)
+	static const float OWN_PRUNE_S = 5;
+	static const float OP_EDGE_M = 1.5;         // m: a segment this far inside the window goes through Stamp
+	protected ref map<int, float> m_mOwn = new map<int, float>();     // own stamp cells (OwnKey) -> time
+	protected float m_fOwnPrune;
+	protected int m_iOpKey = -1;                // OpTile's one-tile cache
+	protected bool m_bOpMake;
+	protected MUD_MudSheetTileData m_OpD;
+	protected ref array<int> m_aOpShown = {};   // shown stored tiles this op changed
+	protected int m_iOpStamps;                  // 10 s
+	protected int m_iOpSkipOwn;
+	protected int m_iOpMs;
+	protected int m_iOpClears;
 	protected static int s_iLabPreset;
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
@@ -335,7 +353,8 @@ class MUD_MudSheet
 	static const int BW_BAND = 7;
 	static const int BW_FIT = 8;                // picked because no more than UPLOAD_SLOTS slots were dirty
 	static const int BW_HOLE = 9;               // crater / dig: built in the blast frame (DoDigNow)
-	static const int BW_N = 10;
+	static const int BW_OP = 10;                // MUD LAB part E: a remote truck's rut op (OpStamps)
+	static const int BW_N = 11;
 	// slot dirt sources (m_aSlotWhy bits): which marks made a live slot dirty since its last build
 	static const int WHY_STAMP = 1;
 	static const int WHY_SLUMP = 2;
@@ -353,7 +372,7 @@ class MUD_MudSheet
 	protected int m_aSlotNow[16];               // 1 = hole in this slot: build it in the blast frame (DoDigNow)
 	protected int m_iMarkWhy = 8;               // WHY_* MarkRect adds (WHY_OTHER unless a caller sets it)
 	protected int m_iBuildWhy = 5;              // BW_* the next BuildTile counts (BW_RESTORE unless a caller sets it)
-	protected int m_aBuildsBy[10];              // builds by reason, this 10 s
+	protected int m_aBuildsBy[11];              // builds by reason, this 10 s
 	protected bool m_bMarkNow;                  // MarkRect also flags m_aSlotNow (hole marks in a go-live)
 	protected bool m_bQueueFront;               // QueueBuild puts the key at the FRONT of m_aOneBuild (DigNow taper neighbours)
 	protected int m_iWouldSkip;                 // builds whose drawn heights changed less than WOULD_SKIP_M
@@ -1407,6 +1426,7 @@ class MUD_MudSheet
 			why, live, stored, dying, dataOnly, m_mBorn.Count(), m_iTouchCells, m_mFar.Count()), LogLevel.NORMAL);
 		m_mFar.Clear();
 		m_aFarOrder.Clear();
+		m_mOwn.Clear();
 		m_aTileEnt.Clear();
 		m_aTileRes.Clear();
 		m_mTrail.Clear();
@@ -1509,11 +1529,18 @@ class MUD_MudSheet
 	{
 		if (!m_bPlaced)
 			return;
+		BandMarkWorld(m_iX0 + i0, m_iX0 + i1, m_iZ0 + k0, m_iZ0 + k1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! BandMark on world cells wi0..wi1 x wk0..wk1 (MUD LAB part E: op stamps outside the window too)
+	protected void BandMarkWorld(int wi0, int wi1, int wk0, int wk1)
+	{
 		int mg = BandMargin();
-		int gi0 = m_iX0 + i0 - mg;
-		int gi1 = m_iX0 + i1 + mg;
-		int gk0 = m_iZ0 + k0 - mg;
-		int gk1 = m_iZ0 + k1 + mg;
+		int gi0 = wi0 - mg;
+		int gi1 = wi1 + mg;
+		int gk0 = wk0 - mg;
+		int gk1 = wk1 + mg;
 		int tx0 = (gi0 - 1) / TQ;     // tile tx holds cells tx * TQ .. tx * TQ + TQ (sides shared)
 		int tx1 = gi1 / TQ;
 		int tz0 = (gk0 - 1) / TQ;
@@ -1876,8 +1903,8 @@ class MUD_MudSheet
 	{
 		string p1 = string.Format("MUD sheet builds: wheel %1, oldest %2, nearest %3, mesh-less %4, freeze %5, restore %6, slump %7, band %8",
 			m_aBuildsBy[BW_WHEEL], m_aBuildsBy[BW_OLDEST], m_aBuildsBy[BW_NEAREST], m_aBuildsBy[BW_MESHLESS], m_aBuildsBy[BW_FREEZE], m_aBuildsBy[BW_RESTORE], m_aBuildsBy[BW_SLUMP], m_aBuildsBy[BW_BAND]);
-		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3 | born slots waited for traces %4 uploads",
-			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait);
+		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3, op %5 | born slots waited for traces %4 uploads",
+			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait, m_aBuildsBy[BW_OP]);
 		Print(p1 + p2 + FarLog(), LogLevel.NORMAL);
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
@@ -2309,6 +2336,489 @@ class MUD_MudSheet
 		m_iFarOut = 0;
 		m_iFarCap = 0;
 		m_iFarLow = 0;
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E (sync-lite), MUD_MudSync.RutOp in sheet local: every machine's rut op (kind 4), in seq order. Its
+	//! segments are stamped into the tile data with the Stamp maths. The op has no vehicle or speed (the op tag stays
+	//! off): OP_SPEED, TyreHalf of OP_RADIUS. Segments within COVER_R of this client's own recent wheel stamps are
+	//! skipped (Wheels stamped them already).
+	static void OpStamps(MUD_VoxelOp op)
+	{
+		if (!ENABLED || SYNC || !s_Inst || !s_Inst.m_bLocal || !op || op.m_iKind != 4)
+			return;
+		s_Inst.OpStampsI(op);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E, MUD_MudSync.ClearOp in sheet local: craters / digs reach the sheet at their go-live already
+	//! (MUD_VoxelProbe.GoLive -> GroundChanged, every op on this machine) - only counted here, or they would clear twice
+	static void OpClear(MUD_VoxelOp op)
+	{
+		if (!ENABLED || SYNC || !s_Inst || !op || op.m_iKind < 0 || op.m_iKind > 3)
+			return;
+		s_Inst.m_iOpClears++;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void OpStampsI(MUD_VoxelOp op)
+	{
+		int tO = System.GetTickCount();
+		float half = TyreHalf(OP_RADIUS);
+		m_iOpKey = -1;
+		m_OpD = null;
+		m_aOpShown.Clear();
+		int segs = Math.Min(op.m_aSegA.Count(), op.m_aSegB.Count());
+		for (int s = 0; s < segs; s++)
+		{
+			vector a = op.m_aSegA[s];
+			vector b = op.m_aSegB[s];
+			float len = Math.Sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[2] - a[2]) * (b[2] - a[2]));
+			if (len < 0.01 || len >= 3)
+				continue;     // as MUD_MudSync.StepStamp: never across a jump
+			int ztx = Math.Floor(b[0] / TILE_M);
+			int ztz = Math.Floor(b[2] / TILE_M);
+			if (!MUD_MudZoneEntity.TileCovered(ztx, ztz))
+				continue;     // as Wheels (ZoneAtWorld in sheet local): only where the wheel stands on holed offroad ground
+			if (OwnNear(b))
+			{
+				m_iOpSkipOwn++;
+				continue;
+			}
+			m_iOpStamps++;
+			if (OpInWindow(a, b))
+				Stamp(a, b, OP_SPEED, m_fLast, OP_VEH, half);
+			else
+				OpStampStore(a, b, OP_SPEED, m_fLast, OP_VEH, half);
+		}
+		// shown stored tiles the stamps changed: rebuilt by FlushOneBuild
+		foreach (int key : m_aOpShown)
+		{
+			int tx = key / 20000;     // TrailKey back to the tile (tx, tz >= 0 on Arland)
+			int tz = key - tx * 20000;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_OP);
+			QueueBuild(tx, tz);
+		}
+		m_aOpShown.Clear();
+		m_iOpKey = -1;
+		m_OpD = null;
+		if (!m_bPlaced && !m_aBandQ.IsEmpty())
+			BandStored();     // no window: no Upload to band them
+		m_iOpMs += System.GetTickCount(tO);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: does op segment a -> b stamp only inside the window (OP_EDGE_M from its sides)? Then Stamp does it.
+	protected bool OpInWindow(vector a, vector b)
+	{
+		if (!m_bPlaced)
+			return false;
+		float x0 = m_iX0 * CELL + OP_EDGE_M;
+		float x1 = (m_iX0 + N - 1) * CELL - OP_EDGE_M;
+		float z0 = m_iZ0 * CELL + OP_EDGE_M;
+		float z1 = (m_iZ0 + N - 1) * CELL - OP_EDGE_M;
+		if (a[0] < x0 || a[0] > x1 || a[2] < z0 || a[2] > z1)
+			return false;
+		return b[0] >= x0 && b[0] <= x1 && b[2] >= z0 && b[2] <= z1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: an own wheel stamp at p (WheelsSim) covers the cells within COVER_R for OWN_S seconds
+	protected void OwnMark(vector p, float time)
+	{
+		int ci = Math.Round(p[0] / CELL);
+		int ck = Math.Round(p[2] / CELL);
+		int rc = Math.Ceil(COVER_R / CELL);
+		float r2 = (COVER_R * COVER_R) / (CELL * CELL);
+		for (int dk = -rc; dk <= rc; dk++)
+		{
+			for (int di = -rc; di <= rc; di++)
+			{
+				if (di * di + dk * dk > r2)
+					continue;
+				m_mOwn.Set(OwnKey(ci + di, ck + dk), time);
+			}
+		}
+		if (time < m_fOwnPrune)
+			return;
+		m_fOwnPrune = time + OWN_PRUNE_S;
+		array<int> old = {};
+		foreach (int key, float t : m_mOwn)
+		{
+			if (time - t > OWN_S)
+				old.Insert(key);
+		}
+		foreach (int ok : old)
+			m_mOwn.Remove(ok);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: did this client stamp within COVER_R of p in the last OWN_S seconds?
+	protected bool OwnNear(vector p)
+	{
+		if (m_mOwn.IsEmpty())
+			return false;
+		float t;
+		if (!m_mOwn.Find(OwnKey(Math.Round(p[0] / CELL), Math.Round(p[2] / CELL)), t))
+			return false;
+		return m_fLast - t <= OWN_S;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: map key of world cell gi, gk (wraps every 32768 cells = 4.9 km; a wrap only skips a segment)
+	protected int OwnKey(int gi, int gk)
+	{
+		return (gi & 32767) | ((gk & 32767) << 15);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: one op segment a -> b on stored tiles (Stamp's BOX + SOFT + GRADUAL maths on world cells, as
+	//! MUD_MudSync.Stamp; cells of live tiles are left to the window). Sink: the data ground beside the tyre.
+	protected void OpStampStore(vector a, vector b, float speed, float time, int veh, float half)
+	{
+		if (SOFT && GRADUAL)
+		{
+			// WIDEN: how pressed the mud at the contact was when this pass began
+			int wgi = Math.Round(b[0] / CELL);
+			int wgk = Math.Round(b[2] / CELL);
+			float wd;
+			float wou;
+			float wov;
+			OpGet(wgi, wgk, wd, wou, wov);
+			int wpk = PassKey(wgi, wgk);
+			if (m_mPassT.Contains(wpk) && m_mPassV.Get(wpk) == veh && time - m_mPassT.Get(wpk) <= PASS_GAP)
+				wd = m_mPassD.Get(wpk);
+			float pressed = Math.Clamp((THICK - wd) / THICK, 0, 1);
+			half = half * (W_FIRST + (1 - W_FIRST) * pressed);
+		}
+		float band = BAND * half / HALF;
+		vector dir = Vector(b[0] - a[0], 0, b[2] - a[2]);
+		float len = dir.Length();
+		dir = dir * (1 / len);
+		vector side = Vector(dir[2], 0, -dir[0]);
+		float reach = half + band;
+		float nose = len + NOSE;
+		float far = nose + FRONT_LEN;
+		float ex = a[0] + dir[0] * far;
+		float ez = a[2] + dir[2] * far;
+		int i0 = Math.Floor((Math.Min(a[0], ex) - reach) / CELL);
+		int i1 = Math.Ceil((Math.Max(a[0], ex) + reach) / CELL);
+		int k0 = Math.Floor((Math.Min(a[2], ez) - reach) / CELL);
+		int k1 = Math.Ceil((Math.Max(a[2], ez) + reach) / CELL);
+		float sideSum = 0;
+		int sideN = 0;
+		for (int sd = -1; sd <= 1; sd += 2)
+		{
+			vector q = b + side * (sd * (reach + CELL));
+			float gq;
+			if (!OpGround(q[0], q[2], gq))
+				continue;
+			sideSum += gq;
+			sideN++;
+		}
+		float sink = 0;
+		if (sideN > 0)
+			sink = Math.Max(0, sideSum / sideN - b[1]);
+		float h = Math.Min(HMAX, H0 + H_SPEED * speed + H_SINK * sink);
+		float drag = DRAG * len;
+		bool any = false;
+		for (int k = k0; k <= k1; k++)
+		{
+			for (int i = i0; i <= i1; i++)
+			{
+				float px = i * CELL - a[0];
+				float pz = k * CELL - a[2];
+				float t = px * dir[0] + pz * dir[2];
+				if (t < 0 || t > far)
+					continue;
+				float latS = px * side[0] + pz * side[2];
+				float lat = Math.AbsFloat(latS);
+				if (lat >= reach || (t > nose && lat >= half))
+					continue;
+				if (OpCell(i, k, t, lat, latS, nose, half, band, h, drag, dir, side, time, veh))
+					any = true;
+			}
+		}
+		if (!any)
+			return;
+		if (DRAG_LIM > 0)
+			OpLimitDrag(i0, i1, k0, k1);
+		BandMarkWorld(i0, i1, k0, k1);     // tiles born, bands due
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: Stamp's per-cell PRESS / PUSH (BOX path) on world cell i, k of the tile data. False = no data
+	//! (a live tile: the window's).
+	protected bool OpCell(int i, int k, float t, float lat, float latS, float nose, float half, float band, float h, float drag, vector dir, vector side, float time, int veh)
+	{
+		int tx = i / TQ;
+		int tz = k / TQ;
+		MUD_MudSheetTileData d = OpTile(tx, tz, true);
+		if (!d)
+			return false;
+		int l = (k - tz * TQ) * TV + (i - tx * TQ);
+		float cur = d.m_aD[l];
+		float d0 = cur;     // mud depth when this pass over the cell began
+		if (GRADUAL)
+		{
+			int pk = PassKey(i, k);
+			if (!m_mPassT.Contains(pk) || m_mPassV.Get(pk) != veh || time - m_mPassT.Get(pk) > PASS_GAP)
+				m_mPassD.Set(pk, d0);     // a new pass starts here
+			else
+				d0 = m_mPassD.Get(pk);
+			m_mPassT.Set(pk, time);
+			m_mPassV.Set(pk, veh);
+		}
+		float target = 0;
+		float du = 0;
+		float dv = 0;
+		if (t <= nose && lat < half)
+		{
+			// PRESS (SOFT_WALL: full in the middle, none at the side), texture dragged along
+			float pf = 1;
+			if (SOFT)
+			{
+				float inW = half * SOFT_WALL;
+				float fromSide = half - lat;
+				if (fromSide < inW)
+					pf = 0.5 * (1 - Math.Cos(Math.PI * fromSide / inW));
+			}
+			if (GRADUAL)
+				cur = Math.Min(cur, Math.Max(0, Math.Min(d0, THICK) - PRESS_STEP * pf));
+			else
+				cur = Math.Min(cur, THICK * (1 - pf));
+			du = dir[0] * drag;
+			dv = dir[2] * drag;
+		}
+		else
+		{
+			// PUSH: push ahead (tyre wide) or side ridge (round shoulder, flat top, falls off)
+			float w = 1;
+			float hh = h;
+			vector pushDir = dir;
+			if (t > nose)
+			{
+				hh = h * ARCH_H;
+				w = Math.Cos((t - nose) / FRONT_LEN * Math.PI * 0.5);
+			}
+			else
+			{
+				float x = (lat - half) / band;
+				if (x > RIDGE_TOP)
+					w = 0.5 * (1 + Math.Cos(Math.PI * (x - RIDGE_TOP) / (1 - RIDGE_TOP)));
+				else if (SOFT)
+					w = Math.Sin(0.5 * Math.PI * x / RIDGE_TOP);
+				pushDir = side;
+				if (latS < 0)
+					pushDir = -side;
+			}
+			target = THICK + hh * w;
+			if (GRADUAL)
+				target = Math.Min(target, Math.Max(d0, THICK) + hh * w * PRESS_STEP / THICK);
+			du = pushDir[0] * drag * 0.5 * w;
+			dv = pushDir[2] * drag * 0.5 * w;
+		}
+		if (target > cur)
+			cur = target;
+		float ou = d.m_aOu[l] + du;
+		float ov = d.m_aOv[l] + dv;
+		float ol = Math.Sqrt(ou * ou + ov * ov);
+		if (ol > DRAG_MAX)
+		{
+			ou *= DRAG_MAX / ol;
+			ov *= DRAG_MAX / ol;
+		}
+		OpSet(i, k, cur, ou, ov, true);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: tile tx, tz's data for op stamps (one-tile cache). make: a missing store is made (THICK, data
+	//! only) and the tile born. Null for a live tile (the window holds it) or nothing there (make false).
+	protected MUD_MudSheetTileData OpTile(int tx, int tz, bool make)
+	{
+		int key = TrailKey(tx, tz);
+		if (key == m_iOpKey && (m_bOpMake || !make))
+			return m_OpD;
+		m_iOpKey = key;
+		m_bOpMake = make;
+		m_OpD = null;
+		if (tx < 0 || tz < 0 || IsLive(tx, tz))
+			return null;
+		ref MUD_MudSheetStore st = TrailGet(key);
+		if (!st)
+		{
+			if (!make)
+				return null;
+			st = new MUD_MudSheetStore();
+			st.m_iTx = tx;
+			st.m_iTz = tz;
+			for (int l = 0; l < TV * TV; l++)
+				st.m_D.m_aD[l] = THICK;     // untouched mud (no sync layer to ask)
+			m_mTrail.Set(key, st);
+			m_aTrailOrder.Insert(key);
+		}
+		if (make)
+		{
+			if (!m_mBorn.Contains(key))
+				m_mBorn.Set(key, 1);
+			if (st.m_Ent && !m_aOpShown.Contains(key))
+				m_aOpShown.Insert(key);
+		}
+		m_OpD = st.m_D;
+		return m_OpD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: world cell gi, gk's mud and drag into every stored tile holding it (sides are shared);
+	//! stamp: a deposit band source too
+	protected void OpSet(int gi, int gk, float dd, float ou, float ov, bool stamp)
+	{
+		int tx1 = gi / TQ;
+		int tz1 = gk / TQ;
+		int ri = gi - tx1 * TQ;
+		int rk = gk - tz1 * TQ;
+		for (int ax = 0; ax < 2; ax++)
+		{
+			int tx = tx1 - ax;
+			if (ax == 1 && (ri != 0 || tx < 0))
+				continue;
+			for (int az = 0; az < 2; az++)
+			{
+				int tz = tz1 - az;
+				if (az == 1 && (rk != 0 || tz < 0))
+					continue;
+				MUD_MudSheetTileData d = OpTile(tx, tz, stamp);
+				if (!d)
+					continue;
+				int l = (gk - tz * TQ) * TV + gi - tx * TQ;
+				if (stamp)
+				{
+					d.m_aD[l] = dd;
+					if (d.m_aTouch[l] == 0)
+					{
+						d.m_aTouch[l] = 1;
+						m_iTouchCells++;
+					}
+				}
+				d.m_aOu[l] = ou;
+				d.m_aOv[l] = ov;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: world cell gi, gk's mud and drag - the window, else the stored tile (THICK / 0 where none)
+	protected bool OpGet(int gi, int gk, out float dd, out float ou, out float ov)
+	{
+		dd = THICK;
+		ou = 0;
+		ov = 0;
+		if (gi < 0 || gk < 0)
+			return false;
+		int tx = gi / TQ;
+		int tz = gk / TQ;
+		if (IsLive(tx, tz))
+		{
+			int wi = gi - m_iX0;
+			int wk = gk - m_iZ0;
+			if (wi < 0 || wi >= N || wk < 0 || wk >= N)
+				return false;
+			int v = wk * N + wi;
+			dd = m_F.m_aD[v];
+			ou = m_F.m_aOu[v];
+			ov = m_F.m_aOv[v];
+			return true;
+		}
+		MUD_MudSheetTileData d = OpTile(tx, tz, false);
+		if (!d)
+			return false;
+		int l = (gk - tz * TQ) * TV + gi - tx * TQ;
+		dd = d.m_aD[l];
+		ou = d.m_aOu[l];
+		ov = d.m_aOv[l];
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: LimitDrag on world cells i0..i1 x k0..k1 of the tile data (two sweeps, opposite directions;
+	//! a neighbour with no data reads 0 drag, as MUD_MudSync.LimitDragCell)
+	protected void OpLimitDrag(int i0, int i1, int k0, int k1)
+	{
+		for (int sweep = 0; sweep < 2; sweep++)
+		{
+			for (int kk = k0; kk <= k1; kk++)
+			{
+				int k = kk;
+				if (sweep == 1)
+					k = k0 + k1 - kk;
+				for (int ii = i0; ii <= i1; ii++)
+				{
+					int i = ii;
+					if (sweep == 1)
+						i = i0 + i1 - ii;
+					if (i < 0 || k < 0 || IsLive(i / TQ, k / TQ))
+						continue;
+					float dd;
+					float ou;
+					float ov;
+					if (!OpGet(i, k, dd, ou, ov))
+						continue;
+					for (int q = 0; q < 4; q++)
+					{
+						int ni = i;
+						int nk = k;
+						if (q == 0)
+							ni = i - 1;
+						else if (q == 1)
+							ni = i + 1;
+						else if (q == 2)
+							nk = k - 1;
+						else
+							nk = k + 1;
+						float nd;
+						float nou;
+						float nov;
+						OpGet(ni, nk, nd, nou, nov);
+						ou = Math.Clamp(ou, nou - DRAG_LIM, nou + DRAG_LIM);
+						ov = Math.Clamp(ov, nov - DRAG_LIM, nov + DRAG_LIM);
+					}
+					OpSet(i, k, dd, ou, ov, false);
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: the data ground at x, z (as MUD_MudSync.GroundY: voxel top, else the heightfield + rut floor)
+	protected bool OpGround(float x, float z, out float y)
+	{
+		if (MUD_VoxelProbe.ColumnAt(x, z) && MUD_VoxelProbe.TopAt(x, z, y))
+			return true;
+		float dug;
+		float undug;
+		if (MUD_WorldGroundEntity.DugUndug(x, z, dug, undug))
+		{
+			y = dug;
+			return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB 10 s line part E: 'op stamps <n> skipped own <n>' (+ ms, clear ops seen), then reset
+	static string OpLog()
+	{
+		if (!s_Inst)
+			return " | op stamps 0 skipped own 0";
+		string s = string.Format(" | op stamps %1 skipped own %2 (%3 ms, own cells %4) | clear ops %5 (taken at go-live)",
+			s_Inst.m_iOpStamps, s_Inst.m_iOpSkipOwn, s_Inst.m_iOpMs, s_Inst.m_mOwn.Count(), s_Inst.m_iOpClears);
+		s_Inst.m_iOpStamps = 0;
+		s_Inst.m_iOpSkipOwn = 0;
+		s_Inst.m_iOpMs = 0;
+		s_Inst.m_iOpClears = 0;
 		return s;
 	}
 
@@ -5358,6 +5868,8 @@ class MUD_MudSheet
 				{
 					float half = TyreHalf(sim.WheelGetRadius(w));
 					Stamp(lp, cp, len / dt, time, mv.m_iId, half);
+					if (m_bLocal)
+						OwnMark(cp, time);     // MUD LAB part E: rut ops near it are this stamp again
 					// TEMP delay meter: first undrawn own stamp of the wheel's tile (cells >= 0 on Arland: int division ok)
 					int dlI = Math.Round(cp[0] / CELL);
 					int dlK = Math.Round(cp[2] / CELL);
