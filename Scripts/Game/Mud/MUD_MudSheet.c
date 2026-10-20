@@ -309,6 +309,20 @@ class MUD_MudSheet
 	protected ref array<Vehicle> m_aNearVeh = {};                        // L8: this frame's near vehicles ...
 	protected ref array<VehicleWheeledSimulation> m_aNearSim = {};       // ... and their sims
 	protected float m_fVehPrune;
+	// MUD LAB part D (SHEET LOCAL only): far data + mesh radius
+	static const int TILE_DATA_CAP = 20000;     // data tiles kept (full stores + compact); the oldest compact ones go first
+	static const float MESH_R = 70;             // meshes only for tiles whose middle is within this of the camera
+	static const float MESH_DROP = 10;          // a mesh past MESH_R + this is deleted at once, its data compacted
+	static const int MESH_MS = 2;               // ms of radius builds per frame (at least one tile)
+	static const float FAR_R = 40;              // a stored tile built past this is built at 11 x 11, never upgraded
+	static const float FAR_H = 0.3;             // compact mud height range 0..FAR_H m (1 byte)
+	protected ref map<int, ref MUD_MudSheetFar> m_mFar = new map<int, ref MUD_MudSheetFar>();
+	protected ref array<int> m_aFarOrder = {};  // compact keys, oldest first
+	protected MUD_MudSheetFar m_TchFar;         // TouchStore's cache: the compact tile of m_iTchKey
+	protected int m_iFarIn;                     // 10 s: tiles compacted / expanded / dropped by the cap / far-ring builds
+	protected int m_iFarOut;
+	protected int m_iFarCap;
+	protected int m_iFarLow;
 	protected static int s_iLabPreset;
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
@@ -1389,8 +1403,10 @@ class MUD_MudSheet
 			SCR_EntityHelper.DeleteEntityAndChildren(dy.m_Ent);
 			dying++;
 		}
-		Print(string.Format("MUD sheet local: exit (%1) - deleted %2 live, %3 stored, %4 dying tile entities; freed %5 data-only tiles; %6 born tiles, %7 touched cells",
-			why, live, stored, dying, dataOnly, m_mBorn.Count(), m_iTouchCells), LogLevel.NORMAL);
+		Print(string.Format("MUD sheet local: exit (%1) - deleted %2 live, %3 stored, %4 dying tile entities; freed %5 data-only, %8 compact tiles; %6 born tiles, %7 touched cells",
+			why, live, stored, dying, dataOnly, m_mBorn.Count(), m_iTouchCells, m_mFar.Count()), LogLevel.NORMAL);
+		m_mFar.Clear();
+		m_aFarOrder.Clear();
 		m_aTileEnt.Clear();
 		m_aTileRes.Clear();
 		m_mTrail.Clear();
@@ -1404,6 +1420,7 @@ class MUD_MudSheet
 		m_aBuildTz.Clear();
 		m_mEase.Clear();
 		m_TchSt = null;
+		m_TchFar = null;
 		m_bPlaced = false;
 	}
 
@@ -1443,7 +1460,8 @@ class MUD_MudSheet
 				dataOnly++;
 		}
 		return string.Format("tiles %1 built %2 kept %3 | born %4 touched cells %5 | live %6 stored %7 data-only %8",
-			live + stored + dataOnly, liveBuilt + stored, dataOnly, m_mBorn.Count(), m_iTouchCells, live, stored, dataOnly);
+			live + stored + dataOnly, liveBuilt + stored, dataOnly, m_mBorn.Count(), m_iTouchCells, live, stored, dataOnly)
+			+ string.Format(" compact %1", m_mFar.Count());     // MUD LAB part D
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1524,7 +1542,7 @@ class MUD_MudSheet
 					m_mBorn.Set(key, 1);     // outside the window: QueueNear builds it, its band in BuildZoneTile
 					continue;
 				}
-				if (m_mTrail.Contains(key) && !m_aBandQ.Contains(key))
+				if (TrailGet(key) && !m_aBandQ.Contains(key))     // MUD LAB part D: a compact one comes back first
 					m_aBandQ.Insert(key);
 				m_bDirty = true;
 			}
@@ -1540,6 +1558,9 @@ class MUD_MudSheet
 		{
 			m_iTchKey = key;
 			m_TchSt = m_mTrail.Get(key);
+			m_TchFar = null;
+			if (!m_TchSt && !m_mFar.IsEmpty())
+				m_TchFar = m_mFar.Get(key);     // MUD LAB part D: or its compact far data
 		}
 		return m_TchSt;
 	}
@@ -1562,21 +1583,23 @@ class MUD_MudSheet
 		int li = gi - tx * TQ;
 		int lk = gk - tz * TQ;
 		MUD_MudSheetStore st = TouchStore(tx, tz);
-		if (!st && li == 0 && tx > 0)
+		if (!st && !m_TchFar && li == 0 && tx > 0)
 		{
 			tx = tx - 1;     // a shared side cell: the tile on its other side may hold it
 			li = TQ;
 			st = TouchStore(tx, tz);
 		}
-		if (!st && lk == 0 && tz > 0)
+		if (!st && !m_TchFar && lk == 0 && tz > 0)
 		{
 			tz = tz - 1;
 			lk = TQ;
 			st = TouchStore(tx, tz);
 		}
-		if (!st)
-			return 0;
-		return st.m_D.m_aTouch[lk * TV + li];
+		if (st)
+			return st.m_D.m_aTouch[lk * TV + li];
+		if (m_TchFar)
+			return (m_TchFar.m_aC[lk * TV + li] >> 25) & 1;     // MUD LAB part D: class bit 1
+		return 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1588,6 +1611,7 @@ class MUD_MudSheet
 		int tB = System.GetTickCount();
 		m_iTchKey = -1;
 		m_TchSt = null;
+		m_TchFar = null;
 		int mg = BandMargin();
 		int w = TV + 2 * mg;
 		int gi0 = tx * TQ - mg;
@@ -1683,6 +1707,7 @@ class MUD_MudSheet
 			}
 		}
 		m_TchSt = null;
+		m_TchFar = null;
 		s_iBandMsAll += System.GetTickCount(tB);
 	}
 
@@ -1692,7 +1717,7 @@ class MUD_MudSheet
 	{
 		foreach (int key : m_aBandQ)
 		{
-			MUD_MudSheetStore st = m_mTrail.Get(key);
+			MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: compacted since it was queued: back first
 			if (!st)
 				continue;
 			BandTile(st.m_iTx, st.m_iTz, st.m_D, 0, 0);
@@ -1853,7 +1878,7 @@ class MUD_MudSheet
 			m_aBuildsBy[BW_WHEEL], m_aBuildsBy[BW_OLDEST], m_aBuildsBy[BW_NEAREST], m_aBuildsBy[BW_MESHLESS], m_aBuildsBy[BW_FREEZE], m_aBuildsBy[BW_RESTORE], m_aBuildsBy[BW_SLUMP], m_aBuildsBy[BW_BAND]);
 		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3 | born slots waited for traces %4 uploads",
 			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait);
-		Print(p1 + p2, LogLevel.NORMAL);
+		Print(p1 + p2 + FarLog(), LogLevel.NORMAL);
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
 		m_iWouldSkip = 0;
@@ -2158,6 +2183,136 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: store of key; SHEET LOCAL: a compact far tile comes back as a full data-only store first
+	protected MUD_MudSheetStore TrailGet(int key)
+	{
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (st || m_mFar.IsEmpty())
+			return st;
+		return FarTake(key);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D, SHEET LOCAL: stored tile key (no mesh) leaves m_mTrail as compact far data - one int a cell:
+	//! byte 0 height 0..FAR_H, byte 1 / 2 drag u / v (-DRAG_MAX..DRAG_MAX), byte 3 class (bit 0 bare, bit 1 touched,
+	//! bits 2-6 deposit band 0..31). Ground, traces and the last-build heights are not kept (traced again on approach).
+	//! Past TILE_DATA_CAP data tiles the oldest compact ones go.
+	protected void FarPut(int key, MUD_MudSheetStore st)
+	{
+		ref MUD_MudSheetFar f = new MUD_MudSheetFar();
+		f.m_iTx = st.m_iTx;
+		f.m_iTz = st.m_iTz;
+		MUD_MudSheetTileData d = st.m_D;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int h = Math.Round(Math.Clamp(d.m_aD[l], 0, FAR_H) * (255 / FAR_H));
+			int u = Math.Round(Math.Clamp(d.m_aOu[l], -DRAG_MAX, DRAG_MAX) * (127 / DRAG_MAX));
+			int w = Math.Round(Math.Clamp(d.m_aOv[l], -DRAG_MAX, DRAG_MAX) * (127 / DRAG_MAX));
+			int bq = Math.Round(Math.Clamp(d.m_aBand[l], 0, 1) * 31);
+			int c = bq * 4;
+			if (d.m_aBare[l] != 0)
+				c += 1;
+			if (d.m_aTouch[l] != 0)
+				c += 2;
+			f.m_aC[l] = h | ((u + 128) << 8) | ((w + 128) << 16) | (c << 24);
+		}
+		if (d.m_iLow != 0)
+			m_iLowNow--;
+		m_iTchKey = -1;     // BandTile's store cache
+		m_TchSt = null;
+		m_TchFar = null;
+		m_mTrail.Remove(key);     // st is gone from here on
+		RemoveTrailKey(key);
+		m_mFar.Set(key, f);
+		int at = m_aFarOrder.Find(key);
+		if (at >= 0)
+			m_aFarOrder.RemoveOrdered(at);
+		m_aFarOrder.Insert(key);
+		m_iFarIn++;
+		int over = m_mTrail.Count() + m_mFar.Count() - TILE_DATA_CAP;
+		while (over > 0 && !m_aFarOrder.IsEmpty())
+		{
+			int ok = m_aFarOrder[0];
+			m_aFarOrder.RemoveOrdered(0);
+			if (!m_mFar.Contains(ok))
+				continue;
+			m_mFar.Remove(ok);
+			m_iFarCap++;
+			over--;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: compact far tile key back as a full data-only store in m_mTrail (null: none)
+	protected MUD_MudSheetStore FarTake(int key)
+	{
+		MUD_MudSheetFar f = m_mFar.Get(key);
+		if (!f)
+			return null;
+		ref MUD_MudSheetStore st = new MUD_MudSheetStore();
+		st.m_iTx = f.m_iTx;
+		st.m_iTz = f.m_iTz;
+		MUD_MudSheetTileData d = st.m_D;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int c = f.m_aC[l];
+			int h = c & 255;
+			int u = (c >> 8) & 255;
+			int w = (c >> 16) & 255;
+			int cls = (c >> 24) & 255;
+			int bq = (cls >> 2) & 31;
+			d.m_aD[l] = h * (FAR_H / 255);
+			d.m_aOu[l] = (u - 128) * (DRAG_MAX / 127);
+			d.m_aOv[l] = (w - 128) * (DRAG_MAX / 127);
+			d.m_aBare[l] = cls & 1;
+			d.m_aTouch[l] = (cls >> 1) & 1;
+			d.m_aBand[l] = bq / 31.0;
+		}
+		m_iTchKey = -1;
+		m_TchSt = null;
+		m_TchFar = null;
+		m_mFar.Remove(key);     // f is gone from here on
+		int at = m_aFarOrder.Find(key);
+		if (at >= 0)
+			m_aFarOrder.RemoveOrdered(at);
+		m_mTrail.Set(key, st);
+		m_aTrailOrder.Insert(key);
+		m_iFarOut++;
+		return st;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: MudAt of cell l of compact far tile key (mud x band; 0 when there is none)
+	protected float FarMud(int key, int l)
+	{
+		if (m_mFar.IsEmpty())
+			return 0;
+		MUD_MudSheetFar f = m_mFar.Get(key);
+		if (!f)
+			return 0;
+		int c = f.m_aC[l];
+		int h = c & 255;
+		int cls = (c >> 24) & 255;
+		int bq = (cls >> 2) & 31;
+		return h * (FAR_H / 255) * (bq / 31.0);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D, 10 s line part: 'far data: compacted <n> expanded <n> cap drops <n> | compact <n> (<n> KB),
+	//! full stores <n> | far-ring 11 x 11 builds <n>'
+	protected string FarLog()
+	{
+		int kb = m_mFar.Count() * TV * TV * 4 / 1024;
+		string s = string.Format(" | far data: compacted %1 expanded %2 cap drops %3 | compact %4 (%5 KB), full stores %6 | far-ring 11 x 11 builds %7",
+			m_iFarIn, m_iFarOut, m_iFarCap, m_mFar.Count(), kb, m_mTrail.Count(), m_iFarLow);
+		m_iFarIn = 0;
+		m_iFarOut = 0;
+		m_iFarCap = 0;
+		m_iFarLow = 0;
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Map key of world tile tx, tz (Arland is < 4300 tiles a side, so tz < 20000 never overlaps)
 	static int TrailKey(int tx, int tz)
 	{
@@ -2185,7 +2340,7 @@ class MUD_MudSheet
 	protected void Freeze(int tx, int tz, int ti, int tk, IEntity te, Resource res)
 	{
 		int key = TrailKey(tx, tz);
-		MUD_MudSheetStore st = m_mTrail.Get(key);
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: no stale compact copy left behind
 		if (st)
 		{
 			// cannot happen (a trail tile is unpacked when the sheet covers it); keep the newer one
@@ -2646,7 +2801,10 @@ class MUD_MudSheet
 			return;
 		int tB = System.GetTickCount();
 		int built = 0;
-		while (!m_aBuildTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < RAD_BUILD_MS))
+		int buildMs = RAD_BUILD_MS;
+		if (m_bLocal)
+			buildMs = MESH_MS;     // MUD LAB part D
+		while (!m_aBuildTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < buildMs))
 		{
 			int n = m_aBuildTx.Count();
 			int bx = m_aBuildTx[n - 1];
@@ -2745,6 +2903,13 @@ class MUD_MudSheet
 		if (ad > AHEAD_MAX)
 			ap = cp + (ap - cp) * (AHEAD_MAX / ad);
 		array<int> order = {};
+		int slots = 1024;
+		int dcmMax = 1000000;
+		if (m_bLocal)
+		{
+			slots = 4096;     // MUD LAB part D: ~1710 tiles in the MESH_R 70 circle
+			dcmMax = 500000;  // 500000 x 4096 + 4095 < 2^31
+		}
 		int ctx = Math.Floor(cp[0] / TILE_M);
 		int ctz = Math.Floor(cp[2] / TILE_M);
 		int rt = Math.Ceil(rad / TILE_M) + 1;
@@ -2775,15 +2940,15 @@ class MUD_MudSheet
 					// sort code: distance to the ahead point in cm x 1024 + list index (ints sort exactly)
 					float ox = (tx * TQ + TQ / 2) * CELL - ap[0];
 					float oz = (tz * TQ + TQ / 2) * CELL - ap[2];
-					int dcm = Math.Min(Math.Round(Math.Sqrt(ox * ox + oz * oz) * 100), 1000000);
-					order.Insert(dcm * 1024 + m_aBuildTx.Count());
+					int dcm = Math.Min(Math.Round(Math.Sqrt(ox * ox + oz * oz) * 100), dcmMax);
+					order.Insert(dcm * slots + m_aBuildTx.Count());
 					m_aBuildTx.Insert(tx);
 					m_aBuildTz.Insert(tz);
 				}
 			}
 		}
 		m_iRadQueued = m_aBuildTx.Count();
-		if (m_iRadQueued < 2 || m_iRadQueued >= 1024)
+		if (m_iRadQueued < 2 || m_iRadQueued >= slots)
 			return;     // (>= 1024 cannot happen at RADIUS 40: ~560 tiles in the circle; then the ring order stays)
 		// Radius() builds from the END: farthest from the ahead point first in the list, the nearest last
 		order.Sort();
@@ -2791,7 +2956,7 @@ class MUD_MudSheet
 		array<int> sz = {};
 		for (int o = order.Count() - 1; o >= 0; o--)
 		{
-			int idx = order[o] % 1024;
+			int idx = order[o] % slots;
 			sx.Insert(m_aBuildTx[idx]);
 			sz.Insert(m_aBuildTz[idx]);
 		}
@@ -2817,6 +2982,8 @@ class MUD_MudSheet
 		m_fRadPrevT = m_fLast;
 		float speed = m_vRadVel.Length();
 		m_fRadBuild = RADIUS;
+		if (m_bLocal)
+			m_fRadBuild = MESH_R;     // MUD LAB part D: fixed mesh radius
 		if (SPEED_RADIUS && !m_bLocal && speed > 1)
 			m_fRadBuild = Math.Clamp(SPEED_RADIUS_K / speed, RADIUS_MIN, RADIUS);
 	}
@@ -2827,6 +2994,8 @@ class MUD_MudSheet
 	protected void DropFar(vector cp)
 	{
 		float far = RADIUS + RADIUS_HYST;
+		if (m_bLocal)
+			far = MESH_R + MESH_DROP;     // MUD LAB part D
 		float far2 = far * far;
 		// MESH KEEP: past-radius meshes (key + distance); with MESH_CAP only the farthest over the cap go
 		int meshes = 0;
@@ -2841,24 +3010,29 @@ class MUD_MudSheet
 				m_aTrailOrder.RemoveOrdered(n);
 				continue;
 			}
-			if (!st.m_Ent)
-				continue;
-			meshes++;
 			float mx = (st.m_iTx * TQ + TQ / 2) * CELL - cp[0];
 			float mz = (st.m_iTz * TQ + TQ / 2) * CELL - cp[2];
 			float d2 = mx * mx + mz * mz;
+			if (!st.m_Ent)
+			{
+				if (m_bLocal && d2 > far2)
+					FarPut(key, st);     // MUD LAB part D: a far data-only store goes compact
+				continue;
+			}
+			meshes++;
 			if (d2 <= far2)
 				continue;
 			farKey.Insert(key);
 			farD2.Insert(d2);
 		}
 		int drop = farKey.Count();
-		if (MESH_CAP > 0)
+		bool cap = MESH_CAP > 0 && !m_bLocal;     // MUD LAB part D: SHEET LOCAL drops every mesh past MESH_R + MESH_DROP
+		if (cap)
 			drop = Math.Min(drop, meshes - MESH_CAP);
 		for (int c = 0; c < drop; c++)
 		{
 			int pick = 0;
-			if (MESH_CAP > 0)
+			if (cap)
 			{
 				for (int f = 1; f < farD2.Count(); f++)
 				{
@@ -2880,6 +3054,19 @@ class MUD_MudSheet
 		MUD_MudSheetStore st = m_mTrail.Get(key);
 		if (!st || !st.m_Ent)
 			return;
+		if (m_bLocal)
+		{
+			// MUD LAB part D: deleted at once (no patch re-lift to wait for in this mode), the data goes compact
+			DropColl(st.m_Ent);
+			SCR_EntityHelper.DeleteEntityAndChildren(st.m_Ent);
+			st.m_Ent = null;
+			st.m_Res = null;
+			st.m_D.m_iUnlift = 0;
+			m_iSt10Drops++;
+			s_iCoverGen++;
+			FarPut(key, st);
+			return;
+		}
 		MUD_MudSheetStore dying = new MUD_MudSheetStore();
 		dying.m_Ent = st.m_Ent;
 		dying.m_Res = st.m_Res;
@@ -2920,7 +3107,7 @@ class MUD_MudSheet
 	protected void FillSlot(int ti, int tk, int tx, int tz)
 	{
 		int key = TrailKey(tx, tz);
-		MUD_MudSheetStore st = m_mTrail.Get(key);
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: a compact one comes back first
 		float sd;
 		float sou;
 		float sov;
@@ -2980,7 +3167,7 @@ class MUD_MudSheet
 		int key = TrailKey(tx, tz);
 		if (IsLive(tx, tz))
 			return;     // the window has it already
-		MUD_MudSheetStore st = m_mTrail.Get(key);
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: a compact one comes back first
 		if (st && st.m_Ent)
 			return;     // duplicate (overlapping zones) or built already
 		bool kept = st != null;
@@ -4547,7 +4734,7 @@ class MUD_MudSheet
 					done++;
 					continue;
 				}
-				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				MUD_MudSheetStore st = TrailGet(TrailKey(tx, tz));     // MUD LAB part D: a compact one comes back first
 				if (!st || !st.m_Ent)
 				{
 					// CAMERA RADIUS: no mesh here - SYNC: the sync layer cleared it (Stage 4, MUD_MudSync.ClearOp), the
@@ -4937,9 +5124,9 @@ class MUD_MudSheet
 				return m_F.m_aD[lv] * m_F.m_aBand[lv];
 			}
 			MUD_MudSheetStore lst = m_mTrail.Get(TrailKey(tx, tz));
-			if (!lst)
-				return 0;
 			int ll = (k - tz * TQ) * TV + (i - tx * TQ);
+			if (!lst)
+				return FarMud(TrailKey(tx, tz), ll);     // MUD LAB part D: compact far data (read, not taken back)
 			return lst.m_D.m_aD[ll] * lst.m_D.m_aBand[ll];
 		}
 		if (IsLive(tx, tz))
@@ -6816,8 +7003,8 @@ class MUD_MudSheet
 	//! PAPER TEST 2: low-detail stored tiles the camera came near -> full rebuild (FlushOneBuild, budgeted)
 	protected void LodUpgrade(vector cp)
 	{
-		if (!LOD_ON || m_iLowNow <= 0)
-			return;
+		if (!LOD_ON || m_iLowNow <= 0 || m_bLocal)
+			return;     // MUD LAB part D: SHEET LOCAL far-ring tiles are never upgraded on screen
 		float ur = LOD_M - LOD_BACK;
 		foreach (int key : m_aTrailOrder)
 		{
@@ -6857,6 +7044,13 @@ class MUD_MudSheet
 			float lcz = (tz + 0.5) * TILE_M - m_vLodCam[2];
 			low = lcx * lcx + lcz * lcz > LOD_M * LOD_M;
 		}
+		if (m_bLocal && !live && m_bLodCam)
+		{
+			// MUD LAB part D: a stored tile past FAR_R from the camera is built at 11 x 11 (LodUpgrade never upgrades it)
+			float fcx = (tx + 0.5) * TILE_M - m_vLodCam[0];
+			float fcz = (tz + 0.5) * TILE_M - m_vLodCam[2];
+			low = fcx * fcx + fcz * fcz > FAR_R * FAR_R;
+		}
 		if (d.m_iLow != 0)
 			m_iLowNow--;
 		d.m_iLow = 0;
@@ -6865,6 +7059,8 @@ class MUD_MudSheet
 			d.m_iLow = 1;
 			m_iLodLow++;
 			m_iLowNow++;
+			if (m_bLocal)
+				m_iFarLow++;
 		}
 		Resource res = BuildTileMesh(te, d, tx, tz, live, low);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
@@ -7836,6 +8032,15 @@ class MUD_MudSheetTileData
 	int m_iUnlift;          // LIFT BY DRAWN: 1 = patches were told this (stored) tile's mesh is on screen
 	int m_iDrawn;           // LAZY RUT MESH: 1 = every cell was traced at its last mesh build (that mesh has no hole)
 	int m_iLow;             // PAPER TEST 2: 1 = its last mesh was the low-detail one (far from the camera)
+}
+
+//! SHEET LOCAL far data (MUD LAB part D): one int a cell = 1 byte each for height, drag u, drag v, class (bit 0 bare,
+//! bit 1 touched, bits 2-6 deposit band): 441 x 4 bytes
+class MUD_MudSheetFar
+{
+	int m_iTx;
+	int m_iTz;
+	int m_aC[441];
 }
 
 //! A frozen trail tile: its data, entity (origin at the tile corner) and the mesh it draws
