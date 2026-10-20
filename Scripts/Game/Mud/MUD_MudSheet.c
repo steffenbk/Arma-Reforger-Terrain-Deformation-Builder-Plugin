@@ -340,6 +340,13 @@ class MUD_MudSheet
 	protected int m_iOpSkipOwn;
 	protected int m_iOpMs;
 	protected int m_iOpClears;
+	// MUD LAB EDGE AUDIT (sheet local meter, user 2026-10-20 DS screenshot: a striped wall along straight tile borders
+	// = the ONE_SKIRT curtain of a raised tile with nothing drawn beside it): each build keeps its border verts, the 10 s
+	// line says what is beside every raised one (ok / lower neighbour / no neighbour and why)
+	static const bool EDGE_AUDIT = true;
+	static const float EDGE_RAISED = 0.03;      // m over the ground: a border vert this high shows its skirt if open
+	static const float EDGE_STEP = 0.03;        // m: drawn neighbour this much lower = a visible step
+	protected ref map<int, ref array<float>> m_mEdgeRec = new map<int, ref array<float>>();   // TrailKey -> 12 x TV
 	protected static int s_iLabPreset;
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
@@ -1426,6 +1433,7 @@ class MUD_MudSheet
 		m_mFar.Clear();
 		m_aFarOrder.Clear();
 		m_mOwn.Clear();
+		m_mEdgeRec.Clear();
 		m_aTileEnt.Clear();
 		m_aTileRes.Clear();
 		m_mTrail.Clear();
@@ -1897,6 +1905,193 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: tile vertex l of border vert j on side s (0 south k 0, 1 north k TQ, 2 west i 0, 3 east i TQ)
+	protected int EdgeL(int s, int j)
+	{
+		if (s == 0)
+			return j;
+		if (s == 1)
+			return TQ * TV + j;
+		if (s == 2)
+			return j * TV;
+		return j * TV + TQ;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: tile vertex a (lower corner) of quad q along side s, on the row / column next to the side
+	protected int EdgeQuad(int s, int q)
+	{
+		if (s == 0)
+			return q;
+		if (s == 1)
+			return (TQ - 1) * TV + q;
+		if (s == 2)
+			return q * TV;
+		return q * TV + TQ - 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT, after each build of tile tx, tz: per border vert (S N W E x TV) the drawn world y (-10000 not drawn:
+	//! untraced quad, -20000 band 0 quads, -30000 no mesh), its height over the ground and its band. Drawn = a quad of
+	//! this tile beside it passed BuildTileMesh's traced + band skips (bare / hole skips not counted)
+	protected void EdgeRecord(MUD_MudSheetTileData d, int tx, int tz, bool drawn)
+	{
+		array<float> ea = {};
+		ea.Resize(12 * TV);
+		for (int s = 0; s < 4; s++)
+		{
+			for (int j = 0; j < TV; j++)
+			{
+				int l = EdgeL(s, j);
+				int e = s * TV + j;
+				ea[4 * TV + e] = d.m_aLastY[l] - d.m_aG[l];
+				ea[8 * TV + e] = d.m_aBand[l];
+				float y = -20000;
+				for (int q = j - 1; q <= j; q++)
+				{
+					if (q < 0 || q >= TQ)
+						continue;
+					int la = EdgeQuad(s, q);
+					if (d.m_aGs[la] == 0 || d.m_aGs[la + 1] == 0 || d.m_aGs[la + TV] == 0 || d.m_aGs[la + TV + 1] == 0)
+					{
+						if (y < -9000)
+							y = -10000;
+						continue;
+					}
+					if (d.m_aBand[la] > 0 || d.m_aBand[la + 1] > 0 || d.m_aBand[la + TV] > 0 || d.m_aBand[la + TV + 1] > 0)
+						y = d.m_aLastY[l];
+				}
+				if (!drawn)
+					y = -30000;
+				ea[e] = y;
+			}
+		}
+		m_mEdgeRec.Set(TrailKey(tx, tz), ea);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: is world tile key's mesh on screen now (live slot or stored tile, entity visible)?
+	protected bool EdgeDrawn(int key)
+	{
+		int tx = key / 20000;
+		int tz = key - tx * 20000;
+		IEntity e;
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t < 0 || t >= m_aTileEnt.Count() || t >= m_aTileRes.Count() || m_aSlotZone[t] == 0 || !m_aTileRes[t])
+				return false;
+			e = m_aTileEnt[t];
+		}
+		else
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Res)
+				return false;
+			e = st.m_Ent;
+		}
+		return e && (e.GetFlags() & EntityFlags.VISIBLE) != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT 10 s part: every border vert (corners left out) of a drawn tile drawn EDGE_RAISED over the ground,
+	//! against the facing vert of the tile beside it: ok, a step (beside drawn lower), or open (beside not drawn: tile
+	//! not born, no mesh, its vert untraced, its band 0 there). Records of tiles no longer drawn go.
+	protected string EdgeAudit()
+	{
+		if (!EDGE_AUDIT)
+			return "";
+		int raised = 0;
+		int ok = 0;
+		int step = 0;
+		float stepMax = 0;
+		int stepBand = 0;
+		int open = 0;
+		float openMax = 0;
+		int nbUnborn = 0;
+		int nbNoMesh = 0;
+		int nbUnt = 0;
+		int nbBand0 = 0;
+		array<int> gone = {};
+		foreach (int key, array<float> ea : m_mEdgeRec)
+		{
+			if (!ea || !EdgeDrawn(key))
+			{
+				gone.Insert(key);
+				continue;
+			}
+			int tx = key / 20000;
+			int tz = key - tx * 20000;
+			for (int s = 0; s < 4; s++)
+			{
+				int nk = TrailKey(tx + 1, tz);
+				int os = 2;
+				if (s == 0)
+				{
+					nk = TrailKey(tx, tz - 1);
+					os = 1;
+				}
+				else if (s == 1)
+				{
+					nk = TrailKey(tx, tz + 1);
+					os = 0;
+				}
+				else if (s == 2)
+				{
+					nk = TrailKey(tx - 1, tz);
+					os = 3;
+				}
+				array<float> nb = null;
+				if (EdgeDrawn(nk))
+					nb = m_mEdgeRec.Get(nk);
+				for (int j = 1; j < TQ; j++)
+				{
+					int e = s * TV + j;
+					float rz = ea[4 * TV + e];
+					if (ea[e] < -9000 || rz < EDGE_RAISED)
+						continue;
+					raised++;
+					float ny = -30000;
+					if (nb)
+						ny = nb[os * TV + j];
+					if (ny < -9000)
+					{
+						open++;
+						openMax = Math.Max(openMax, rz);
+						if (!m_mBorn.Contains(nk))
+							nbUnborn++;
+						else if (ny > -15000)
+							nbUnt++;
+						else if (ny > -25000)
+							nbBand0++;
+						else
+							nbNoMesh++;
+						continue;
+					}
+					float dy = ea[e] - ny;
+					if (dy > EDGE_STEP)
+					{
+						step++;
+						stepMax = Math.Max(stepMax, dy);
+						if (nb[8 * TV + os * TV + j] < ea[8 * TV + e] - 0.05)
+							stepBand++;
+						continue;
+					}
+					ok++;
+				}
+			}
+		}
+		foreach (int g : gone)
+			m_mEdgeRec.Remove(g);
+		int stepCm = Math.Round(stepMax * 100);
+		int openCm = Math.Round(openMax * 100);
+		string a = string.Format(" | edge audit: raised border verts %1: ok %2, step > 3 cm %3 (max %4 cm, beside band lower %5)",
+			raised, ok, step, stepCm, stepBand);
+		return a + string.Format(", open %1 (max %2 cm: beside not born %3, no mesh %4, vert untraced %5, band 0 %6)",
+			open, openCm, nbUnborn, nbNoMesh, nbUnt, nbBand0);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! SHEET LOCAL 10 s line (Log10): builds by reason, then reset
 	protected void LocalLog()
 	{
@@ -1904,7 +2099,7 @@ class MUD_MudSheet
 			m_aBuildsBy[BW_WHEEL], m_aBuildsBy[BW_OLDEST], m_aBuildsBy[BW_NEAREST], m_aBuildsBy[BW_MESHLESS], m_aBuildsBy[BW_FREEZE], m_aBuildsBy[BW_RESTORE], m_aBuildsBy[BW_SLUMP], m_aBuildsBy[BW_BAND]);
 		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3, op %5 | born slots waited for traces %4 uploads",
 			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait, m_aBuildsBy[BW_OP]);
-		Print(p1 + p2 + FarLog(), LogLevel.NORMAL);
+		Print(p1 + p2 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
 		m_iWouldSkip = 0;
@@ -7580,6 +7775,8 @@ class MUD_MudSheet
 				m_iFarLow++;
 		}
 		Resource res = BuildTileMesh(te, d, tx, tz, live, low);
+		if (m_bLocal && EDGE_AUDIT)
+			EdgeRecord(d, tx, tz, res != null);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
 			m_aBuildsBy[m_iBuildWhy] = m_aBuildsBy[m_iBuildWhy] + 1;
 		m_iBuildWhy = BW_RESTORE;
