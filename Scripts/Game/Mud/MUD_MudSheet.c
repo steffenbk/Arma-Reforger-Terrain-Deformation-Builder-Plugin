@@ -355,6 +355,7 @@ class MUD_MudSheet
 	static bool EDGE_COBUILD_PICK = false;      // A2: dirty band / stamp slots beside a picked wheel slot build with it
 	static bool EDGE_COBUILD = false;           // A3: a build whose border differs from the tile beside builds that one too
 	static bool SKIRT_APRON = false;            // A4: skirt bottom verts go out ~45 deg down to under the ground, own UVs
+	static bool EDGE_OPEN_FADE = false;         // A8: a side whose neighbour is not drawn (and not built this upload) fades over EDGE
 	static bool EDGE_DRAPE = false;             // A7 (user idea 2026-10-20): skirt curves over and down as a quarter round (wins over A4)
 	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
 	static const float EDGE_CO_STEP = 0.03;     // A3: m between our border vert and the neighbour's = co-build (EDGE_STEP)
@@ -396,7 +397,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 9;
+	static const int FIX_SETS = 10;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -415,6 +416,7 @@ class MUD_MudSheet
 	protected ref array<int> m_aFrontTz = {};
 	protected int m_iSkirtFrom;                 // A4: first skirt vert of the mesh being built
 	protected int m_iSkirtTix;                  // A7: first skirt index (tix) of the mesh being built
+	protected int m_iOpenFade;                  // A8 meter (10 s): tile sides faded toward a neighbour not drawn
 	protected int m_iDrapeCut;                  // A7 meter (10 s): builds whose drape stopped at the vert / index cap
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
@@ -3242,6 +3244,8 @@ class MUD_MudSheet
 			p3 += string.Format(" | band incr: passes %1, box cells %2, slots dirtied %3, slot BandTiles %4", m_iIncrRuns, m_iIncrCells, m_iIncrDirty, m_iIncrFull);
 		if (EDGE_DRAPE)
 			p3 += string.Format(" | drape cut at cap %1", m_iDrapeCut);
+		if (EDGE_OPEN_FADE)
+			p3 += string.Format(" | sides faded (beside not drawn) %1", m_iOpenFade);
 		if (BUILD_SKIP_SAME)
 			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
 		if (BAND_STORED_HOLD)
@@ -3264,6 +3268,7 @@ class MUD_MudSheet
 		m_iIncrFull = 0;
 		m_iSkipSame = 0;
 		m_iDrapeCut = 0;
+		m_iOpenFade = 0;
 		m_iBandHeld = 0;
 	}
 
@@ -3289,11 +3294,12 @@ class MUD_MudSheet
 		bool a = s == 3 || s == 6 || s == 8;
 		bool c = s == 5 || s == 6 || s == 8;
 		bool b = s == 7 || s == 8;
-		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s == 9;
-		EDGE_COBUILD = a || s == 2 || s == 9;
+		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s >= 9;
+		EDGE_COBUILD = a || s == 2 || s >= 9;     // A8 needs A3 to lift the fade again
 		SKIRT_APRON = a;
-		EDGE_DRAPE = s == 9;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
-		BAND_BORN_FRONT = a || s == 9;
+		EDGE_DRAPE = s == 9 || s == 10;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
+		EDGE_OPEN_FADE = s == 10;          // A8: set 10 = set 9 + open fade
+		BAND_BORN_FRONT = a || s >= 9;
 		BAND_INCR = c || s == 4;
 		BAND_MICRO = c || s == 4;
 		BUILD_SKIP_SAME = c;
@@ -3334,6 +3340,8 @@ class MUD_MudSheet
 			s += " apron";
 		if (EDGE_DRAPE)
 			s += " drape";
+		if (EDGE_OPEN_FADE)
+			s += " open_fade";
 		if (BAND_BORN_FRONT)
 			s += " born_front";
 		if (BAND_INCR)
@@ -4391,9 +4399,30 @@ class MUD_MudSheet
 	//! Is world tile tx, tz a mud tile (its middle inside a zone)? Fades go where the next tile is not one.
 	protected bool HasTile(int tx, int tz)
 	{
+		if (m_bLocal && EDGE_OPEN_FADE)
+			return OpenDrawn(tx, tz);     // stage 2 A8
 		if (m_bLocal)
 			return true;     // SHEET LOCAL: no EDGE fade - the deposit band takes the mud into the ground
 		return TileInZone(tx, tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A8 EDGE_OPEN_FADE: world tile tx, tz counts as a drawn neighbour (no fade toward it) when its mesh is on
+	//! screen or it is a live slot built in this upload. Otherwise a raised border beside it would show its skirt / drape
+	//! (the striped wedges, user screenshots 2026-10-20). When it gets drawn, A3 (CoCheck: raised beside not drawn, or
+	//! step) builds this tile again without the fade.
+	protected bool OpenDrawn(int tx, int tz)
+	{
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t >= 0 && t < TILES * TILES && m_aPick[t] == 1)
+				return true;
+		}
+		bool drawn = EdgeDrawn(TrailKey(tx, tz));
+		if (!drawn)
+			m_iOpenFade++;
+		return drawn;
 	}
 
 	//------------------------------------------------------------------------------------------------

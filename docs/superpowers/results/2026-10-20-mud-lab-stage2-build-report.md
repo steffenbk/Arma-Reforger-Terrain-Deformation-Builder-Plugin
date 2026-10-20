@@ -38,6 +38,7 @@ Second cycle: **numpad \*** (TEST_KIT, sheet local on) steps fix sets 0-8 (MUD_M
 | 7 | all B (B2 B3 B4) |
 | 8 | everything (with the apron, not the drape) |
 | 9 | A2 + A3 + A7 drape + A5 (set 3 with the drape instead of the apron) |
+| 10 | set 9 + A8 open fade |
 
 B1 (crater log, MUD_CraterTrace.c) has no switch: it is TEST_KIT only and print only.
 
@@ -95,3 +96,7 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
 - Added A7 EDGE_DRAPE (set 9) for those edges. Meter: `drape cut at cap N` on the builds line.
 - D1 overlay + D2 pressed lift taken out of the numpad 3 cycle and archived
   (mud_backups/archive/mud-overlay-D1-press-lift-D2-2026-10-20, README lists call sites). D2's PRESS_LIFT code stays dormant.
+- WB 23:10-23:12 (set 9): user screenshots show striped dirt wedges beside tiles; edge audit 'open: no mesh' up to 92
+  verts / 10 s (max 22 cm). Added A8 EDGE_OPEN_FADE (set 10): a side whose neighbour is not drawn (and not a live slot
+  built in this upload) fades over EDGE (1 m) like the old open-side fade; A3 rebuilds it once the neighbour is drawn.
+  Meter: `sides faded (beside not drawn) N`.
