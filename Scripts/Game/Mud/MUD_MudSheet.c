@@ -355,6 +355,7 @@ class MUD_MudSheet
 	static bool EDGE_COBUILD_PICK = false;      // A2: dirty band / stamp slots beside a picked wheel slot build with it
 	static bool EDGE_COBUILD = false;           // A3: a build whose border differs from the tile beside builds that one too
 	static bool SKIRT_APRON = false;            // A4: skirt bottom verts go out ~45 deg down to under the ground, own UVs
+	static bool EDGE_DRAPE = false;             // A7 (user idea 2026-10-20): skirt curves over and down as a quarter round (wins over A4)
 	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
 	static const float EDGE_CO_STEP = 0.03;     // A3: m between our border vert and the neighbour's = co-build (EDGE_STEP)
 	static const int CO_MAX = 4;                // A3: stored neighbours built at once per upload; the rest are queued
@@ -395,7 +396,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 8;
+	static const int FIX_SETS = 9;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -413,6 +414,8 @@ class MUD_MudSheet
 	protected ref array<int> m_aFrontTx = {};   // A5: tiles built before the radius list
 	protected ref array<int> m_aFrontTz = {};
 	protected int m_iSkirtFrom;                 // A4: first skirt vert of the mesh being built
+	protected int m_iSkirtTix;                  // A7: first skirt index (tix) of the mesh being built
+	protected int m_iDrapeCut;                  // A7 meter (10 s): builds whose drape stopped at the vert / index cap
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
 	static const int BW_OLDEST = 1;
@@ -3237,6 +3240,8 @@ class MUD_MudSheet
 			m_iCoPick, m_iCoLive, m_iCoStored, m_iCoCapped, m_aBuildsBy[BW_COBUILD], m_iBornFront);
 		if (BAND_INCR)
 			p3 += string.Format(" | band incr: passes %1, box cells %2, slots dirtied %3, slot BandTiles %4", m_iIncrRuns, m_iIncrCells, m_iIncrDirty, m_iIncrFull);
+		if (EDGE_DRAPE)
+			p3 += string.Format(" | drape cut at cap %1", m_iDrapeCut);
 		if (BUILD_SKIP_SAME)
 			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
 		if (BAND_STORED_HOLD)
@@ -3258,6 +3263,7 @@ class MUD_MudSheet
 		m_iIncrDirty = 0;
 		m_iIncrFull = 0;
 		m_iSkipSame = 0;
+		m_iDrapeCut = 0;
 		m_iBandHeld = 0;
 	}
 
@@ -3283,10 +3289,11 @@ class MUD_MudSheet
 		bool a = s == 3 || s == 6 || s == 8;
 		bool c = s == 5 || s == 6 || s == 8;
 		bool b = s == 7 || s == 8;
-		EDGE_COBUILD_PICK = a || s == 1 || s == 2;
-		EDGE_COBUILD = a || s == 2;
+		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s == 9;
+		EDGE_COBUILD = a || s == 2 || s == 9;
 		SKIRT_APRON = a;
-		BAND_BORN_FRONT = a;
+		EDGE_DRAPE = s == 9;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
+		BAND_BORN_FRONT = a || s == 9;
 		BAND_INCR = c || s == 4;
 		BAND_MICRO = c || s == 4;
 		BUILD_SKIP_SAME = c;
@@ -3319,6 +3326,8 @@ class MUD_MudSheet
 			s += " cobuild";
 		if (SKIRT_APRON)
 			s += " apron";
+		if (EDGE_DRAPE)
+			s += " drape";
 		if (BAND_BORN_FRONT)
 			s += " born_front";
 		if (BAND_INCR)
@@ -9507,6 +9516,7 @@ class MUD_MudSheet
 			}
 			// own skirt over the 2-vertex border steps (same faces as the full one below)
 			m_iSkirtFrom = nv;     // stage 2 A4
+			m_iSkirtTix = ni;      // stage 2 A7
 			if ((ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
 			{
 				for (int lsd = 0; lsd < 4; lsd++)
@@ -9782,7 +9792,10 @@ class MUD_MudSheet
 		int nvColl = nv;        // collider: tile verts / indices only, not the skirt
 		int niColl = ni;
 		if (!low)
+		{
 			m_iSkirtFrom = nv;     // stage 2 A4
+			m_iSkirtTix = ni;      // stage 2 A7
+		}
 		if (!low && (ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
 		{
 			// side 0 south (k 0), 1 north (k TQ), 2 west (i 0), 3 east (i TQ); T0 -> T1 runs so that the quad faces
@@ -9853,7 +9866,7 @@ class MUD_MudSheet
 		// curtain lies on the ground instead of standing as a wall. Their dirt UVs come from their own position (the top
 		// vert's UV + the offset / SIZE, same frame, its drag kept); TOP_UV64 recomputes all from xz anyway. Own block:
 		// BuildTileMesh is at the 64-locals limit.
-		if (m_bLocal && SKIRT_APRON)
+		if (m_bLocal && SKIRT_APRON && !EDGE_DRAPE)
 		{
 			for (int ab = m_iSkirtFrom; ab + 3 < nv; ab += 4)
 			{
@@ -9870,6 +9883,50 @@ class MUD_MudSheet
 					tuv[(ab + 3 - au) * 2] = Math.Clamp(tuv[(ab + au) * 2] + aOut[0] * aDrop / SIZE, 0, 1);
 					tuv[(ab + 3 - au) * 2 + 1] = Math.Clamp(tuv[(ab + au) * 2 + 1] - aOut[2] * aDrop / SIZE, 0, 1);
 				}
+			}
+		}
+		// stage 2 A7 EDGE_DRAPE (sheet local, user idea 2026-10-20): each skirt quad (top0, top1, bottom1, bottom0) becomes
+		// a quarter round of radius R = top height over G - BAND_UNDER - 0.02: it leaves the top flat, a middle ring at
+		// 45 deg (R * 0.707 out, R * 0.293 down; 2 new verts) and ends straight down R out. Two quads instead of one;
+		// stops at the vert / index caps (m_iDrapeCut). Own block: BuildTileMesh is at the 64-locals limit.
+		if (m_bLocal && EDGE_DRAPE)
+		{
+			int dn = (nv - m_iSkirtFrom) / 4;
+			for (int dq = 0; dq < dn; dq++)
+			{
+				if (nv + 2 > EDGE_VCAP || ni + 6 > 3360)
+				{
+					m_iDrapeCut++;
+					break;
+				}
+				int db = m_iSkirtFrom + dq * 4;
+				// outward = (T1 - T0) turned to the right (as A4)
+				vector dOut = Vector(tv[db + 1][2] - tv[db][2], 0, tv[db][0] - tv[db + 1][0]);
+				dOut = dOut * (1 / dOut.Length());
+				for (int du = 0; du < 2; du++)
+				{
+					vector dTop = tv[db + du];
+					int dl = Math.Round(dTop[2] / CELL) * TV + Math.Round(dTop[0] / CELL);
+					float dR = Math.Max(0, dTop[1] - (d.m_aG[dl] - BAND_UNDER - 0.02 - orgY));
+					tv[nv + du] = Vector(dTop[0] + dOut[0] * dR * 0.7071, dTop[1] - dR * 0.2929, dTop[2] + dOut[2] * dR * 0.7071);
+					tv[db + 3 - du] = Vector(dTop[0] + dOut[0] * dR, dTop[1] - dR, dTop[2] + dOut[2] * dR);
+					tuv[(nv + du) * 2] = Math.Clamp(tuv[(db + du) * 2] + dOut[0] * dR * 0.7071 / SIZE, 0, 1);
+					tuv[(nv + du) * 2 + 1] = Math.Clamp(tuv[(db + du) * 2 + 1] - dOut[2] * dR * 0.7071 / SIZE, 0, 1);
+					tuv[(db + 3 - du) * 2] = Math.Clamp(tuv[(db + du) * 2] + dOut[0] * dR / SIZE, 0, 1);
+					tuv[(db + 3 - du) * 2 + 1] = Math.Clamp(tuv[(db + du) * 2 + 1] - dOut[2] * dR / SIZE, 0, 1);
+				}
+				// upper quad top0 top1 mid1 mid0 over the old skirt tris, lower quad mid0 mid1 bottom1 bottom0 appended
+				tix[m_iSkirtTix + dq * 6 + 2] = nv + 1;
+				tix[m_iSkirtTix + dq * 6 + 4] = nv + 1;
+				tix[m_iSkirtTix + dq * 6 + 5] = nv;
+				tix[ni] = nv;
+				tix[ni + 1] = nv + 1;
+				tix[ni + 2] = db + 2;
+				tix[ni + 3] = nv;
+				tix[ni + 4] = db + 2;
+				tix[ni + 5] = db + 3;
+				ni += 6;
+				nv += 2;
 			}
 		}
 		MUD_Prof.Add(MUD_Prof.T_SKIRT, System.GetTickCount(tPart));

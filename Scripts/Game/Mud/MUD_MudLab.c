@@ -1,6 +1,6 @@
 //! MUD LAB (stage 1, plan docs/superpowers/plans/2026-10-20-mud-lab.md, build 2026-10-20; checkpoint v249 = before):
-//! the permanent mud-look switcher. TEST_KIT numpad 3 cycles off -> sheet local presets -> D2 pressed lift presets ->
-//! D1 overlay presets -> off; one surface mode at a time. A new play resets to off. Called every frame from
+//! the permanent mud-look switcher. TEST_KIT numpad 3 cycles off -> sheet local presets -> off (D2 pressed lift and D1
+//! overlay modes archived 2026-10-20: mud_backups/archive/mud-overlay-D1-press-lift-D2-2026-10-20). A new play resets to off. Called every frame from
 //! MUD_WorldGroundEntity's frame (render machines only).
 //! Logs: 'MUD lab: surface <name> preset <p> | <why>' on every switch; 'MUD lab 10s: ...' every 10 s while a mode is
 //! on. 'MUD ms' there = MUD_Prof's whole MUD_WorldGroundEntity.EOnFrame total per frame (the 'MUD script avg ms/frame'
@@ -28,9 +28,7 @@ class MUD_MudLab
 	protected static void Init()
 	{
 		s_aModes = {};
-		s_aModes.Insert(new MUD_LabSheetLocal());
-		s_aModes.Insert(new MUD_LabPressLift());
-		s_aModes.Insert(new MUD_LabOverlay());
+		s_aModes.Insert(new MUD_LabSheetLocal());     // D2 pressed lift + D1 overlay archived 2026-10-20 (user: sheet local wins)
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -73,7 +71,7 @@ class MUD_MudLab
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! TEST_KIT numpad 3: next step of off -> sheet local -> D2 -> D1 -> off
+	//! TEST_KIT numpad 3: next step of off -> sheet local presets -> off
 	protected static void Cycle()
 	{
 		s_iStep++;
@@ -245,43 +243,4 @@ class MUD_LabSheetLocal : MUD_LabMode
 		m_iSlAt = MUD_MudSheet.SlumpMsAll();
 		m_iBaAt = MUD_MudSheet.BandMsAll();
 	}
-}
-
-//! D2: MUD_WorldGroundEntity.PRESS_LIFT (pressed lift, its own 'MUD pressed lift' 10 s line keeps running)
-class MUD_LabPressLift : MUD_LabMode
-{
-	override string Name() { return "D2 pressed lift"; }
-	override int Presets() { return MUD_WorldGroundEntity.PRESS_PRESETS; }
-	override void Enter(int preset) { MUD_WorldGroundEntity.SetPressLift(preset, "key"); }
-	override void Exit() { MUD_WorldGroundEntity.SetPressLift(0, "key"); }
-	override string Label()
-	{
-		return string.Format("lift %1 m, press %2 m, wear press %3", MUD_WorldGroundEntity.s_fPressLiftM, MUD_WorldGroundEntity.s_fPressM, MUD_WorldGroundEntity.s_fWearPress);
-	}
-	override string Log10s() { return "tiles - built - kept - (patch meshes) | mode ms = MUD_Prof 'rebuild' part (D2 is drawn by patch rebuilds)"; }
-	override int ModeMsAll() { return MUD_Prof.PartAll(MUD_Prof.REBUILD); }
-}
-
-//! D1: MUD_MudOverlay (its own 'MUD mud overlay' 10 s lines keep running)
-class MUD_LabOverlay : MUD_LabMode
-{
-	protected int m_iMs;
-	override string Name() { return "D1 overlay"; }
-	override int Presets() { return MUD_MudOverlay.PRESETS; }
-	override void Enter(int preset) { MUD_MudOverlay.SetPreset(preset, "key"); }
-	override void Exit() { MUD_MudOverlay.SetPreset(0, "key"); }
-	override void Tick(float time)
-	{
-		int t0 = System.GetTickCount();
-		MUD_MudOverlay.LabFrame(time);
-		m_iMs += System.GetTickCount(t0);
-	}
-	override string Label()
-	{
-		if (MUD_MudOverlay.s_iPreset == 1)
-			return "live stamps + re-centre + fallback";
-		return "fallback only (late-join view)";
-	}
-	override string Log10s() { return MUD_MudOverlay.LabCounts(); }
-	override int ModeMsAll() { return m_iMs; }
 }

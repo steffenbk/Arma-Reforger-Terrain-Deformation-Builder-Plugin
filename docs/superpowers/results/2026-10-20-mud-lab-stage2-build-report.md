@@ -11,6 +11,7 @@ Commits: 28d518d (part 0), e94d59d (A), 4766541 (B), 1b61f33 (C), this commit (D
 | EDGE_COBUILD_PICK | A2 | dirty band / stamp slots beside a picked wheel slot build with it |
 | EDGE_COBUILD | A3 | a build whose border differs from the tile beside builds that one too (CO_MAX 4 stored per upload, rest queued) |
 | SKIRT_APRON | A4 | skirt bottom verts go out ~45 deg down to under the ground, own UVs |
+| EDGE_DRAPE | A7 | (added after the first DS run, user idea) the skirt curves over and down as a quarter round; wins over A4 |
 | BAND_BORN_FRONT | A5 | a tile born / re-banded outside the window builds before the radius list |
 | CRATER_TRACE_NOW | B2 | a now-slot not traced yet is traced / filled and built in the go-live frame |
 | CRATER_TAPER_NOW | B3 | the hole's taper tiles build in the go-live frame (cap TAPER_NOW_MAX 12 / TAPER_NOW_MS 15) |
@@ -35,7 +36,8 @@ Second cycle: **numpad \*** (TEST_KIT, sheet local on) steps fix sets 0-8 (MUD_M
 | 5 | all C (C1-C5) |
 | 6 | all A + all C |
 | 7 | all B (B2 B3 B4) |
-| 8 | everything |
+| 8 | everything (with the apron, not the drape) |
+| 9 | A2 + A3 + A7 drape + A5 (set 3 with the drape instead of the apron) |
 
 B1 (crater log, MUD_CraterTrace.c) has no switch: it is TEST_KIT only and print only.
 
@@ -86,3 +88,10 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
 14. C6: EDGE_AUDIT stays on until you confirm part A in WB (the WB session needs its numbers). Then I flip it to false.
 15. D: LabCounts "built" now counts a live slot only when its entity is visible - a null build ("nothing to draw")
     hides the entity but used to leave the old resource counted.
+
+## After the first DS run (2026-10-20 22:43-22:50)
+- Compiled clean first try. Bench: max |incr - full| 0. Set 7/8 crater taper tiles done in the same frame to +3 frames
+  (vs +5..+7 frames with set 0); sets 2+ took edge steps > 3 cm from 22 to 0 per 10 s. Left: 'open: no mesh' edges.
+- Added A7 EDGE_DRAPE (set 9) for those edges. Meter: `drape cut at cap N` on the builds line.
+- D1 overlay + D2 pressed lift taken out of the numpad 3 cycle and archived
+  (mud_backups/archive/mud-overlay-D1-press-lift-D2-2026-10-20, README lists call sites). D2's PRESS_LIFT code stays dormant.

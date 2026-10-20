@@ -547,7 +547,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected float m_fLiftZ0;
 	// PRESSED LIFT (plans/2026-10-19-pressed-lift-ruts.md, look test 2026-10-19): clients draw the patch ground
 	// s_fPressLiftM higher, pressed out where the rut floor is cut (all of it at s_fPressM) or worn (s_fWearPress), none
-	// next to voxel / dug cells. Off = today's mesh exactly. Static (not const): TEST_KIT numpad 3 (MUD_MudOverlay.Cycle).
+	// next to voxel / dug cells. Off = today's mesh exactly. Static (not const): TEST_KIT numpad 3 (was MUD_MudOverlay.Cycle; archived 2026-10-20).
 	static bool PRESS_LIFT = false;
 	static float s_fPressLiftM = 0.04;  // MUD_LIFT_M
 	static float s_fPressM = 0.03;      // PRESS_M
@@ -1082,7 +1082,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_KeepScan.Tick(m_fTime);    // TEMP tool 2026-10-17 run 2: keep mask incl. asphalt / concrete terrain (pin cut-out)
 		MUD_Prof.Add(MUD_Prof.KEEPSCAN, System.GetTickCount(tP));
 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet (adds its own MUD_Prof parts)
-		if (m_bRender && (MUD_MudOverlay.ENABLED || PRESS_LIFT || MUD_MudSheet.ENABLED || MUD_TestKit.TEST_KIT))
+		if (m_bRender && (PRESS_LIFT || MUD_MudSheet.ENABLED || MUD_TestKit.TEST_KIT))
 			MUD_MudLab.Tick(m_fTime);    // mud lab 2026-10-20: surface mode switcher (client look only; TEST_KIT numpad 3 cycles)
 		tP = System.GetTickCount();
 		MUD_VoxelHouse.Tick();    // TEMP probe 2026-10-13
@@ -6944,15 +6944,11 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Pressed lift preset p (0 = off; 1..PRESS_PRESETS = plan presets MUD_LIFT_M / PRESS_M / WEAR_PRESS). On turns the
-	//! mud overlay off (the two never run together). The patches and skin chunks in view build again.
+	//! Pressed lift preset p (0 = off; 1..PRESS_PRESETS = plan presets MUD_LIFT_M / PRESS_M / WEAR_PRESS). The patches
+	//! and skin chunks in view build again. (Mud lab D2 - out of the numpad 3 cycle since 2026-10-20, code dormant;
+	//! the D1 overlay it used to turn off is archived: mud_backups/archive/mud-overlay-D1-press-lift-D2-2026-10-20.)
 	static void SetPressLift(int p, string why)
 	{
-		if (p > 0 && MUD_MudOverlay.ENABLED)
-		{
-			Print("MUD pressed lift: on -> mud overlay turned off (the two never run together)", LogLevel.NORMAL);
-			MUD_MudOverlay.SetPreset(0, "pressed lift on");
-		}
 		bool was = PRESS_LIFT;
 		PRESS_LIFT = p > 0;
 		s_iPressPreset = p;
