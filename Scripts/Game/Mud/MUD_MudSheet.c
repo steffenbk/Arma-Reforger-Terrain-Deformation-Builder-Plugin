@@ -363,6 +363,9 @@ class MUD_MudSheet
 	static const int CO_MAX = 4;                // A3: stored neighbours built at once per upload; the rest are queued
 	// part B: crater delay (O1a / O1b / O1c of the research)
 	static bool CRATER_TRACE_NOW = false;       // B2: a now-slot not traced yet is traced / filled and built in the go-live
+	static bool CRATER_PREBUILD = false;        // B5: a crater's tiles build while the voxels build it (ahead), shown at its go-live
+	static const int PRE_MS = 5;                // B5: ms per frame for held now-slot builds, and again for held taper builds
+	static const int PRE_MAX_MS = 1000;         // B5: no go-live by then -> the held meshes show anyway
 	static bool CRATER_TAPER_NOW = false;       // B3: the hole's taper tiles build in the go-live frame (cap below)
 	static bool CRATER_EASE_DROP = false;       // B4: a dig drops the running ground ease of every vertex it writes
 	static const int TAPER_NOW_MAX = 12;        // B3: at most this many taper tiles ...
@@ -398,7 +401,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 12;
+	static const int FIX_SETS = 13;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -458,6 +461,25 @@ class MUD_MudSheet
 	protected int m_aBuildsBy[12];              // builds by reason, this 10 s
 	protected bool m_bMarkNow;                  // MarkRect also flags m_aSlotNow (hole marks in a go-live)
 	protected bool m_bQueueFront;               // QueueBuild puts the key at the FRONT of m_aOneBuild (DigNow taper neighbours)
+	protected ref array<vector> m_aPreLo = {};  // B5 CRATER_PREBUILD: crater ops seen at Submit (TakeOp), not live yet
+	protected ref array<vector> m_aPreHi = {};
+	protected ref array<vector> m_aPreWp = {};
+	protected ref array<float> m_aPreR = {};    // its crest radius (CraterCrest, as the go-live passes)
+	protected ref array<int> m_aPreSt = {};     // 0 seen, 1 dug ahead (its GroundChanged at the go-live is skipped)
+	protected ref map<int, int> m_mPreTiles = new map<int, int>();   // TrailKeys whose builds are held (m_bPreWin)
+	protected ref array<IEntity> m_aHoldEnt = {};          // B5: held builds - entity, mesh (null = hide), TrailKey
+	protected ref array<ref Resource> m_aHoldRes = {};
+	protected ref array<int> m_aHoldKey = {};
+	protected ref array<ref Resource> m_aHoldOld = {};
+	protected ref array<ref Resource> m_aLostOld = {};     // B5: shown meshes of moved held tiles, kept one more window     // B5: the mesh te shows now - kept alive until the swap
+	protected bool m_bPreWin;                   // B5: builds of m_mPreTiles are held until the go-live (PreClose)
+	protected bool m_bPreDig;                   // B5: DigNow / HoleGround read the voxel data uncached (PreSurf)
+	protected int m_iPreT0;                     // B5: tick the hold window opened
+	protected int m_iNowBudget;                 // B5: BuildNowSlots ms cap (0 = none)
+	protected int m_iTaperCap;                  // B5: TaperNow ms cap, quiet (> 0), no cap, quiet (< 0), as before (0)
+	protected int m_iPreOps;                    // B5 meters, per window
+	protected int m_iPreHeld;
+	protected int m_iPreFrames;
 	protected int m_iWouldSkip;                 // builds whose drawn heights changed less than WOULD_SKIP_M
 	static const float WOULD_SKIP_M = 0.003;
 	protected int m_iTouchCells;                // cells touched (all time)
@@ -1014,6 +1036,8 @@ class MUD_MudSheet
 				m_fNextEase = time + UPLOAD_EVERY;     // L6: at upload rate
 			EaseTick(time);
 		}
+		if (CRATER_PREBUILD || m_bPreWin)
+			PreStep();     // stage 2 B5 (before FlushOneBuild: the taper fronts it builds are held too)
 		if (!m_aOneBuild.IsEmpty())
 			FlushOneBuild();
 		bool frozen = false;
@@ -2684,6 +2708,250 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B5 CRATER_PREBUILD (TakeOp, client, sheet local): crater op seen at Submit - its voxels are carved right
+	//! after (data), their meshes build over the next frames and go live together (MUD_VoxelProbe.GoLive)
+	protected void PreNote(MUD_VoxelOp op)
+	{
+		if (m_aPreWp.Count() >= 32)
+			PreForget();     // go-lives that never came: start clean
+		m_aPreLo.Insert(op.m_vLo);
+		m_aPreHi.Insert(op.m_vHi);
+		m_aPreWp.Insert(op.m_vWp);
+		m_aPreR.Insert(MUD_VoxelProbe.CraterCrest(op.m_fDepth));
+		m_aPreSt.Insert(0);
+	}
+
+	protected void PreForget()
+	{
+		m_aPreLo.Clear();
+		m_aPreHi.Clear();
+		m_aPreWp.Clear();
+		m_aPreR.Clear();
+		m_aPreSt.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5, GroundChanged at the go-live: true = the crater at wp was dug ahead (skip it). Its entry goes either way.
+	protected bool PreTaken(vector wp)
+	{
+		for (int i = 0; i < m_aPreWp.Count(); i++)
+		{
+			if (vector.DistanceSq(m_aPreWp[i], wp) > 0.0001)
+				continue;
+			int st = m_aPreSt[i];
+			m_aPreLo.RemoveOrdered(i);
+			m_aPreHi.RemoveOrdered(i);
+			m_aPreWp.RemoveOrdered(i);
+			m_aPreR.RemoveOrdered(i);
+			m_aPreSt.RemoveOrdered(i);
+			return st == 1;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: voxel ground top at x, z from the data, not cached (MUD_VoxelProbe.SurfaceAt's cache holds the last
+	//! go-live's tops until the next one): TopAt with the rut floor under it (a little smoother at rut edges)
+	static bool PreSurf(float x, float z, out float y)
+	{
+		if (!MUD_VoxelProbe.TopAt(x, z, y))
+			return false;
+		float f = MUD_VoxelProbe.FieldFloorAt(x, z, y);
+		if (f < y)
+			y = f;
+		return true;
+	}
+
+	//! DigNow's voxel ground read: uncached in the ahead dig (B5)
+	protected bool DigSurf(float x, float z, out float y)
+	{
+		if (m_bPreDig)
+			return PreSurf(x, z, y);
+		return MUD_VoxelProbe.SurfaceAt(x, z, y);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: is tile tx, tz's build held (window open, in a dug-ahead crater's reach + 1 tile)?
+	protected bool PreHeld(int tx, int tz)
+	{
+		return m_bPreWin && m_mPreTiles.Contains(TrailKey(tx, tz));
+	}
+
+	//! B5: keep mesh res (null = hide) for te until PreClose; a later build of te replaces it
+	protected void PreKeep(IEntity te, Resource res, int tx, int tz)
+	{
+		m_iPreHeld++;
+		int at = m_aHoldEnt.Find(te);
+		if (at < 0)
+		{
+			// the shown mesh: its caller drops its ref when it stores res (m_aTileRes / st.m_Res) - keep it until the swap
+			Resource old;
+			if (m_bPlaced && IsLive(tx, tz))
+			{
+				int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+				if (t >= 0 && t < m_aTileRes.Count())
+					old = m_aTileRes[t];
+			}
+			else
+			{
+				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (st)
+					old = st.m_Res;
+			}
+			m_aHoldEnt.Insert(te);
+			m_aHoldRes.Insert(res);
+			m_aHoldKey.Insert(TrailKey(tx, tz));
+			m_aHoldOld.Insert(old);
+			return;
+		}
+		m_aHoldRes[at] = res;
+		m_aHoldKey[at] = TrailKey(tx, tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5, every Frame while on or a window is open: dig new crater ops ahead (data, held builds queued), then build
+	//! held now-slots and taper tiles PRE_MS each; close on timeout / switch off / sheet local off
+	protected void PreStep()
+	{
+		if (!CRATER_PREBUILD || !m_bLocal)
+		{
+			if (m_bPreWin)
+				PreClose("switch off");
+			PreForget();
+			return;
+		}
+		bool dig = false;
+		for (int i = 0; i < m_aPreSt.Count(); i++)
+		{
+			if (m_aPreSt[i] != 0)
+				continue;
+			if (!m_bPreWin)
+			{
+				m_bPreWin = true;
+				m_iPreT0 = System.GetTickCount();
+				m_iPreOps = 0;
+				m_iPreHeld = 0;
+				m_iPreFrames = 0;
+			}
+			m_aPreSt[i] = 1;
+			m_iPreOps++;
+			dig = true;
+			// held tiles: the blast reach (BlastNow) and the dig box, + 1 tile for the taper neighbours
+			vector wp = m_aPreWp[i];
+			float reach = BlastReach(m_aPreR[i]);
+			vector lo = m_aPreLo[i];
+			vector hi = m_aPreHi[i];
+			int tx0 = Math.Floor(Math.Min(lo[0], wp[0] - reach) / TILE_M) - 1;
+			int tx1 = Math.Floor(Math.Max(hi[0], wp[0] + reach) / TILE_M) + 1;
+			int tz0 = Math.Floor(Math.Min(lo[2], wp[2] - reach) / TILE_M) - 1;
+			int tz1 = Math.Floor(Math.Max(hi[2], wp[2] + reach) / TILE_M) + 1;
+			for (int tz = tz0; tz <= tz1; tz++)
+			{
+				for (int tx = tx0; tx <= tx1; tx++)
+					m_mPreTiles.Set(TrailKey(tx, tz), 1);
+			}
+			m_bPreDig = true;
+			m_bMarkNow = true;     // as GroundChanged: its live slots get m_aSlotNow
+			QueueChange(lo, hi, wp, m_aPreR[i]);
+			m_bMarkNow = false;
+			m_bPreDig = false;
+		}
+		if (dig)
+		{
+			m_bPreDig = true;
+			m_bMarkNow = true;
+			DigNow();     // data now, its builds held (stored ones queued at the front)
+			m_bMarkNow = false;
+			m_bPreDig = false;
+			m_aNowLo.Clear();
+			m_aNowHi.Clear();
+		}
+		if (!m_bPreWin)
+			return;
+		if (System.GetTickCount(m_iPreT0) > PRE_MAX_MS)
+		{
+			PreClose("no go-live in time");
+			return;
+		}
+		m_iPreFrames++;
+		m_iNowBudget = PRE_MS;
+		BuildNowSlots();
+		m_iNowBudget = 0;
+		m_iTaperCap = PRE_MS;
+		TaperNow();
+		m_iTaperCap = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: the window ends (FlushNow at the go-live, or PreStep): what is left builds now (held), then every held mesh
+	//! goes on its entity in this frame. A tile that moved (window shift, stored, gone) is built again instead.
+	protected void PreClose(string why)
+	{
+		int t0 = System.GetTickCount();
+		int late = BuildNowSlots();
+		m_iTaperCap = -1;
+		late += TaperNow();
+		m_iTaperCap = 0;
+		int shown = 0;
+		int lost = 0;
+		m_aLostOld.Clear();
+		for (int h = 0; h < m_aHoldEnt.Count(); h++)
+		{
+			IEntity te = m_aHoldEnt[h];
+			int key = m_aHoldKey[h];
+			int tx = key / 20000;
+			int tz = key - tx * 20000;
+			bool ok = false;
+			if (te && m_bPlaced && IsLive(tx, tz))
+			{
+				int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+				ok = t >= 0 && t < m_aTileEnt.Count() && m_aTileEnt[t] == te;
+			}
+			else if (te)
+			{
+				MUD_MudSheetStore st = m_mTrail.Get(key);
+				ok = st && st.m_Ent == te;
+			}
+			if (!ok)
+			{
+				lost++;
+				m_aLostOld.Insert(m_aHoldOld[h]);     // te may still show it until its rebuild
+				if (m_bPlaced && IsLive(tx, tz))
+				{
+					int i0 = (tx - m_iX0 / TQ) * TQ;
+					int k0 = (tz - m_iZ0 / TQ) * TQ;
+					MarkRect(i0, i0 + TQ, k0, k0 + TQ);
+					m_bDirty = true;
+				}
+				else
+					QueueBuild(tx, tz);
+				continue;
+			}
+			Resource res = m_aHoldRes[h];
+			if (!res || !res.GetResource())
+			{
+				te.ClearFlags(EntityFlags.VISIBLE, false);
+				shown++;
+				continue;
+			}
+			te.SetFlags(EntityFlags.VISIBLE, false);
+			te.SetObject(res.GetResource().ToMeshObject(), "");
+			te.Update();
+			shown++;
+		}
+		m_aHoldEnt.Clear();
+		m_aHoldRes.Clear();
+		m_aHoldKey.Clear();
+		m_aHoldOld.Clear();     // after every SetObject above
+		m_mPreTiles.Clear();
+		m_bPreWin = false;
+		if (why == "go-live")
+			PreForget();     // every crater of this go-live passed GroundChanged already
+		Print(string.Format("MUD sheet prebuild: %1 after %2 ms (%3 ahead frames) | crater ops %4, builds held %5, built at close %6, shown %7, moved -> rebuilt %8, close %9 ms",
+			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0)), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! SHEET LOCAL holes (DoDigNow): live zone slots a crater / dig marked are built in the blast frame (not through
 	//! UploadPick / UPLOAD_SLOTS / SLOT_MIN_S). A slot not traced yet stays dirty for Upload.
 	protected int BuildNowSlots()
@@ -2693,10 +2961,13 @@ class MUD_MudSheet
 		int x0 = m_iX0 / TQ;
 		int z0 = m_iZ0 / TQ;
 		int built = 0;
+		int tNow = System.GetTickCount();
 		for (int t = 0; t < TILES * TILES; t++)
 		{
 			if (m_aSlotNow[t] == 0)
 				continue;
+			if (m_iNowBudget > 0 && built > 0 && System.GetTickCount(tNow) >= m_iNowBudget)
+				break;     // stage 2 B5: the rest next frame (still flagged)
 			m_aSlotNow[t] = 0;
 			int ti = t % TILES;
 			int tk = t / TILES;
@@ -2788,7 +3059,9 @@ class MUD_MudSheet
 			int qWhy;
 			if (!m_mQWhy.Find(key, qWhy) || qWhy != BW_HOLE)
 				break;
-			if (built >= TAPER_NOW_MAX || System.GetTickCount(t0) >= TAPER_NOW_MS)
+			if (m_iTaperCap > 0 && built > 0 && System.GetTickCount(t0) >= m_iTaperCap)
+				break;     // stage 2 B5 ahead frame: the rest next frame
+			if (m_iTaperCap == 0 && (built >= TAPER_NOW_MAX || System.GetTickCount(t0) >= TAPER_NOW_MS))
 			{
 				int left = 0;
 				for (int q = 0; q < m_aOneBuild.Count(); q++)
@@ -3348,7 +3621,7 @@ class MUD_MudSheet
 		s_iFixSet = s;
 		bool a = s == 3 || s == 6 || s == 8;
 		bool c = s == 5 || s == 6 || s == 8;
-		bool b = s == 7 || s == 8 || s == 12;     // set 12 = set 11 + all B (crater)
+		bool b = s == 7 || s == 8 || s >= 12;     // set 12 = set 11 + all B (crater)
 		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s >= 9;
 		EDGE_COBUILD = a || s == 2 || s >= 9;     // A8 needs A3 to lift the fade again
 		SKIRT_APRON = a;
@@ -3364,6 +3637,7 @@ class MUD_MudSheet
 		CRATER_TRACE_NOW = b;
 		CRATER_TAPER_NOW = b;
 		CRATER_EASE_DROP = b;
+		CRATER_PREBUILD = s == 13;          // B5: set 13 = set 12 + prebuild
 		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
 	}
@@ -3418,6 +3692,8 @@ class MUD_MudSheet
 			s += " crater_taper";
 		if (CRATER_EASE_DROP)
 			s += " crater_ease";
+		if (CRATER_PREBUILD)
+			s += " prebuild";
 		if (s == "")
 			return "off";
 		return s.Trim();
@@ -5315,6 +5591,8 @@ class MUD_MudSheet
 		int tCt = System.GetTickCount();
 		if (MUD_TestKit.TEST_KIT && blastR > 0)
 			MUD_CraterTrace.SheetHit(wp);     // stage 2 B1 crater log
+		if (blastR > 0 && s_Inst.PreTaken(wp))
+			return;     // stage 2 B5: dug ahead, its tiles are held for FlushNow
 		s_Inst.m_bMarkNow = s_Inst.m_bLocal;     // SHEET LOCAL: slots a hole marks build in the blast frame (DoDigNow)
 		s_Inst.QueueChange(lo, hi, wp, blastR);
 		s_Inst.m_bMarkNow = false;
@@ -6065,6 +6343,8 @@ class MUD_MudSheet
 	//! both: the voxels take it too (tunnel / zone edge) - held until their go-live (SYNC), true returned.
 	static bool TakeOp(MUD_VoxelOp op, bool both)
 	{
+		if (CRATER_PREBUILD && ENABLED && s_Inst && s_Inst.m_bLocal && op && op.m_iKind == 0)
+			s_Inst.PreNote(op);     // stage 2 B5: the voxels carve it right after this - dug ahead next Frame
 		if (!ONE_GRID || !ENABLED || !s_Inst || !s_Inst.m_bOneHidden || !op)
 			return false;
 		vector p;
@@ -6524,6 +6804,8 @@ class MUD_MudSheet
 		if (!ENABLED || !s_Inst)
 			return;
 		int tCt = System.GetTickCount();
+		if (s_Inst.m_bPreWin)
+			s_Inst.PreClose("go-live");     // stage 2 B5: the held crater tiles show with the voxels
 		s_Inst.m_bNowDue = true;
 		s_Inst.StepNow();
 		if (MUD_TestKit.TEST_KIT)
@@ -6621,7 +6903,7 @@ class MUD_MudSheet
 								continue;
 							int v = k * N + i;
 							float ny;
-							if (m_F.m_aGs[v] == 0 || !MUD_VoxelProbe.SurfaceAt(wx, wz, ny))
+							if (m_F.m_aGs[v] == 0 || !DigSurf(wx, wz, ny))
 								continue;
 							// ONE_GRID: the voxels draw only in carved cells (zone craters do not carve): elsewhere the
 							// sheet keeps its own ground (an opened hole there would show nothing)
@@ -6680,7 +6962,7 @@ class MUD_MudSheet
 							continue;
 						int l = lk * TV + li;
 						float ny2;
-						if (d.m_aGs[l] == 0 || !MUD_VoxelProbe.SurfaceAt(sx, sz, ny2))
+						if (d.m_aGs[l] == 0 || !DigSurf(sx, sz, ny2))
 							continue;
 						if (ONE_GRID && m_bOneHidden && !MUD_VoxelProbe.DrawsAt(sx, sz))
 							continue;
@@ -6729,6 +7011,16 @@ class MUD_MudSheet
 				}
 				if (!st.m_Ent)
 					continue;     // SHEET LOCAL: data only - its mesh comes on approach (CAMERA RADIUS)
+				if (m_bPreDig)
+				{
+					// stage 2 B5: ahead dig - built held over the next frames (TaperNow / FlushOneBuild from the front)
+					m_bQueueFront = true;
+					QueueTaperNeighbours(tx, tz, hi0, hi1, hk0, hk1);
+					QueueBuild(tx, tz);
+					m_bQueueFront = false;
+					done++;
+					continue;
+				}
 				m_iBuildWhy = BW_HOLE;
 				Resource res = BuildTile(st.m_Ent, d, tx, tz, false);
 				if (res)
@@ -6753,6 +7045,14 @@ class MUD_MudSheet
 				continue;
 			int ltx = lk2 / 20000;     // TrailKey back to the tile (tx, tz >= 0 on Arland)
 			int ltz = lk2 - ltx * 20000;
+			if (m_bPreDig)
+			{
+				m_bQueueFront = true;     // stage 2 B5: built held later
+				QueueBuild(ltx, ltz);
+				m_bQueueFront = false;
+				done++;
+				continue;
+			}
 			m_iBuildWhy = BW_HOLE;
 			Resource res2 = BuildTile(st2.m_Ent, st2.m_D, ltx, ltz, false);
 			if (res2)
@@ -7139,6 +7439,9 @@ class MUD_MudSheet
 				return look;
 			return hgDug;
 		}
+		float hgPre;
+		if (m_bPreWin && PreSurf(x, z, hgPre))
+			return hgPre;     // stage 2 B5: the old brick bodies are still in until the go-live - traces would miss the hole
 		return OurY(x, z);
 	}
 
@@ -10097,12 +10400,16 @@ class MUD_MudSheet
 		if (ni + niTop == 0)
 		{
 			// nothing to draw: hide (no SetObject(null) - the 21:42 crash came right after 16 of those; inference)
-			te.ClearFlags(EntityFlags.VISIBLE, false);
+			if (PreHeld(tx, tz))
+				PreKeep(te, null, tx, tz);     // stage 2 B5: hidden at the go-live
+			else
+				te.ClearFlags(EntityFlags.VISIBLE, false);
 			DropColl(te);
 			return null;
 		}
 		m_iBuildQuads += (ni + niTop) / 6;
-		te.SetFlags(EntityFlags.VISIBLE, false);
+		if (!PreHeld(tx, tz))
+			te.SetFlags(EntityFlags.VISIBLE, false);
 		// counts built at the call, as MUD_VoxelProbe (bricks draw). IDA 2026-10-14: the old 'int nvs[1]' filled
 		// earlier reached Create as 6 vertices while the indices went to 440 -> UpdateVerts' normal pass smashed its
 		// stack buffer (mud-gotchas)
@@ -10194,8 +10501,13 @@ class MUD_MudSheet
 			mesh.UpdateIndices(0, tix);
 			mesh.UpdateVerts(0, tv, tuv);
 		}
-		te.SetObject(mesh, "");
-		te.Update();
+		if (PreHeld(tx, tz))
+			PreKeep(te, res, tx, tz);     // stage 2 B5: shown at the go-live (PreClose)
+		else
+		{
+			te.SetObject(mesh, "");
+			te.Update();
+		}
 		MUD_Prof.Add(MUD_Prof.T_ENGINE, System.GetTickCount(tPart));
 		if (!COLLIDE)
 			return res;

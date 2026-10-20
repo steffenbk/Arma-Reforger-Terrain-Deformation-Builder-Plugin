@@ -111,3 +111,14 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   B fixes. Added set 12 = set 11 + B2 B3 B4. DS log (sets 7/8, 22:47-22:49): with B on, the hole's core tiles all build
   in the go-live frame (sheet part 25-47 ms of that frame, ~2 ms per tile), taper tiles past the TAPER_NOW_MAX cap
   still come +1..+6 frames later. recv -> go-live is 50-120 ms (the voxel ahead build), the same off the sheet.
+- WB 23:35 (measured, 7 craters): set 12 no faster than set 11 on the sheet (taper cap 6 tiles hit, rim +6..+8 frames,
+  go-live frame sheet part 89-120 ms WB). Off the sheet that frame is 0-1 ms. recv -> go-live 110-280 ms both.
+- Added B5 CRATER_PREBUILD (set 13 = set 12 + prebuild). TakeOp (Submit, before the carve) notes each crater op; next
+  sheet Frame digs it ahead (QueueChange + DigNow) reading the voxel DATA uncached (PreSurf = TopAt + rut floor; the
+  SurfaceAt cache holds the last go-live's tops, and traces would hit the old brick bodies that stay until SwapPending).
+  Every build of a tile in the crater's reach + 1 tile is held (PreHeld / PreKeep in BuildTileMesh: no SetObject /
+  visible change). Ahead frames build held now-slots + taper tiles PRE_MS (5) each. At the go-live (FlushNow) the
+  crater's GroundChanged is skipped, the rest builds, then every held mesh goes on its entity in that frame. Moved tiles
+  are rebuilt. Timeout PRE_MAX_MS 1 s. The shown mesh's Resource is kept until the swap (the callers drop their ref).
+  Log per window: `MUD sheet prebuild: <why> after N ms (F ahead frames) | crater ops, builds held, built at close,
+  shown, moved -> rebuilt, close ms`. Checkpoint v262 = before. Not compiled.
