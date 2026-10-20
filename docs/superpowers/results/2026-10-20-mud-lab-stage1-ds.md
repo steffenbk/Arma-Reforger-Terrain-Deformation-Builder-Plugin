@@ -59,3 +59,34 @@ D1 overlay/1 fps 38.9 MUD 17.48 ms; D1 overlay/2 fps 64.3 MUD 8.75 ms.
   'edge audit: raised border verts n: ok, step > 3 cm, open (beside not born / no mesh / vert untraced / band 0)'.
   Checkpoint v254 = before it.
 - User report (not measured): a crater blown on the mud ruts shows a small delay before the mud takes the crater.
+
+## Builds by reason, every 10 s (stage 2 part 0, added 2026-10-20)
+
+Source: PeerPlugin1/logs/logs_2026-10-20_21-14-45/console.log, all 17 'MUD sheet builds:' lines (client, levers off).
+'builds' = sum of the 11 reasons (every BuildTile call with a tile entity); 'would skip' = builds whose biggest drawn
+height change since that tile's last build was < 3 mm (BuildTileMesh meter). Checksum: the builds column sums to 13143.
+
+| time | preset | wheel | oldest | nearest | mesh-less | freeze | restore | slump | band | fit | hole | op | builds | would skip | skip share |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 21:15:47 | 1 | 409 | 3 | 0 | 163 | 23 | 13 | 0 | 22 | 111 | 0 | 0 | 744 | 158 | 21 % |
+| 21:15:57 | 1 | 474 | 18 | 0 | 222 | 63 | 58 | 0 | 6 | 104 | 0 | 0 | 945 | 175 | 19 % |
+| 21:16:07 | 1 | 426 | 38 | 1 | 151 | 58 | 30 | 0 | 17 | 73 | 0 | 0 | 794 | 182 | 23 % |
+| 21:16:17 | 1 | 353 | 32 | 0 | 100 | 2 | 8 | 0 | 61 | 41 | 0 | 0 | 597 | 185 | 31 % |
+| 21:16:27 | 1 | 404 | 62 | 0 | 84 | 4 | 97 | 0 | 45 | 26 | 59 | 0 | 781 | 211 | 27 % |
+| 21:16:37 | 1 | 376 | 2 | 0 | 86 | 0 | 9 | 0 | 50 | 102 | 32 | 0 | 657 | 260 | 40 % |
+| 21:16:53 | 2 | 227 | 29 | 2 | 109 | 25 | 23 | 0 | 33 | 25 | 0 | 0 | 473 | 129 | 27 % |
+| 21:17:03 | 2 | 419 | 10 | 0 | 176 | 42 | 26 | 0 | 46 | 125 | 0 | 0 | 844 | 219 | 26 % |
+| 21:17:14 | 2 | 354 | 55 | 1 | 37 | 8 | 14 | 0 | 110 | 16 | 0 | 0 | 595 | 191 | 32 % |
+| 21:17:23 | 2 | 419 | 66 | 1 | 136 | 47 | 16 | 0 | 82 | 21 | 0 | 0 | 788 | 229 | 29 % |
+| 21:17:35 | 3 | 389 | 24 | 1 | 185 | 41 | 23 | 0 | 49 | 91 | 0 | 0 | 803 | 183 | 23 % |
+| 21:17:45 | 3 | 432 | 17 | 0 | 233 | 74 | 81 | 0 | 17 | 122 | 0 | 0 | 976 | 183 | 19 % |
+| 21:17:55 | 3 | 386 | 48 | 1 | 99 | 15 | 16 | 0 | 80 | 33 | 0 | 0 | 678 | 173 | 26 % |
+| 21:18:05 | 3 | 369 | 71 | 3 | 55 | 33 | 14 | 0 | 80 | 19 | 0 | 0 | 644 | 210 | 33 % |
+| 21:18:15 | 4 | 471 | 89 | 0 | 175 | 59 | 59 | 0 | 105 | 12 | 0 | 0 | 970 | 243 | 25 % |
+| 21:18:25 | 4 | 463 | 69 | 0 | 188 | 98 | 73 | 0 | 76 | 58 | 0 | 0 | 1025 | 223 | 22 % |
+| 21:19:53 | 1 | 419 | 15 | 0 | 211 | 36 | 17 | 0 | 19 | 112 | 0 | 0 | 829 | 181 | 22 % |
+| all 17 | |  |  |  |  |  |  |  |  |  |  |  | 13143 | 3335 | 25.4 % |
+
+- MEASURED: would skip = 3335 of 13143 builds = 25.4 % (row range 19-40 %). About a quarter of all mesh builds
+  change nothing visible - the target of BUILD_SKIP_SAME (stage 2 part C3).
+- MEASURED: wheel builds are 44-59 % of all builds per row; mesh-less second (37-233).
