@@ -147,3 +147,10 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   line ends `| colliders N ms, meshes N ms, meshes later N (B7 0/1)` (split now on every set); new line
   `MUD world: voxel cells meshes later - N built over N frames, N ms (worst N ms), N to the mesh queue`.
   MudSheet.LocalOn() added. Checkpoint v264 = before. Not compiled.
+- WB 00:05 + DS 00:08-00:11 2026-10-21 (sets 14 / 15). User: better, still room; one crater's voxels showed a little
+  late. DS crater go-live frame (swap / voxel / sheet ms): set 14 1/36/15, 2/22/8, 1/24/15, 1/19/8; set 15 1/6/9,
+  1/5/18, 1/7/5 (off ruts 0/2/0). DS split set 14: colliders 22/14/10/6 ms, meshes 13/7/12/12 ms; set 15: colliders
+  5/4/4 ms, meshes later 4/2/1 built one per frame (12/6/2 ms total, worst 4 ms). WB set 15: colliders 18-28 ms,
+  meshes later 2-3 (10-18 ms, worst 6-7). Ahead dig DS 12-21 ms, close 5-18 ms.
+- Next stage prompt: docs/superpowers/prompts/2026-10-21-local-mud-lab-stage3.md (edges on turns, ruts under the sheet
+  physics only, whole voxel + sheet optimisation).
