@@ -355,6 +355,7 @@ class MUD_MudSheet
 	static bool EDGE_COBUILD_PICK = false;      // A2: dirty band / stamp slots beside a picked wheel slot build with it
 	static bool EDGE_COBUILD = false;           // A3: a build whose border differs from the tile beside builds that one too
 	static bool SKIRT_APRON = false;            // A4: skirt bottom verts go out ~45 deg down to under the ground, own UVs
+	static bool EDGE_MATCH = false;             // A9: borders copy the drawn neighbour's; a border that must move rebuilds both now
 	static bool EDGE_OPEN_FADE = false;         // A8: a side whose neighbour is not drawn (and not built this upload) fades over EDGE
 	static bool EDGE_DRAPE = false;             // A7 (user idea 2026-10-20): skirt curves over and down as a quarter round (wins over A4)
 	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
@@ -397,7 +398,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 10;
+	static const int FIX_SETS = 11;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -416,6 +417,11 @@ class MUD_MudSheet
 	protected ref array<int> m_aFrontTz = {};
 	protected int m_iSkirtFrom;                 // A4: first skirt vert of the mesh being built
 	protected int m_iSkirtTix;                  // A7: first skirt index (tix) of the mesh being built
+	protected int m_aMatchCo[4];                // A9: sides (S N W E) whose neighbour this build co-builds now
+	protected int m_iMatchOs;                   // A9: EdgeNb's facing side of the neighbour
+	protected int m_iMatchCopy;                 // A9 meters (10 s): sides copied, sides moved (+ co-build), sides faded
+	protected int m_iMatchMove;
+	protected int m_iMatchFade;
 	protected int m_iOpenFade;                  // A8 meter (10 s): tile sides faded toward a neighbour not drawn
 	protected int m_iDrapeCut;                  // A7 meter (10 s): builds whose drape stopped at the vert / index cap
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
@@ -2829,6 +2835,50 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A9 EDGE_MATCH: the edge record of the tile beside tile tx, tz on side s (S N W E) when that tile is drawn,
+	//! else null; m_iMatchOs = its facing side
+	protected array<float> EdgeNb(int tx, int tz, int s)
+	{
+		int ntx = tx + 1;
+		int ntz = tz;
+		m_iMatchOs = 2;
+		if (s == 0)
+		{
+			ntx = tx;
+			ntz = tz - 1;
+			m_iMatchOs = 1;
+		}
+		else if (s == 1)
+		{
+			ntx = tx;
+			ntz = tz + 1;
+			m_iMatchOs = 0;
+		}
+		else if (s == 2)
+		{
+			ntx = tx - 1;
+			m_iMatchOs = 3;
+		}
+		int nk = TrailKey(ntx, ntz);
+		if (!EdgeDrawn(nk))
+			return null;
+		return m_mEdgeRec.Get(nk);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A9: tile vertex r rows / columns in from border vertex j of side s
+	protected int EdgeIn(int s, int j, int r)
+	{
+		if (s == 0)
+			return r * TV + j;
+		if (s == 1)
+			return (TQ - r) * TV + j;
+		if (s == 2)
+			return j * TV + r;
+		return j * TV + TQ - r;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! EDGE AUDIT: tile vertex a (lower corner) of quad q along side s, on the row / column next to the side
 	protected int EdgeQuad(int s, int q)
 	{
@@ -3203,7 +3253,7 @@ class MUD_MudSheet
 		MUD_MudSheetStore st = m_mTrail.Get(key);
 		if (!st || !st.m_Ent)
 			return;     // data only or none: its mesh comes with the radius builds
-		if (m_iCoStoredUp >= CO_MAX)
+		if (m_iCoStoredUp >= CO_MAX && !EDGE_MATCH)     // A9: a moved border's neighbour is built now, no cap
 		{
 			m_iCoCapped++;
 			if (!m_mQWhy.Contains(key))
@@ -3246,6 +3296,8 @@ class MUD_MudSheet
 			p3 += string.Format(" | drape cut at cap %1", m_iDrapeCut);
 		if (EDGE_OPEN_FADE)
 			p3 += string.Format(" | sides faded (beside not drawn) %1", m_iOpenFade);
+		if (EDGE_MATCH)
+			p3 += string.Format(" | edge match: sides copied %1, moved + co-built %2, faded (beside not drawn) %3", m_iMatchCopy, m_iMatchMove, m_iMatchFade);
 		if (BUILD_SKIP_SAME)
 			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
 		if (BAND_STORED_HOLD)
@@ -3269,6 +3321,9 @@ class MUD_MudSheet
 		m_iSkipSame = 0;
 		m_iDrapeCut = 0;
 		m_iOpenFade = 0;
+		m_iMatchCopy = 0;
+		m_iMatchMove = 0;
+		m_iMatchFade = 0;
 		m_iBandHeld = 0;
 	}
 
@@ -3297,8 +3352,9 @@ class MUD_MudSheet
 		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s >= 9;
 		EDGE_COBUILD = a || s == 2 || s >= 9;     // A8 needs A3 to lift the fade again
 		SKIRT_APRON = a;
-		EDGE_DRAPE = s == 9 || s == 10;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
+		EDGE_DRAPE = s >= 9;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
 		EDGE_OPEN_FADE = s == 10;          // A8: set 10 = set 9 + open fade
+		EDGE_MATCH = s == 11;              // A9: set 11 = set 9 + edge match
 		BAND_BORN_FRONT = a || s >= 9;
 		BAND_INCR = c || s == 4;
 		BAND_MICRO = c || s == 4;
@@ -3342,6 +3398,8 @@ class MUD_MudSheet
 			s += " drape";
 		if (EDGE_OPEN_FADE)
 			s += " open_fade";
+		if (EDGE_MATCH)
+			s += " edge_match";
 		if (BAND_BORN_FRONT)
 			s += " born_front";
 		if (BAND_INCR)
@@ -9137,7 +9195,7 @@ class MUD_MudSheet
 		}
 		if (BAND_STORED_HOLD && !live)
 			m_mStoredAt.Set(TrailKey(tx, tz), m_fLast);     // stage 2 C5
-		if (m_bLocal && (EDGE_AUDIT || EDGE_COBUILD))
+		if (m_bLocal && (EDGE_AUDIT || EDGE_COBUILD || EDGE_MATCH))
 			EdgeRecord(d, tx, tz, res != null);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
 			m_aBuildsBy[m_iBuildWhy] = m_aBuildsBy[m_iBuildWhy] + 1;
@@ -9177,6 +9235,26 @@ class MUD_MudSheet
 			{
 				m_iLiftTold++;
 				MUD_WorldGroundEntity.SheetLiftDirty(tx * TILE_M, tz * TILE_M);
+			}
+		}
+		if (m_bLocal && EDGE_MATCH && !m_bCoBuilding && res)
+		{
+			// stage 2 A9: neighbours whose border ours moved away from are built now (they copy ours)
+			int mco[4];
+			for (int mq = 0; mq < 4; mq++)
+				mco[mq] = m_aMatchCo[mq];
+			for (int mb = 0; mb < 4; mb++)
+			{
+				if (mco[mb] == 0)
+					continue;
+				if (mb == 0)
+					CoBuild(tx, tz - 1);
+				else if (mb == 1)
+					CoBuild(tx, tz + 1);
+				else if (mb == 2)
+					CoBuild(tx - 1, tz);
+				else
+					CoBuild(tx + 1, tz);
 			}
 		}
 		if (m_bLocal && EDGE_COBUILD && !m_bCoBuilding)
@@ -9380,6 +9458,56 @@ class MUD_MudSheet
 				vy[yl] = d.m_aG[yl] - SINK + (SINK + LIFT + d.m_aD[yl]) * fade;
 				if (yBare)
 					vy[yl] = d.m_aG[yl] - SINK;     // the mesh dips under the ground toward a blown-off patch
+			}
+		}
+		// stage 2 A9 EDGE_MATCH (sheet local): tile borders never show a step or a gap, whatever order tiles build in.
+		// A side beside a drawn tile: within EDGE_CO_STEP of its drawn border (or this is a co-build) -> copy that border
+		// exactly; else keep our own (the field) and co-build the neighbour now (BuildTile, it then copies ours). A side
+		// beside no drawn mesh (or where the neighbour draws nothing): our raised border goes down to the band-0 height.
+		// The change is ramped in over 4 vertex rows (1, 0.75, 0.5, 0.25). Corners stay ours. Own block (64 locals).
+		if (m_bLocal && EDGE_MATCH)
+		{
+			for (int ms = 0; ms < 4; ms++)
+			{
+				m_aMatchCo[ms] = 0;
+				array<float> mnb = EdgeNb(tx, tz, ms);
+				int mos = m_iMatchOs * TV;
+				bool mCopy = m_bCoBuilding;
+				if (mnb && !mCopy)
+				{
+					mCopy = true;
+					for (int mc = 1; mc < TQ && mCopy; mc++)
+					{
+						float mcy = mnb[mos + mc];
+						int mcl = EdgeL(ms, mc);
+						if (mcy < -9000)
+							mCopy = vy[mcl] - d.m_aG[mcl] < EDGE_RAISED;     // it draws nothing there: ok while we are flat
+						else
+							mCopy = Math.AbsFloat(vy[mcl] - mcy) < EDGE_CO_STEP;
+					}
+					if (!mCopy)
+					{
+						m_aMatchCo[ms] = 1;
+						m_iMatchMove++;
+						continue;     // our border stays the field's; the neighbour follows this frame
+					}
+				}
+				if (mnb)
+					m_iMatchCopy++;
+				else
+					m_iMatchFade++;
+				for (int mj = 1; mj < TQ; mj++)
+				{
+					int ml = EdgeL(ms, mj);
+					float mT = d.m_aG[ml] - BAND_UNDER;     // beside nothing drawn: down to the band-0 height
+					if (mnb && mnb[mos + mj] > -9000)
+						mT = mnb[mos + mj];
+					else if (vy[ml] <= mT)
+						continue;
+					float mDy = mT - vy[ml];
+					for (int mr = 0; mr < 4; mr++)
+						vy[EdgeIn(ms, mj, mr)] = vy[EdgeIn(ms, mj, mr)] + mDy * (1 - mr * 0.25);
+				}
 			}
 		}
 		// SHEET LOCAL 'would skip' meter: the biggest drawn height change since this tile's last build (own block:

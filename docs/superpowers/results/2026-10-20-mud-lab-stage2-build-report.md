@@ -100,3 +100,10 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   verts / 10 s (max 22 cm). Added A8 EDGE_OPEN_FADE (set 10): a side whose neighbour is not drawn (and not a live slot
   built in this upload) fades over EDGE (1 m) like the old open-side fade; A3 rebuilds it once the neighbour is drawn.
   Meter: `sides faded (beside not drawn) N`.
+- WB 23:17-23:18 (set 10): user still sees the wedges clearly. Log: sides faded 171-790 / 10 s, steps > 3 cm 4-13,
+  'open: no mesh' 114-118 (max 24 cm). A8 only moves the mismatch to the other tile until A3 rebuilds it.
+- Added A9 EDGE_MATCH (set 11 = set 9 + match, no A8): a border beside a drawn tile copies that tile's drawn border when
+  every vert is within EDGE_CO_STEP (3 cm), or keeps its own and co-builds the neighbour at once (no CO_MAX cap) so it
+  copies ours; beside nothing drawn the raised border goes down to the band-0 height. The change ramps in over 4 vert
+  rows (1, 0.75, 0.5, 0.25); corners stay. Meter: `edge match: sides copied N, moved + co-built N, faded N`.
+  Checkpoint v260 = before. Not compiled.
