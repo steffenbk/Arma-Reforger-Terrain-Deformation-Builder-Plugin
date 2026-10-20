@@ -327,7 +327,6 @@ class MUD_MudSheet
 	static const float OP_SPEED = 5;            // m/s: an op has no speed with the op tag off
 	static const float OP_RADIUS = 0.5;         // m: wheel radius for TyreHalf (no tyre in the op)
 	static const int OP_VEH = -1;               // GRADUAL pass vehicle of op stamps (own vehicles are >= 1)
-	static const float COVER_R = 0.3;           // m: an op segment this near an own recent stamp is skipped
 	static const float OWN_S = 20;              // s an own stamp covers op segments (the op's round trip, generous)
 	static const float OWN_PRUNE_S = 5;
 	static const float OP_EDGE_M = 1.5;         // m: a segment this far inside the window goes through Stamp
@@ -2515,7 +2514,7 @@ class MUD_MudSheet
 		{
 			vector q = b + side * (sd * (reach + CELL));
 			float gq;
-			if (!OpGround(q[0], q[2], gq))
+			if (!OpDataGround(q[0], q[2], gq))
 				continue;
 			sideSum += gq;
 			sideN++;
@@ -2799,7 +2798,7 @@ class MUD_MudSheet
 
 	//------------------------------------------------------------------------------------------------
 	//! MUD LAB part E: the data ground at x, z (as MUD_MudSync.GroundY: voxel top, else the heightfield + rut floor)
-	protected bool OpGround(float x, float z, out float y)
+	protected bool OpDataGround(float x, float z, out float y)
 	{
 		if (MUD_VoxelProbe.ColumnAt(x, z) && MUD_VoxelProbe.TopAt(x, z, y))
 			return true;
