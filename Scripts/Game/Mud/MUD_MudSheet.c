@@ -370,6 +370,31 @@ class MUD_MudSheet
 	static bool BUILD_SKIP_SAME = false;        // C3: a rebuild that moves no vert 3 mm (classes same) keeps the old mesh
 	static bool UV64_FAST = false;              // C4: TOP_UV64 UVs into their own array (no x1e6 round trip via cix)
 	static bool BAND_STORED_HOLD = false;       // C5: band-only stored rebuilds obey SLOT_MIN_S
+	static const int LUT_N = 514;               // C1 / C2: band by distance, 32 steps a cell over 16 cells (+2)
+	protected static float s_aBandLut[514];
+	protected static bool s_bLutOk;
+	protected static int s_iDistGen;            // C1: a new value = every kept distance is stale (fix set, preset)
+	protected int m_iDistGen = -1;
+	protected ref MUD_MudSheetDist m_DistF;     // C1: window distances (Follow swaps them with m_DistT)
+	protected ref MUD_MudSheetDist m_DistT;
+	protected int m_aSlotDist[16];              // C1: 1 = the slot's window distances are current
+	protected ref array<int> m_aNewGi = {};     // C1: world cells touched since the last BandIncr
+	protected ref array<int> m_aNewGk = {};
+	protected ref array<int> m_aNewV = {};      // C1: scratch, their window index
+	protected bool m_bIncrMark;                 // C1: BandMark from a window stamp - live slots only get born
+	protected bool m_bBenchDone;                // C1: the TEST_KIT bench ran (once per instance)
+	protected int m_iIncrRuns;                  // C1 meters (10 s): BandIncr passes, box cells, slots dirtied, BandTiles
+	protected int m_iIncrCells;
+	protected int m_iIncrDirty;
+	protected int m_iIncrFull;
+	protected int m_aSlotSig1[16];              // C3: class signature of the live slot's last mesh (0 = unknown)
+	protected int m_aSlotSig2[16];
+	protected bool m_bSkipSame;                 // C3: BuildTileMesh kept the old mesh (m_SkipRes)
+	protected ref Resource m_SkipRes;
+	protected int m_iLowWas;                    // C3: d.m_iLow before this build
+	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
+	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
+	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
 	static const int FIX_SETS = 8;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
@@ -919,6 +944,14 @@ class MUD_MudSheet
 				m_aHeldBuild.Insert(key);
 				continue;
 			}
+			if (BAND_STORED_HOLD && qWhy == BW_BAND && st.m_Res && m_mStoredAt.Contains(key) && m_fLast < m_mStoredAt.Get(key) + SLOT_MIN_S)
+			{
+				m_aHeldBuild.Insert(key);     // stage 2 C5: band only, built < SLOT_MIN_S ago - end of the queue
+				if (!m_mQWhy.Contains(key))
+					m_mQWhy.Set(key, BW_BAND);     // still band only when it comes up again
+				m_iBandHeld++;
+				continue;
+			}
 			m_iBuildWhy = qWhy;
 			Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
 			if (res)
@@ -1228,6 +1261,8 @@ class MUD_MudSheet
 		int stk = (wantZ - m_iZ0) / TQ;
 		int oldTx = m_iX0 / TQ;
 		int oldTz = m_iZ0 / TQ;
+		if (m_bLocal && BAND_INCR)
+			BandIncr();     // stage 2 C1: pending touches into the distances before slots freeze / move
 		// 1. tiles that stay move to their new slot; leaving ones become trail (touched) or spare entities
 		array<IEntity> spare = {};
 		array<IEntity> newEnt = {};
@@ -1345,6 +1380,13 @@ class MUD_MudSheet
 		m_Chg.Shift(si, sk);
 		for (int cn = 0; cn < TILES * TILES; cn++)
 			m_aCoNext[cn] = 0;     // stage 2 A3: slot numbers moved (the shift rebuilds its slots anyway)
+		if (m_bLocal && BAND_INCR)
+			DistShift(sti, stk);     // stage 2 C1
+		for (int sgr = 0; sgr < TILES * TILES; sgr++)
+		{
+			m_aSlotSig1[sgr] = 0;     // stage 2 C3: slot numbers moved - unknown until the next build
+			m_aSlotSig2[sgr] = 0;
+		}
 		// 3. empty slots: the trail tile there comes back to life, else a spare or new entity
 		int nTx = m_iX0 / TQ;
 		int nTz = m_iZ0 / TQ;
@@ -1369,6 +1411,10 @@ class MUD_MudSheet
 						m_aSlotBand[t2] = 0;
 					}
 					Unpack(st.m_D, ti2, tk2);
+					if (m_bLocal && BAND_INCR)
+						DistUnpack(st.m_D, key, t2, ti2, tk2);     // stage 2 C1: its kept distances, if current
+					m_aSlotSig1[t2] = st.m_D.m_iSig1;     // stage 2 C3: the signature of the mesh it comes back with
+					m_aSlotSig2[t2] = st.m_D.m_iSig2;
 					m_aSlotUnlift[t2] = st.m_D.m_iUnlift;
 					newEnt[t2] = st.m_Ent;
 					newRes[t2] = st.m_Res;
@@ -1435,6 +1481,8 @@ class MUD_MudSheet
 		if (preset == 2 || preset == 4)
 			BAND_FADE = 1.2;
 		s_iCoverGen++;
+		s_iDistGen++;
+		BandLutBuild();     // C1 / C2: band by distance for this preset
 		if (preset <= 0 && s_iLeverSet != 0)
 			LeverApply(0, why);
 		if (preset <= 0 && s_iFixSet != 0)
@@ -1616,6 +1664,10 @@ class MUD_MudSheet
 					int t = (tz - z0) * TILES + tx - x0;
 					if (!born)
 						Birth(t, key);
+					if (m_bIncrMark)
+						continue;
+					if (BAND_INCR)
+						m_aSlotDist[t] = 0;     // stage 2 C1: a touch outside the window (op) - BandTile again
 					m_aSlotBand[t] = 1;
 					m_aSlotDirty[t] = 1;
 					m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_BAND;
@@ -1719,6 +1771,11 @@ class MUD_MudSheet
 	//! or, d null, to live slot ti, tk of the field.
 	protected void BandTile(int tx, int tz, MUD_MudSheetTileData d, int ti, int tk)
 	{
+		if (BAND_MICRO)
+		{
+			BandTileMicro(tx, tz, d, ti, tk);     // stage 2 C2
+			return;
+		}
 		int tB = System.GetTickCount();
 		m_iTchKey = -1;
 		m_TchSt = null;
@@ -1796,6 +1853,9 @@ class MUD_MudSheet
 				}
 			}
 		}
+		float cap = mg + 1;
+		if (BAND_INCR)
+			DistPrep(d);     // stage 2 C1: the distances are kept too
 		for (int lk2 = 0; lk2 < TV; lk2++)
 		{
 			for (int li2 = 0; li2 < TV; li2++)
@@ -1815,11 +1875,678 @@ class MUD_MudSheet
 					d.m_aBand[lk2 * TV + li2] = band;
 				else
 					m_F.m_aBand[(tk * TQ + lk2) * N + ti * TQ + li2] = band;
+				if (BAND_INCR)
+				{
+					float dv = dist[(lk2 + mg) * w + li2 + mg];
+					if (dv > cap)
+						dv = cap;
+					if (d)
+						d.m_Dist.m_aDist[lk2 * TV + li2] = dv;
+					else
+						m_DistF.m_aDist[(tk * TQ + lk2) * N + ti * TQ + li2] = dv;
+				}
 			}
 		}
+		if (BAND_INCR)
+			DistDone(d, ti, tk);
 		m_TchSt = null;
 		m_TchFar = null;
 		s_iBandMsAll += System.GetTickCount(tB);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 / C2: band by distance (cells) - the same curve as BandTile (1 within BAND_IN, a cosine fall to 0
+	//! at BAND_IN + BAND_FADE), 32 steps a cell, read with a straight line between steps (LabSet; first use)
+	static void BandLutBuild()
+	{
+		for (int j = 0; j < LUT_N; j++)
+		{
+			float dm = j / 32.0 * CELL;
+			float band = 0;
+			if (dm <= BAND_IN)
+			{
+				band = 1;
+			}
+			else if (dm < BAND_IN + BAND_FADE)
+			{
+				float f = (dm - BAND_IN) / BAND_FADE;
+				band = 0.5 + 0.5 * Math.Cos(f * Math.PI);
+			}
+			s_aBandLut[j] = band;
+		}
+		s_bLutOk = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 / C2: band at distance dv (cells) from the table
+	protected float BandOf(float dv)
+	{
+		float fj = dv * 32;
+		int j = fj;
+		if (j >= LUT_N - 1)
+			return 0;
+		float b0 = s_aBandLut[j];
+		return b0 + (s_aBandLut[j + 1] - b0) * (fj - j);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1: kept distances of an older switch / preset are dropped (every live slot due again); holders made
+	protected void DistGenCheck()
+	{
+		if (!m_DistF)
+		{
+			m_DistF = new MUD_MudSheetDist();
+			m_DistT = new MUD_MudSheetDist();
+		}
+		if (m_iDistGen == s_iDistGen)
+			return;
+		m_iDistGen = s_iDistGen;
+		for (int t = 0; t < TILES * TILES; t++)
+			m_aSlotDist[t] = 0;
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, BandTile before writing distances: d's holder (a store) or the window's
+	protected void DistPrep(MUD_MudSheetTileData d)
+	{
+		DistGenCheck();
+		if (d && !d.m_Dist)
+			d.m_Dist = new MUD_MudSheetTileDist();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, BandTile done: d's distances (or live slot ti, tk's) are current
+	protected void DistDone(MUD_MudSheetTileData d, int ti, int tk)
+	{
+		if (d)
+			d.m_Dist.m_iGen = s_iDistGen;
+		else
+			m_aSlotDist[tk * TILES + ti] = 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C2 BAND_MICRO: BandTile with direct m_F.m_aTouch reads when the tile + margin lies in the window, if
+	//! compares instead of Math.Min and the band table instead of Math.Cos (same distances, band within the table's
+	//! step error)
+	protected void BandTileMicro(int tx, int tz, MUD_MudSheetTileData d, int ti, int tk)
+	{
+		int tB = System.GetTickCount();
+		if (!s_bLutOk)
+			BandLutBuild();
+		m_iTchKey = -1;
+		m_TchSt = null;
+		m_TchFar = null;
+		int mg = BandMargin();
+		int w = TV + 2 * mg;
+		int gi0 = tx * TQ - mg;
+		int gk0 = tz * TQ - mg;
+		int wi0 = gi0 - m_iX0;
+		int wk0 = gk0 - m_iZ0;
+		bool inWin = m_bPlaced && wi0 >= 0 && wk0 >= 0 && wi0 + w <= N && wk0 + w <= N;
+		float dist[2401];      // BAND_W x BAND_W
+		bool any = false;
+		for (int k = 0; k < w; k++)
+		{
+			for (int i = 0; i < w; i++)
+			{
+				int li = i - mg;
+				int lk = k - mg;
+				int tc;
+				if (d && li >= 0 && li < TV && lk >= 0 && lk < TV)
+					tc = d.m_aTouch[lk * TV + li];
+				else if (inWin)
+					tc = m_F.m_aTouch[(wk0 + k) * N + wi0 + i];
+				else
+					tc = TouchAt(gi0 + i, gk0 + k);
+				if (tc != 0)
+				{
+					dist[k * w + i] = 0;
+					any = true;
+				}
+				else
+				{
+					dist[k * w + i] = 1000000;
+				}
+			}
+		}
+		if (any)
+		{
+			for (int k2 = 0; k2 < w; k2++)
+			{
+				for (int i2 = 0; i2 < w; i2++)
+				{
+					int a = k2 * w + i2;
+					float best = dist[a];
+					if (best == 0)
+						continue;
+					float c;
+					if (i2 > 0)
+					{
+						c = dist[a - 1] + 1;
+						if (c < best)
+							best = c;
+					}
+					if (k2 > 0)
+					{
+						c = dist[a - w] + 1;
+						if (c < best)
+							best = c;
+						if (i2 > 0)
+						{
+							c = dist[a - w - 1] + 1.4142;
+							if (c < best)
+								best = c;
+						}
+						if (i2 < w - 1)
+						{
+							c = dist[a - w + 1] + 1.4142;
+							if (c < best)
+								best = c;
+						}
+					}
+					dist[a] = best;
+				}
+			}
+			for (int k3 = w - 1; k3 >= 0; k3--)
+			{
+				for (int i3 = w - 1; i3 >= 0; i3--)
+				{
+					int b = k3 * w + i3;
+					float best2 = dist[b];
+					if (best2 == 0)
+						continue;
+					float c2;
+					if (i3 < w - 1)
+					{
+						c2 = dist[b + 1] + 1;
+						if (c2 < best2)
+							best2 = c2;
+					}
+					if (k3 < w - 1)
+					{
+						c2 = dist[b + w] + 1;
+						if (c2 < best2)
+							best2 = c2;
+						if (i3 < w - 1)
+						{
+							c2 = dist[b + w + 1] + 1.4142;
+							if (c2 < best2)
+								best2 = c2;
+						}
+						if (i3 > 0)
+						{
+							c2 = dist[b + w - 1] + 1.4142;
+							if (c2 < best2)
+								best2 = c2;
+						}
+					}
+					dist[b] = best2;
+				}
+			}
+		}
+		float cap = mg + 1;
+		if (BAND_INCR)
+			DistPrep(d);
+		for (int lk2 = 0; lk2 < TV; lk2++)
+		{
+			for (int li2 = 0; li2 < TV; li2++)
+			{
+				float dv = dist[(lk2 + mg) * w + li2 + mg];
+				if (dv > cap)
+					dv = cap;
+				float band = BandOf(dv);
+				if (d)
+				{
+					d.m_aBand[lk2 * TV + li2] = band;
+					if (BAND_INCR)
+						d.m_Dist.m_aDist[lk2 * TV + li2] = dv;
+				}
+				else
+				{
+					int wv = (tk * TQ + lk2) * N + ti * TQ + li2;
+					m_F.m_aBand[wv] = band;
+					if (BAND_INCR)
+						m_DistF.m_aDist[wv] = dv;
+				}
+			}
+		}
+		if (BAND_INCR)
+			DistDone(d, ti, tk);
+		m_TchSt = null;
+		m_TchFar = null;
+		s_iBandMsAll += System.GetTickCount(tB);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1: live slot t's kept window distances are current (its band needs no BandTile)
+	protected bool DistOk(int t)
+	{
+		return m_aSlotDist[t] != 0 && m_iDistGen == s_iDistGen;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 BAND_INCR, once per Upload and before a Follow shift: the cells touched since the last call lower the
+	//! kept distances round them. Box = the new cells + BandMargin, seeded from the kept distances (new cells 0, no
+	//! TouchAt), two chamfer passes inside the box only; cells whose distance fell get their band from the table, and
+	//! only slots where a band value changed are dirtied. Exact: touches only go 0 -> 1, and a chamfer path between two
+	//! cells stays inside their box. Slots in the box without current distances get a BandTile first.
+	protected void BandIncr()
+	{
+		if (m_aNewGi.IsEmpty() || !m_bPlaced)
+		{
+			m_aNewGi.Clear();
+			m_aNewGk.Clear();
+			return;
+		}
+		int tB = System.GetTickCount();
+		int bandAt = s_iBandMsAll;
+		DistGenCheck();
+		if (!s_bLutOk)
+			BandLutBuild();
+		int mg = BandMargin();
+		int i0 = N;
+		int i1 = -1;
+		int k0 = N;
+		int k1 = -1;
+		m_aNewV.Clear();
+		for (int n = 0; n < m_aNewGi.Count(); n++)
+		{
+			int ni = m_aNewGi[n] - m_iX0;
+			int nk = m_aNewGk[n] - m_iZ0;
+			if (ni < 0 || ni >= N || nk < 0 || nk >= N)
+				continue;
+			m_aNewV.Insert(nk * N + ni);
+			if (ni < i0)
+				i0 = ni;
+			if (ni > i1)
+				i1 = ni;
+			if (nk < k0)
+				k0 = nk;
+			if (nk > k1)
+				k1 = nk;
+		}
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+		if (i1 < 0)
+			return;
+		int bi0 = i0 - mg;
+		if (bi0 < 0)
+			bi0 = 0;
+		int bi1 = i1 + mg;
+		if (bi1 > N - 1)
+			bi1 = N - 1;
+		int bk0 = k0 - mg;
+		if (bk0 < 0)
+			bk0 = 0;
+		int bk1 = k1 + mg;
+		if (bk1 > N - 1)
+			bk1 = N - 1;
+		// slots in the box need current distances first (BandTile: exact, the new touches included)
+		int ta = 0;
+		if (bi0 > 0)
+			ta = (bi0 - 1) / TQ;
+		int tb = bi1 / TQ;
+		if (tb > TILES - 1)
+			tb = TILES - 1;
+		int ka = 0;
+		if (bk0 > 0)
+			ka = (bk0 - 1) / TQ;
+		int kb = bk1 / TQ;
+		if (kb > TILES - 1)
+			kb = TILES - 1;
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		for (int sk = ka; sk <= kb; sk++)
+		{
+			for (int si = ta; si <= tb; si++)
+			{
+				int st = sk * TILES + si;
+				if (m_aSlotDist[st] != 0)
+					continue;
+				BandTile(x0 + si, z0 + sk, null, si, sk);
+				m_aSlotBand[st] = 0;
+				m_aSlotDirty[st] = 1;
+				m_aSlotWhy[st] = m_aSlotWhy[st] | WHY_BAND;
+				m_bDirty = true;
+				m_iIncrFull++;
+			}
+		}
+		MUD_MudSheetDist df = m_DistF;
+		foreach (int nv : m_aNewV)
+		{
+			if (df.m_aDist[nv] != 0)
+			{
+				df.m_aDist[nv] = 0;
+				df.m_aChg[nv] = 1;
+			}
+		}
+		for (int k = bk0; k <= bk1; k++)
+		{
+			for (int i = bi0; i <= bi1; i++)
+			{
+				int a = k * N + i;
+				float best = df.m_aDist[a];
+				if (best == 0)
+					continue;
+				float c;
+				if (i > bi0)
+				{
+					c = df.m_aDist[a - 1] + 1;
+					if (c < best)
+						best = c;
+				}
+				if (k > bk0)
+				{
+					c = df.m_aDist[a - N] + 1;
+					if (c < best)
+						best = c;
+					if (i > bi0)
+					{
+						c = df.m_aDist[a - N - 1] + 1.4142;
+						if (c < best)
+							best = c;
+					}
+					if (i < bi1)
+					{
+						c = df.m_aDist[a - N + 1] + 1.4142;
+						if (c < best)
+							best = c;
+					}
+				}
+				if (best < df.m_aDist[a])
+				{
+					df.m_aDist[a] = best;
+					df.m_aChg[a] = 1;
+				}
+			}
+		}
+		for (int k2 = bk1; k2 >= bk0; k2--)
+		{
+			for (int i2 = bi1; i2 >= bi0; i2--)
+			{
+				int b = k2 * N + i2;
+				float best2 = df.m_aDist[b];
+				if (best2 == 0)
+					continue;
+				float c2;
+				if (i2 < bi1)
+				{
+					c2 = df.m_aDist[b + 1] + 1;
+					if (c2 < best2)
+						best2 = c2;
+				}
+				if (k2 < bk1)
+				{
+					c2 = df.m_aDist[b + N] + 1;
+					if (c2 < best2)
+						best2 = c2;
+					if (i2 < bi1)
+					{
+						c2 = df.m_aDist[b + N + 1] + 1.4142;
+						if (c2 < best2)
+							best2 = c2;
+					}
+					if (i2 > bi0)
+					{
+						c2 = df.m_aDist[b + N - 1] + 1.4142;
+						if (c2 < best2)
+							best2 = c2;
+					}
+				}
+				if (best2 < df.m_aDist[b])
+				{
+					df.m_aDist[b] = best2;
+					df.m_aChg[b] = 1;
+				}
+			}
+		}
+		// bands of the lowered cells; slots (a side cell: both) where a value changed are dirtied
+		int mask = 0;
+		for (int k3 = bk0; k3 <= bk1; k3++)
+		{
+			for (int i3 = bi0; i3 <= bi1; i3++)
+			{
+				int e = k3 * N + i3;
+				if (df.m_aChg[e] == 0)
+					continue;
+				df.m_aChg[e] = 0;
+				float band = BandOf(df.m_aDist[e]);
+				if (band == m_F.m_aBand[e])
+					continue;
+				m_F.m_aBand[e] = band;
+				int ri = i3 % TQ;
+				int rk = k3 % TQ;
+				int ma = i3 / TQ;
+				int mb = ma;
+				if (ri == 0 && ma > 0)
+					ma = ma - 1;
+				if (mb > TILES - 1)
+					mb = TILES - 1;
+				int mc = k3 / TQ;
+				int md = mc;
+				if (rk == 0 && mc > 0)
+					mc = mc - 1;
+				if (md > TILES - 1)
+					md = TILES - 1;
+				for (int mk = mc; mk <= md; mk++)
+				{
+					for (int mi = ma; mi <= mb; mi++)
+						mask = mask | (1 << (mk * TILES + mi));
+				}
+			}
+		}
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if ((mask & (1 << t)) == 0)
+				continue;
+			m_aSlotDirty[t] = 1;
+			m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_BAND;
+			m_bDirty = true;
+			m_iIncrDirty++;
+		}
+		m_iIncrRuns++;
+		m_iIncrCells += (bi1 - bi0 + 1) * (bk1 - bk0 + 1);
+		s_iBandMsAll += System.GetTickCount(tB) - (s_iBandMsAll - bandAt);     // its BandTiles counted once
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Follow after the field moved by sti, stk tiles: the kept distances and slot flags move with it
+	//! (entering slots: not current until DistUnpack / BandTile)
+	protected void DistShift(int sti, int stk)
+	{
+		DistGenCheck();
+		int si = sti * TQ;
+		int sk = stk * TQ;
+		float cap = BandMargin() + 1;
+		MUD_MudSheetDist f = m_DistF;
+		MUD_MudSheetDist nt = m_DistT;
+		for (int k = 0; k < N; k++)
+		{
+			for (int i = 0; i < N; i++)
+			{
+				int oi = i + si;
+				int ok = k + sk;
+				int v = k * N + i;
+				nt.m_aChg[v] = 0;
+				if (oi >= 0 && oi < N && ok >= 0 && ok < N)
+					nt.m_aDist[v] = f.m_aDist[ok * N + oi];
+				else
+					nt.m_aDist[v] = cap;
+			}
+		}
+		m_DistF = nt;
+		m_DistT = f;
+		int nd[16];
+		for (int t = 0; t < TILES * TILES; t++)
+			nd[t] = 0;
+		for (int tk = 0; tk < TILES; tk++)
+		{
+			for (int ti = 0; ti < TILES; ti++)
+			{
+				int nti = ti - sti;
+				int ntk = tk - stk;
+				if (nti >= 0 && nti < TILES && ntk >= 0 && ntk < TILES)
+					nd[ntk * TILES + nti] = m_aSlotDist[tk * TILES + ti];
+			}
+		}
+		for (int t2 = 0; t2 < TILES * TILES; t2++)
+			m_aSlotDist[t2] = nd[t2];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Freeze after Pack: live slot ti, tk's distances go with its store (none if not current)
+	protected void DistPack(int ti, int tk, MUD_MudSheetTileData d)
+	{
+		if (!DistOk(tk * TILES + ti))
+		{
+			d.m_Dist = null;
+			return;
+		}
+		if (!d.m_Dist)
+			d.m_Dist = new MUD_MudSheetTileDist();
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+				d.m_Dist.m_aDist[lk * TV + li] = m_DistF.m_aDist[(tk * TQ + lk) * N + ti * TQ + li];
+		}
+		d.m_Dist.m_iGen = s_iDistGen;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Follow after Unpack: a store's current distances come back into slot t (ti, tk); none, stale or its
+	//! band still queued (m_aBandQ) -> the slot is not current (BandTile before its build, as before)
+	protected void DistUnpack(MUD_MudSheetTileData d, int key, int t, int ti, int tk)
+	{
+		MUD_MudSheetTileDist sd = d.m_Dist;
+		if (!sd || sd.m_iGen != s_iDistGen || m_aBandQ.Contains(key))
+			return;
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+				m_DistF.m_aDist[(tk * TQ + lk) * N + ti * TQ + li] = sd.m_aDist[lk * TV + li];
+		}
+		m_aSlotDist[t] = 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 TEST_KIT bench (once, first Upload with BAND_INCR): 1000 random stamps (discs r 0..2 cells) through
+	//! BandIncr every 10 stamps, then every live slot's band again from scratch (BandTile into a scratch store) - max
+	//! |incremental - full| of band and distance. The window is put back as it was (touches, bands, distances, slots).
+	protected void BandBench()
+	{
+		m_bBenchDone = true;
+		if (!m_bPlaced)
+			return;
+		int bandAll = s_iBandMsAll;
+		bool wasDirty = m_bDirty;
+		DistGenCheck();
+		MUD_MudSheetBench sv = new MUD_MudSheetBench();
+		for (int v = 0; v < NN; v++)
+		{
+			sv.m_aTouch[v] = m_F.m_aTouch[v];
+			sv.m_aBand[v] = m_F.m_aBand[v];
+			sv.m_aDist[v] = m_DistF.m_aDist[v];
+		}
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			sv.m_aSlot[t] = m_aSlotDist[t];
+			sv.m_aSlot[16 + t] = m_aSlotBand[t];
+			sv.m_aSlot[32 + t] = m_aSlotDirty[t];
+			sv.m_aSlot[48 + t] = m_aSlotWhy[t];
+		}
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		for (int t1 = 0; t1 < TILES * TILES; t1++)
+		{
+			int ti1 = t1 % TILES;
+			int tk1 = t1 / TILES;
+			if (m_aSlotDist[t1] == 0)
+				BandTile(x0 + ti1, z0 + tk1, null, ti1, tk1);
+		}
+		int tI = System.GetTickCount();
+		int news = 0;
+		for (int s = 0; s < 1000; s++)
+		{
+			int ci = Math.RandomInt(0, N);
+			int ck = Math.RandomInt(0, N);
+			int r = Math.RandomInt(0, 3);
+			for (int dk = -r; dk <= r; dk++)
+			{
+				for (int di = -r; di <= r; di++)
+				{
+					int i = ci + di;
+					int k = ck + dk;
+					if (i < 0 || i >= N || k < 0 || k >= N || di * di + dk * dk > r * r)
+						continue;
+					if (m_F.m_aTouch[k * N + i] != 0)
+						continue;
+					m_F.m_aTouch[k * N + i] = 1;
+					m_aNewGi.Insert(m_iX0 + i);
+					m_aNewGk.Insert(m_iZ0 + k);
+					news++;
+				}
+			}
+			int sm = s % 10;
+			if (sm == 9)
+				BandIncr();
+		}
+		BandIncr();
+		int incrMs = System.GetTickCount(tI);
+		MUD_MudSheetTileData sc = new MUD_MudSheetTileData();
+		float maxBand = 0;
+		float maxDist = 0;
+		int at = -1;
+		int tF = System.GetTickCount();
+		for (int t2 = 0; t2 < TILES * TILES; t2++)
+		{
+			int ti = t2 % TILES;
+			int tk = t2 / TILES;
+			for (int lk = 0; lk < TV; lk++)
+			{
+				for (int li = 0; li < TV; li++)
+					sc.m_aTouch[lk * TV + li] = m_F.m_aTouch[(tk * TQ + lk) * N + ti * TQ + li];
+			}
+			BandTile(x0 + ti, z0 + tk, sc, ti, tk);
+			for (int lk2 = 0; lk2 < TV; lk2++)
+			{
+				for (int li2 = 0; li2 < TV; li2++)
+				{
+					int wv = (tk * TQ + lk2) * N + ti * TQ + li2;
+					float db = Math.AbsFloat(sc.m_aBand[lk2 * TV + li2] - m_F.m_aBand[wv]);
+					if (db > maxBand)
+					{
+						maxBand = db;
+						at = wv;
+					}
+					float dd = Math.AbsFloat(sc.m_Dist.m_aDist[lk2 * TV + li2] - m_DistF.m_aDist[wv]);
+					if (dd > maxDist)
+						maxDist = dd;
+				}
+			}
+		}
+		int fullMs = System.GetTickCount(tF);
+		Print(string.Format("MUD band incr bench: 1000 stamps (%1 new cells), incremental %2 ms in 101 passes, full BandTile x 16 %3 ms | max |incr - full| band %4 (window cell %5), distance %6 cells | band micro %7, within 1e-4: %8",
+			news, incrMs, fullMs, maxBand, at, maxDist, BAND_MICRO, maxBand <= 0.0001), LogLevel.NORMAL);
+		for (int v2 = 0; v2 < NN; v2++)
+		{
+			m_F.m_aTouch[v2] = sv.m_aTouch[v2];
+			m_F.m_aBand[v2] = sv.m_aBand[v2];
+			m_DistF.m_aDist[v2] = sv.m_aDist[v2];
+			m_DistF.m_aChg[v2] = 0;
+		}
+		for (int t3 = 0; t3 < TILES * TILES; t3++)
+		{
+			m_aSlotDist[t3] = sv.m_aSlot[t3];
+			m_aSlotBand[t3] = sv.m_aSlot[16 + t3];
+			m_aSlotDirty[t3] = sv.m_aSlot[32 + t3];
+			m_aSlotWhy[t3] = sv.m_aSlot[48 + t3];
+		}
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+		m_bDirty = wasDirty;
+		s_iBandMsAll = bandAll;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1900,7 +2627,8 @@ class MUD_MudSheet
 		if (m_aSlotBand[t] != 0)
 		{
 			m_aSlotBand[t] = 0;
-			BandTile(tx, tz, null, ti, tk);
+			if (!BAND_INCR || !DistOk(t))
+				BandTile(tx, tz, null, ti, tk);     // stage 2 C1: not when the kept distances are current
 		}
 	}
 
@@ -1978,7 +2706,8 @@ class MUD_MudSheet
 			if (m_aSlotBand[t] != 0)
 			{
 				m_aSlotBand[t] = 0;
-				BandTile(x0 + ti, z0 + tk, null, ti, tk);
+				if (!BAND_INCR || !DistOk(t))
+					BandTile(x0 + ti, z0 + tk, null, ti, tk);     // stage 2 C1: not when the kept distances are current
 			}
 			Pack(ti, tk, m_TD);
 			m_iBuildWhy = BW_HOLE;
@@ -2504,6 +3233,12 @@ class MUD_MudSheet
 		// stage 2 A6: co-builds (the cobuild builds by reason = pick + live + stored + queued ones that ran)
 		string p3 = string.Format(" | cobuild pick %1, cobuild live %2, cobuild stored %3 (capped %4), cobuild builds %5, born front %6",
 			m_iCoPick, m_iCoLive, m_iCoStored, m_iCoCapped, m_aBuildsBy[BW_COBUILD], m_iBornFront);
+		if (BAND_INCR)
+			p3 += string.Format(" | band incr: passes %1, box cells %2, slots dirtied %3, slot BandTiles %4", m_iIncrRuns, m_iIncrCells, m_iIncrDirty, m_iIncrFull);
+		if (BUILD_SKIP_SAME)
+			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
+		if (BAND_STORED_HOLD)
+			p3 += string.Format(" | stored band builds held %1", m_iBandHeld);
 		if (!EDGE_AUDIT && EDGE_COBUILD)
 			EdgePrune();
 		Print(p1 + p2 + p3 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
@@ -2516,6 +3251,12 @@ class MUD_MudSheet
 		m_iCoStored = 0;
 		m_iCoCapped = 0;
 		m_iBornFront = 0;
+		m_iIncrRuns = 0;
+		m_iIncrCells = 0;
+		m_iIncrDirty = 0;
+		m_iIncrFull = 0;
+		m_iSkipSame = 0;
+		m_iBandHeld = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2552,6 +3293,7 @@ class MUD_MudSheet
 		CRATER_TRACE_NOW = b;
 		CRATER_TAPER_NOW = b;
 		CRATER_EASE_DROP = b;
+		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
 	}
 
@@ -3545,6 +4287,10 @@ class MUD_MudSheet
 		if (m_bLocal)
 			FreezeLocal(tx, tz, ti, tk);     // SHEET LOCAL: eases end, band up to date
 		Pack(ti, tk, st.m_D);
+		if (m_bLocal && BAND_INCR)
+			DistPack(ti, tk, st.m_D);     // stage 2 C1
+		st.m_D.m_iSig1 = m_aSlotSig1[tk * TILES + ti];     // stage 2 C3: its mesh goes with it
+		st.m_D.m_iSig2 = m_aSlotSig2[tk * TILES + ti];
 		st.m_D.m_iDrawn = m_aSlotReady[tk * TILES + ti];     // LAZY RUT MESH: the slot's mesh had no hole
 		st.m_D.m_iUnlift = m_aSlotUnlift[tk * TILES + ti];   // LIFT BY DRAWN: the mesh stays on screen
 		if (m_bLocal && te && !SlotTraced(tk * TILES + ti))
@@ -7249,6 +7995,11 @@ class MUD_MudSheet
 					m_F.m_aTouch[v] = 1;     // SHEET LOCAL: deposit band source
 					m_bTouchNew = true;
 					m_iTouchCells++;
+					if (BAND_INCR)
+					{
+						m_aNewGi.Insert(m_iX0 + i);     // stage 2 C1: BandIncr at the next upload
+						m_aNewGk.Insert(m_iZ0 + k);
+					}
 				}
 				if (LEV_L2_DRAG)
 					m_Drag.Add(v);     // L2: LimitDragCells at the next upload
@@ -7357,7 +8108,9 @@ class MUD_MudSheet
 		if (m_bTouchNew)
 		{
 			m_bTouchNew = false;
+			m_bIncrMark = BAND_INCR;     // stage 2 C1: live slots only get born (BandIncr dirties by band change)
 			BandMark(i0, i1, k0, k1);     // SHEET LOCAL: tiles born, bands due
+			m_bIncrMark = false;
 		}
 	}
 
@@ -7719,6 +8472,12 @@ class MUD_MudSheet
 	//! Rebuild every live tile's mesh from the field
 	protected void Upload()
 	{
+		if (m_bLocal && BAND_INCR)
+		{
+			BandIncr();     // stage 2 C1: the band round the touches since the last upload
+			if (MUD_TestKit.TEST_KIT && !m_bBenchDone)
+				BandBench();
+		}
 		m_bDirty = false;
 		if (DRAG_LIM > 0 && !m_Drag.m_aList.IsEmpty())
 			LimitDragCells();     // L2 (cells stay listed only while it is on, or one last time after)
@@ -7802,7 +8561,8 @@ class MUD_MudSheet
 		if (m_bLocal && m_aSlotBand[t] != 0)
 		{
 			m_aSlotBand[t] = 0;
-			BandTile(x0 + ti, z0 + tk, null, ti, tk);
+			if (!BAND_INCR || !DistOk(t))
+				BandTile(x0 + ti, z0 + tk, null, ti, tk);     // stage 2 C1: not when the kept distances are current
 		}
 		Pack(ti, tk, m_TD);
 		m_iBuildWhy = UploadWhy(t);
@@ -8309,6 +9069,7 @@ class MUD_MudSheet
 			float fcz = (tz + 0.5) * TILE_M - m_vLodCam[2];
 			low = fcx * fcx + fcz * fcz > FAR_R * FAR_R;
 		}
+		m_iLowWas = d.m_iLow;     // stage 2 C3
 		if (d.m_iLow != 0)
 			m_iLowNow--;
 		d.m_iLow = 0;
@@ -8321,6 +9082,15 @@ class MUD_MudSheet
 				m_iFarLow++;
 		}
 		Resource res = BuildTileMesh(te, d, tx, tz, live, low);
+		if (m_bSkipSame)
+		{
+			res = m_SkipRes;     // stage 2 C3: nothing moved 3 mm, same classes - the old mesh stays
+			m_bSkipSame = false;
+			m_SkipRes = null;
+			m_iSkipSame++;
+		}
+		if (BAND_STORED_HOLD && !live)
+			m_mStoredAt.Set(TrailKey(tx, tz), m_fLast);     // stage 2 C5
 		if (m_bLocal && (EDGE_AUDIT || EDGE_COBUILD))
 			EdgeRecord(d, tx, tz, res != null);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
@@ -8402,6 +9172,59 @@ class MUD_MudSheet
 
 	//------------------------------------------------------------------------------------------------
 	//! low (PAPER TEST 2): every 2nd vertex, plain quads, own skirt (far stored tiles)
+	//! Stage 2 C3 BUILD_SKIP_SAME (from BuildTileMesh): signature of the per-vertex classes (bare / hole, traced,
+	//! band > 0, touched, untouched top), stored for the slot (live) or in d (stored). True = 'still' (no vert moved
+	//! WOULD_SKIP_M) and the last mesh had the same signature and LOD and is still on te: m_SkipRes = that mesh.
+	//! UV drag (m_aOu / m_aOv) is not compared except 'untouched top' (dirt UVs can lag up to one rebuild).
+	protected bool SkipSame(IEntity te, MUD_MudSheetTileData d, int tx, int tz, bool live, bool low, bool still)
+	{
+		int sg1 = 1;
+		int sg2 = 0;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int c = 2 * d.m_aBare[l] + 8 * d.m_aGs[l] + 32 * d.m_aTouch[l];
+			if (Bare(d, l))
+				c += 1;
+			if (d.m_aBand[l] > 0)
+				c += 16;
+			if (d.m_aD[l] == THICK && d.m_aOu[l] == 0 && d.m_aOv[l] == 0)
+				c += 64;
+			sg1 = sg1 * 31 + c;
+			sg2 = sg2 + c * (l + 7);
+		}
+		sg1 = sg1 | 1;     // never 0 (0 = unknown)
+		Resource old;
+		int was1 = d.m_iSig1;
+		int was2 = d.m_iSig2;
+		d.m_iSig1 = sg1;
+		d.m_iSig2 = sg2;
+		if (live && IsLive(tx, tz))
+		{
+			int slot = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			was1 = m_aSlotSig1[slot];
+			was2 = m_aSlotSig2[slot];
+			m_aSlotSig1[slot] = sg1;
+			m_aSlotSig2[slot] = sg2;
+			if (slot < m_aTileRes.Count() && m_aTileEnt[slot] == te)
+				old = m_aTileRes[slot];
+		}
+		else if (!live)
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+			if (st && st.m_Ent == te)
+				old = st.m_Res;
+		}
+		int lowNow = 0;
+		if (low)
+			lowNow = 1;
+		if (!still || !old || was1 == 0 || was1 != sg1 || was2 != sg2 || lowNow != m_iLowWas)
+			return false;
+		m_bSkipSame = true;
+		m_SkipRes = old;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	protected Resource BuildTileMesh(IEntity te, MUD_MudSheetTileData d, int tx, int tz, bool live, bool low)
 	{
 		bool fast = s_bFastBuild;
@@ -8523,10 +9346,19 @@ class MUD_MudSheet
 				float lyd = Math.AbsFloat(vy[lyl] - d.m_aLastY[lyl]);
 				if (lyd > lyMax)
 					lyMax = lyd;
-				d.m_aLastY[lyl] = vy[lyl];
+				if (!BUILD_SKIP_SAME)
+					d.m_aLastY[lyl] = vy[lyl];
 			}
 			if (lyMax < WOULD_SKIP_M)
 				m_iWouldSkip++;
+			// stage 2 C3: same classes and no vert moved 3 mm -> the old mesh stays (BuildTile takes m_SkipRes)
+			if (BUILD_SKIP_SAME && SkipSame(te, d, tx, tz, live, low, lyMax < WOULD_SKIP_M))
+				return null;
+			if (BUILD_SKIP_SAME)
+			{
+				for (int lyw = 0; lyw < TV * TV; lyw++)
+					d.m_aLastY[lyw] = vy[lyw];     // drawn heights of the mesh built now
+			}
 		}
 		// TEMP GAP PROBE: border heights S N W E (world y; -10000 = untraced). Own block: BuildTileMesh is at the
 		// 64-locals limit (mud-gotchas 2026-10-18)
@@ -9079,7 +9911,7 @@ class MUD_MudSheet
 		// SHEET LOCAL TOP_UV64: the MAT_TOP section takes the 64 m skin chunk UV frame (as voxel tops,
 		// MUD_VoxelProbe.KindAB kind 0), chunk picked by the tile middle; the dirt UVs wait in cix (unused: COLLIDE off)
 		bool uv64 = m_bLocal && TOP_UV64 && !COLLIDE && niTop > 0;
-		if (uv64)
+		if (uv64 && !UV64_FAST)
 		{
 			for (int us = 0; us < nv * 2; us++)
 				cix[us] = Math.Round(tuv[us] * 1000000);
@@ -9095,8 +9927,30 @@ class MUD_MudSheet
 				tuv[un * 2 + 1] = 1 - Math.Clamp((tz * TILE_M + upv[2] - ucz) / TOP_UV_M, 0, 1);
 			}
 		}
+		if (uv64 && UV64_FAST)
+		{
+			// stage 2 C4 UV64_FAST: dirt section first with its own (dragged) UVs, then the top UVs over tuv in place
+			if (ni > 0)
+			{
+				mesh.UpdateIndices(1, tix);
+				mesh.UpdateVerts(1, tv, tuv);     // its own (dragged) UVs
+			}
+			float fx0;
+			float fz0;
+			MUD_VoxelProbe.LookOrigin(fx0, fz0);
+			float fox = tx * TILE_M - fx0 - Math.Floor(((tx + 0.5) * TILE_M - fx0) / TOP_UV_M) * TOP_UV_M;
+			float foz = tz * TILE_M - fz0 - Math.Floor(((tz + 0.5) * TILE_M - fz0) / TOP_UV_M) * TOP_UV_M;
+			for (int fn = 0; fn < nv; fn++)
+			{
+				vector fpv = tv[fn];
+				tuv[fn * 2] = Math.Clamp((fox + fpv[0]) / TOP_UV_M, 0, 1);
+				tuv[fn * 2 + 1] = 1 - Math.Clamp((foz + fpv[2]) / TOP_UV_M, 0, 1);
+			}
+			mesh.UpdateIndices(0, tixTop);
+			mesh.UpdateVerts(0, tv, tuv);
+		}
 		// indices first: UpdateVerts rebuilds normals from the triangle list
-		if (ni > 0 && niTop > 0)
+		else if (ni > 0 && niTop > 0)
 		{
 			mesh.UpdateIndices(0, tixTop);
 			mesh.UpdateVerts(0, tv, tuv);
@@ -9323,6 +10177,32 @@ class MUD_MudSheetTileData
 	int m_iUnlift;          // LIFT BY DRAWN: 1 = patches were told this (stored) tile's mesh is on screen
 	int m_iDrawn;           // LAZY RUT MESH: 1 = every cell was traced at its last mesh build (that mesh has no hole)
 	int m_iLow;             // PAPER TEST 2: 1 = its last mesh was the low-detail one (far from the camera)
+	ref MUD_MudSheetTileDist m_Dist;     // stage 2 C1 BAND_INCR: its kept distances (null: none)
+	int m_iSig1;            // stage 2 C3 BUILD_SKIP_SAME: class signature of its last mesh (0 = unknown)
+	int m_iSig2;
+}
+
+//! Stage 2 C1 BAND_INCR: a stored tile's distances (cells) to the nearest touched cell, as BandTile last made them
+class MUD_MudSheetTileDist
+{
+	float m_aDist[441];
+	int m_iGen = -1;        // MUD_MudSheet.s_iDistGen when made (another = stale)
+}
+
+//! Stage 2 C1 BAND_INCR: the window's distances - own class, MUD_MudSheetField is near the 256 KB limit
+class MUD_MudSheetDist
+{
+	float m_aDist[6561];    // chamfer distance (cells) to the nearest touched cell, capped at BandMargin + 1
+	int m_aChg[6561];       // 1 = lowered in the running BandIncr
+}
+
+//! Stage 2 C1 TEST_KIT bench: the window state it puts back
+class MUD_MudSheetBench
+{
+	int m_aTouch[6561];
+	float m_aBand[6561];
+	float m_aDist[6561];
+	int m_aSlot[64];
 }
 
 //! SHEET LOCAL far data (MUD LAB part D): one int a cell = 1 byte each for height, drag u, drag v, class (bit 0 bare,
