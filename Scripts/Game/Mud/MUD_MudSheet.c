@@ -404,7 +404,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 14;
+	static const int FIX_SETS = 15;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -3709,8 +3709,9 @@ class MUD_MudSheet
 		CRATER_TRACE_NOW = b;
 		CRATER_TAPER_NOW = b;
 		CRATER_EASE_DROP = b;
-		CRATER_PREBUILD = s == 13 || s == 14;     // B5: set 13 = set 12 + prebuild
-		PRE_COL_CACHE = s == 14;           // B6: set 14 = set 13 + column cache
+		CRATER_PREBUILD = s == 13 || s == 14 || s == 15;     // B5: set 13 = set 12 + prebuild
+		PRE_COL_CACHE = s == 14 || s == 15;     // B6: set 14 = set 13 + column cache
+		MUD_WorldGroundEntity.VOX_MESH_LATER = s == 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
 		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
 	}
@@ -3769,6 +3770,8 @@ class MUD_MudSheet
 			s += " prebuild";
 		if (PRE_COL_CACHE)
 			s += " col_cache";
+		if (MUD_WorldGroundEntity.VOX_MESH_LATER)
+			s += " vox_mesh_later";
 		if (s == "")
 			return "off";
 		return s.Trim();
@@ -4876,6 +4879,13 @@ class MUD_MudSheet
 			if (lnx < oldTx || lnx >= oldTx + TILES || lnz < oldTz || lnz >= oldTz + TILES)
 				MUD_WorldGroundEntity.SheetLiftDirty(lnx * TILE_M, lnz * TILE_M);
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B7 (MUD_WorldGround DoVoxCells): does this machine run sheet local?
+	static bool LocalOn()
+	{
+		return ENABLED && s_Inst && s_Inst.m_bLocal;
 	}
 
 	//------------------------------------------------------------------------------------------------

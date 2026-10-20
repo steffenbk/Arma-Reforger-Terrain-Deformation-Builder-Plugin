@@ -140,3 +140,10 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   WB 23:56:56 2/2/2 34 | 23:57:04 4/3/3 44 | 23:57:15 3/1/3 26 | 23:57:23 4/1/3 24 | 23:57:30 2/0/0 0 | 23:57:36 1/1/1 10
   DS 23:49:24 2/1/2 15 | 23:49:28 4/3/3 24 | 23:49:44 4/2/2 17 | 23:49:48 3/2/2 15 | 23:49:56 4/4/4 33 | 23:50:01 2/0/0 0
   So the rest of the stutter is the rut side (WorldGround, off limits) - asked the user.
+- Added B7 MUD_WorldGroundEntity.VOX_MESH_LATER (user OK 2026-10-21 for this MUD_WorldGround edit; set 15 = set 14 + it):
+  with sheet local on, DoVoxCells still builds the patch colliders in the go-live frame, but the patch meshes go to a
+  list built one per frame (VoxLaterStep, EOnFrame before the voxel tick; a patch gone / building goes to the normal mesh
+  queue). The old patch mesh can show over the crater for 1-4 frames (under the sheet). Meters: the 'voxel cells live'
+  line ends `| colliders N ms, meshes N ms, meshes later N (B7 0/1)` (split now on every set); new line
+  `MUD world: voxel cells meshes later - N built over N frames, N ms (worst N ms), N to the mesh queue`.
+  MudSheet.LocalOn() added. Checkpoint v264 = before. Not compiled.

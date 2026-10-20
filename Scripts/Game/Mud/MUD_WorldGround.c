@@ -799,6 +799,15 @@ class MUD_WorldGroundEntity : GenericEntity
 	// even OFF; 'MUD AB' line). COARSE_PLATE is const (on all session).
 	static bool VIEW_TRIM = true;      // 2: AheadView skips the dead per-wheel loop; MarkHide one EnsurePress per patch
 	static bool LOOK_PACE = true;      // 3: no height dirt since the last mesh -> LOOK_MESH_EVERY pace (+ C1 hold reset)
+	// mud lab stage 2 B7 (user OK 2026-10-21, fix set 15): with sheet local on, DoVoxCells builds the patch colliders in the
+	// go-live frame as before, but their meshes one per frame after it (the sheet draws over them). Default off.
+	static bool VOX_MESH_LATER = false;
+	protected ref array<int> m_aVoxLater = {};     // B7: patch keys whose go-live mesh waits (one per frame, VoxLaterStep)
+	protected int m_iVoxLaterN;                    // B7 meters, per run of the list: meshes built, frames, ms, worst, re-queued
+	protected int m_iVoxLaterF;
+	protected int m_iVoxLaterMs;
+	protected int m_iVoxLaterWorst;
+	protected int m_iVoxLaterQ;
 	static const bool COARSE_PLATE = true;     // 5: flat-floor patches get 2 plate tris per hole skin cell
 	protected int m_aWhyBuild[16];     // 0 REBUILD_WHY (TEMP): queued mesh builds per dirt kind bits (1 look, 2 floor, 4 height, 8 sweep)
 	protected int m_iWhySkips;         //   queued small skips
@@ -1076,6 +1085,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_TestKit.BenchTick(timeSlice);    // sheet cost A4 (2026-10-19): 'MUD bench natives' once, 30 s in, clients
 		// MUD_Prof (TEMP 2026-10-18): each part's ms
 		int tP = System.GetTickCount();
+		if (!m_aVoxLater.IsEmpty())
+			VoxLaterStep();     // stage 2 B7: one go-live patch mesh per frame
 		MUD_VoxelProbe.Tick(m_fTime);    // TEMP probe 2026-10-12
 		MUD_Prof.Add(MUD_Prof.VOX, System.GetTickCount(tP));
 		tP = System.GetTickCount();
@@ -3682,6 +3693,10 @@ class MUD_WorldGroundEntity : GenericEntity
 		int now;
 		int dropped;
 		int meshes;
+		int colMs;     // stage 2 B7 meter: collider ms, mesh ms, meshes put off
+		int meshMs;
+		int later;
+		bool vLater = VOX_MESH_LATER && MUD_MudSheet.LocalOn();
 		int t0 = System.GetTickCount();
 		int px0 = Math.Max(0, Math.Floor(cx0 / SKIN));
 		int px1 = Math.Min(m_iNPX - 1, Math.Floor(cx1 / SKIN));
@@ -3724,18 +3739,29 @@ class MUD_WorldGroundEntity : GenericEntity
 				}
 				else if (p.m_iBuild == 0 && !p.m_bAsleep)
 				{
+					int tc = System.GetTickCount();
 					BuildCollider(p);
+					colMs += System.GetTickCount(tc);
 					p.m_fColAt = m_fTime;
 					now++;
 				}
 				else if (p.m_iBuild == BUILD_COVER)
 					p.m_iBuild = BUILD_COLLIDER;    // its collider has the old cells: build it again before the cover
-				if (m_bRender && p.m_iBuild == 0 && p.m_Ent)
+				if (vLater && m_bRender && p.m_iBuild == 0 && p.m_Ent)
+				{
+					// stage 2 B7 VOX_MESH_LATER: the sheet draws over it - its mesh comes one per frame after this one
+					if (m_aVoxLater.Find(p.m_iKey) < 0)
+						m_aVoxLater.Insert(p.m_iKey);
+					later++;
+				}
+				else if (m_bRender && p.m_iBuild == 0 && p.m_Ent)
 				{
 					// mesh now, in the frame the bricks show, asleep ones too: the queue waits (one per frame, Mesh
 					// Interval) and skips sleeping patches, so the old surface (ruts) lay over the crater
 					// (user 2026-10-13 20:24)
+					int tm = System.GetTickCount();
 					BuildMesh(p);
+					meshMs += System.GetTickCount(tm);
 					p.m_fMeshAt = m_fTime;
 					meshes++;
 				}
@@ -3757,8 +3783,56 @@ class MUD_WorldGroundEntity : GenericEntity
 			}
 		}
 		if (changed > 0)
-			Print(string.Format("MUD world: voxel cells live - %1 patches took the voxel cells (%2 colliders rebuilt now, %3 dropped: all voxel, %4 meshes now) in %5 ms", changed, now, dropped, meshes, System.GetTickCount(t0)), LogLevel.NORMAL);
+			Print(string.Format("MUD world: voxel cells live - %1 patches took the voxel cells (%2 colliders rebuilt now, %3 dropped: all voxel, %4 meshes now) in %5 ms", changed, now, dropped, meshes, System.GetTickCount(t0))
+				+ string.Format(" | colliders %1 ms, meshes %2 ms, meshes later %3 (B7 %4)", colMs, meshMs, later, vLater), LogLevel.NORMAL);
 		return changed;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B7 VOX_MESH_LATER (EOnFrame, before the voxel tick): build the next go-live patch mesh DoVoxCells put off.
+	//! A patch gone / building / without entity goes to the normal mesh queue instead. Prints once the list is empty.
+	protected void VoxLaterStep()
+	{
+		int key = m_aVoxLater[0];
+		m_aVoxLater.RemoveOrdered(0);
+		m_iVoxLaterF++;
+		MUD_FinePatch p = m_mPatches.Get(key);
+		if (p && m_bRender && p.m_iBuild == 0 && p.m_Ent)
+		{
+			int t0 = System.GetTickCount();
+			BuildMesh(p);
+			p.m_fMeshAt = m_fTime;
+			int ms = System.GetTickCount(t0);
+			m_iVoxLaterN++;
+			m_iVoxLaterMs += ms;
+			if (ms > m_iVoxLaterWorst)
+				m_iVoxLaterWorst = ms;
+		}
+		else if (p && m_bRender)
+		{
+			p.m_bMeshDirty = true;     // as DoVoxCells' queued branch
+			p.m_bMBoxAll = true;
+			p.m_bRutMesh = false;
+			p.m_bHMesh = true;
+			if (LOOK_PACE)
+				p.m_fMeshHoldTo = -100;
+			if (!p.m_bQueued)
+			{
+				p.m_bQueued = true;
+				p.m_fQueuedAt = m_fTime;
+				m_aDirty.Insert(p.m_iKey);
+			}
+			m_iVoxLaterQ++;
+		}
+		if (!m_aVoxLater.IsEmpty())
+			return;
+		Print(string.Format("MUD world: voxel cells meshes later - %1 built over %2 frames, %3 ms (worst %4 ms), %5 to the mesh queue",
+			m_iVoxLaterN, m_iVoxLaterF, m_iVoxLaterMs, m_iVoxLaterWorst, m_iVoxLaterQ), LogLevel.NORMAL);
+		m_iVoxLaterN = 0;
+		m_iVoxLaterF = 0;
+		m_iVoxLaterMs = 0;
+		m_iVoxLaterWorst = 0;
+		m_iVoxLaterQ = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
