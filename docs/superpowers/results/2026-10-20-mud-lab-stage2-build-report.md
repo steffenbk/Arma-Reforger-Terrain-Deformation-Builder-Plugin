@@ -122,3 +122,12 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   are rebuilt. Timeout PRE_MAX_MS 1 s. The shown mesh's Resource is kept until the swap (the callers drop their ref).
   Log per window: `MUD sheet prebuild: <why> after N ms (F ahead frames) | crater ops, builds held, built at close,
   shown, moved -> rebuilt, close ms`. Checkpoint v262 = before. Not compiled.
+- WB 23:46 + DS 23:49 (set 13, user: "the whole game stutters when it explodes on the ruts, the vehicle stops for a split
+  second"). Logs: prebuild close 5-26 ms, but the 5 s prof worst 'sheet' frame went to 92-94 ms (WB) / 60 ms (DS) =
+  the untimed ahead dig (PreStep QueueChange + DigNow). Its PreSurf = TopAt (4 ColTop column scans) per sheet vert at
+  0.15 m, ~11 verts per 0.5 m column, all uncached. The go-live voxel part also rose (WB 55-65 vs 15-26 ms, DS 34 vs
+  17-25 ms) - cause not proven (no sheet call found in UpdateVox).
+- Added B6 PRE_COL_CACHE (set 14 = set 13 + col cache): PreSurf reads each grid column's top once per frame (s_mPreTop,
+  cleared every PreStep and every TakeOp), bilinear as TopAt; a corner without a cached top falls back to TopAt.
+  Prebuild line now ends `| dig ahead N ms (worst frame N) | voxel top reads N, col cache 0/1 (misses -> plain read N)`.
+  Checkpoint v263 = before. Not compiled.

@@ -366,6 +366,9 @@ class MUD_MudSheet
 	static bool CRATER_PREBUILD = false;        // B5: a crater's tiles build while the voxels build it (ahead), shown at its go-live
 	static const int PRE_MS = 5;                // B5: ms per frame for held now-slot builds, and again for held taper builds
 	static const int PRE_MAX_MS = 1000;         // B5: no go-live by then -> the held meshes show anyway
+	static bool PRE_COL_CACHE = false;          // B6: B5's voxel top reads take each grid column's top once per frame
+	static const int PRE_KEY = 40000;           // B6: grid column key gk * PRE_KEY + gi
+	static const float PRE_TOP_NONE = -99999;   // B6: cached 'no top' (TopAt false at that column)
 	static bool CRATER_TAPER_NOW = false;       // B3: the hole's taper tiles build in the go-live frame (cap below)
 	static bool CRATER_EASE_DROP = false;       // B4: a dig drops the running ground ease of every vertex it writes
 	static const int TAPER_NOW_MAX = 12;        // B3: at most this many taper tiles ...
@@ -401,7 +404,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 13;
+	static const int FIX_SETS = 14;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -480,6 +483,11 @@ class MUD_MudSheet
 	protected int m_iPreOps;                    // B5 meters, per window
 	protected int m_iPreHeld;
 	protected int m_iPreFrames;
+	protected int m_iPreDigMs;                  // B5 meters: ahead dig ms (all, worst frame) per window
+	protected int m_iPreDigWorst;
+	protected static ref map<int, float> s_mPreTop = new map<int, float>();   // B6: column top this frame (PreNode)
+	protected static int s_iPreReads;           // B5 / B6 meters per window: PreSurf reads, cache misses -> plain TopAt
+	protected static int s_iPreFall;
 	protected int m_iWouldSkip;                 // builds whose drawn heights changed less than WOULD_SKIP_M
 	static const float WOULD_SKIP_M = 0.003;
 	protected int m_iTouchCells;                // cells touched (all time)
@@ -2754,12 +2762,63 @@ class MUD_MudSheet
 	//! go-live's tops until the next one): TopAt with the rut floor under it (a little smoother at rut edges)
 	static bool PreSurf(float x, float z, out float y)
 	{
-		if (!MUD_VoxelProbe.TopAt(x, z, y))
-			return false;
+		s_iPreReads++;
+		if (!PRE_COL_CACHE || !PreTopCached(x, z, y))
+		{
+			if (!MUD_VoxelProbe.TopAt(x, z, y))
+				return false;
+		}
 		float f = MUD_VoxelProbe.FieldFloorAt(x, z, y);
 		if (f < y)
 			y = f;
 		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B6 PRE_COL_CACHE (PreSurf): TopAt from the 4 grid column tops round x, z, each read once per frame (TopAt scans
+	//! 4 columns per call, ~11 sheet verts share a column). False = a corner has no cached top (box edge, no origin):
+	//! the caller reads TopAt itself (counted in s_iPreFall)
+	protected static bool PreTopCached(float x, float z, out float y)
+	{
+		float x0;
+		float z0;
+		if (!MUD_VoxelProbe.LookOrigin(x0, z0))
+		{
+			s_iPreFall++;
+			return false;
+		}
+		float gx = (x - x0) / MUD_VoxelProbe.CELL;
+		float gz = (z - z0) / MUD_VoxelProbe.CELL;
+		int gi = Math.Floor(gx);
+		int gk = Math.Floor(gz);
+		float fx = gx - gi;
+		float fz = gz - gk;
+		float h00;
+		float h10;
+		float h01;
+		float h11;
+		if (!PreNode(gi, gk, x0, z0, h00) || !PreNode(gi + 1, gk, x0, z0, h10) || !PreNode(gi, gk + 1, x0, z0, h01) || !PreNode(gi + 1, gk + 1, x0, z0, h11))
+		{
+			s_iPreFall++;
+			return false;
+		}
+		y = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+		return true;
+	}
+
+	//! B6: grid column gi, gk's top (TopAt right at the column = its top), cached until s_mPreTop is cleared
+	//! (every PreStep, every TakeOp: the data only changes with an op)
+	protected static bool PreNode(int gi, int gk, float x0, float z0, out float h)
+	{
+		if (gi < 0 || gk < 0 || gi >= PRE_KEY || gk >= PRE_KEY)
+			return false;
+		int key = gk * PRE_KEY + gi;
+		if (s_mPreTop.Find(key, h))
+			return h != PRE_TOP_NONE;
+		if (!MUD_VoxelProbe.TopAt(x0 + gi * MUD_VoxelProbe.CELL, z0 + gk * MUD_VoxelProbe.CELL, h))
+			h = PRE_TOP_NONE;
+		s_mPreTop.Set(key, h);
+		return h != PRE_TOP_NONE;
 	}
 
 	//! DigNow's voxel ground read: uncached in the ahead dig (B5)
@@ -2820,6 +2879,8 @@ class MUD_MudSheet
 			PreForget();
 			return;
 		}
+		s_mPreTop.Clear();     // B6: a new frame - ops may have carved since
+		int preT0 = System.GetTickCount();
 		bool dig = false;
 		for (int i = 0; i < m_aPreSt.Count(); i++)
 		{
@@ -2832,6 +2893,10 @@ class MUD_MudSheet
 				m_iPreOps = 0;
 				m_iPreHeld = 0;
 				m_iPreFrames = 0;
+				m_iPreDigMs = 0;
+				m_iPreDigWorst = 0;
+				s_iPreReads = 0;
+				s_iPreFall = 0;
 			}
 			m_aPreSt[i] = 1;
 			m_iPreOps++;
@@ -2865,6 +2930,10 @@ class MUD_MudSheet
 			m_bPreDig = false;
 			m_aNowLo.Clear();
 			m_aNowHi.Clear();
+			int preMs = System.GetTickCount(preT0);
+			m_iPreDigMs += preMs;
+			if (preMs > m_iPreDigWorst)
+				m_iPreDigWorst = preMs;
 		}
 		if (!m_bPreWin)
 			return;
@@ -2944,11 +3013,14 @@ class MUD_MudSheet
 		m_aHoldKey.Clear();
 		m_aHoldOld.Clear();     // after every SetObject above
 		m_mPreTiles.Clear();
+		s_mPreTop.Clear();
 		m_bPreWin = false;
 		if (why == "go-live")
 			PreForget();     // every crater of this go-live passed GroundChanged already
 		Print(string.Format("MUD sheet prebuild: %1 after %2 ms (%3 ahead frames) | crater ops %4, builds held %5, built at close %6, shown %7, moved -> rebuilt %8, close %9 ms",
-			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0)), LogLevel.NORMAL);
+			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0))
+			+ string.Format(" | dig ahead %1 ms (worst frame %2) | voxel top reads %3, col cache %4 (misses -> plain read %5)",
+			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3637,7 +3709,8 @@ class MUD_MudSheet
 		CRATER_TRACE_NOW = b;
 		CRATER_TAPER_NOW = b;
 		CRATER_EASE_DROP = b;
-		CRATER_PREBUILD = s == 13;          // B5: set 13 = set 12 + prebuild
+		CRATER_PREBUILD = s == 13 || s == 14;     // B5: set 13 = set 12 + prebuild
+		PRE_COL_CACHE = s == 14;           // B6: set 14 = set 13 + column cache
 		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
 	}
@@ -3694,6 +3767,8 @@ class MUD_MudSheet
 			s += " crater_ease";
 		if (CRATER_PREBUILD)
 			s += " prebuild";
+		if (PRE_COL_CACHE)
+			s += " col_cache";
 		if (s == "")
 			return "off";
 		return s.Trim();
@@ -6343,6 +6418,8 @@ class MUD_MudSheet
 	//! both: the voxels take it too (tunnel / zone edge) - held until their go-live (SYNC), true returned.
 	static bool TakeOp(MUD_VoxelOp op, bool both)
 	{
+		if (PRE_COL_CACHE)
+			s_mPreTop.Clear();     // stage 2 B6: this op carves the voxels next - cached column tops are stale
 		if (CRATER_PREBUILD && ENABLED && s_Inst && s_Inst.m_bLocal && op && op.m_iKind == 0)
 			s_Inst.PreNote(op);     // stage 2 B5: the voxels carve it right after this - dug ahead next Frame
 		if (!ONE_GRID || !ENABLED || !s_Inst || !s_Inst.m_bOneHidden || !op)
