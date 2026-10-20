@@ -348,6 +348,46 @@ class MUD_MudSheet
 	static const float EDGE_STEP = 0.03;        // m: drawn neighbour this much lower = a visible step
 	protected ref map<int, ref array<float>> m_mEdgeRec = new map<int, ref array<float>>();   // TrailKey -> 12 x TV
 	protected static int s_iLabPreset;
+	// MUD LAB STAGE 2 (prompt prompts/2026-10-20-local-mud-lab-stage2.md, research/2026-10-20-sheet-local-edges-craters.md;
+	// checkpoint v255 = before): sheet local fixes, each its own switch, all default off. TEST_KIT numpad * (KC_MULTIPLY)
+	// while sheet local runs cycles the fix sets (FixApply); sheet local off (or a new play) = none.
+	// part A: tile-edge wall
+	static bool EDGE_COBUILD_PICK = false;      // A2: dirty band / stamp slots beside a picked wheel slot build with it
+	static bool EDGE_COBUILD = false;           // A3: a build whose border differs from the tile beside builds that one too
+	static bool SKIRT_APRON = false;            // A4: skirt bottom verts go out ~45 deg down to under the ground, own UVs
+	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
+	static const float EDGE_CO_STEP = 0.03;     // A3: m between our border vert and the neighbour's = co-build (EDGE_STEP)
+	static const int CO_MAX = 4;                // A3: stored neighbours built at once per upload; the rest are queued
+	// part B: crater delay (O1a / O1b / O1c of the research)
+	static bool CRATER_TRACE_NOW = false;       // B2: a now-slot not traced yet is traced / filled and built in the go-live
+	static bool CRATER_TAPER_NOW = false;       // B3: the hole's taper tiles build in the go-live frame (cap below)
+	static bool CRATER_EASE_DROP = false;       // B4: a dig drops the running ground ease of every vertex it writes
+	static const int TAPER_NOW_MAX = 12;        // B3: at most this many taper tiles ...
+	static const int TAPER_NOW_MS = 15;         // ... and this many ms in the go-live frame
+	// part C: cost
+	static bool BAND_INCR = false;              // C1: band from a kept distance field, updated only round new touched cells
+	static bool BAND_MICRO = false;             // C2: BandTile reads the field directly, no Math.Min / Math.Cos
+	static bool BUILD_SKIP_SAME = false;        // C3: a rebuild that moves no vert 3 mm (classes same) keeps the old mesh
+	static bool UV64_FAST = false;              // C4: TOP_UV64 UVs into their own array (no x1e6 round trip via cix)
+	static bool BAND_STORED_HOLD = false;       // C5: band-only stored rebuilds obey SLOT_MIN_S
+	static const int FIX_SETS = 8;
+	protected static int s_iFixSet;
+	// part A meters (10 s, LocalLog) and state
+	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
+	protected int m_iCoLive;                    // A3: live neighbours built in the same upload / next upload
+	protected int m_iCoStored;                  // A3: stored neighbours built now
+	protected int m_iCoCapped;                  // A3: stored neighbours queued (over CO_MAX)
+	protected int m_iCoStoredUp;                // A3: stored co-builds since the last upload (CO_MAX)
+	protected int m_iBornFront;                 // A5: front builds
+	protected bool m_bCoBuilding;               // A3: a co-build runs (it triggers no co-builds: no ping-pong)
+	protected bool m_bInUpload;                 // A3: Upload's slot loop runs (live neighbours join it)
+	protected bool m_bCoAny;                    // A3: some slot got m_aCoLive in this upload
+	protected int m_aCoLive[16];                // A3: 1 = build in this upload (co-build)
+	protected int m_aCoNext[16];                // A3: 1 = build at the next upload (co-build)
+	protected int m_aWheelSlot[16];             // A2: 1 = a wheel contact lies in the slot (this upload)
+	protected ref array<int> m_aFrontTx = {};   // A5: tiles built before the radius list
+	protected ref array<int> m_aFrontTz = {};
+	protected int m_iSkirtFrom;                 // A4: first skirt vert of the mesh being built
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
 	static const int BW_OLDEST = 1;
@@ -360,7 +400,8 @@ class MUD_MudSheet
 	static const int BW_FIT = 8;                // picked because no more than UPLOAD_SLOTS slots were dirty
 	static const int BW_HOLE = 9;               // crater / dig: built in the blast frame (DoDigNow)
 	static const int BW_OP = 10;                // MUD LAB part E: a remote truck's rut op (OpStamps)
-	static const int BW_N = 11;
+	static const int BW_COBUILD = 11;           // MUD LAB stage 2 part A: built beside a tile (EDGE_COBUILD_PICK / EDGE_COBUILD)
+	static const int BW_N = 12;
 	// slot dirt sources (m_aSlotWhy bits): which marks made a live slot dirty since its last build
 	static const int WHY_STAMP = 1;
 	static const int WHY_SLUMP = 2;
@@ -378,7 +419,7 @@ class MUD_MudSheet
 	protected int m_aSlotNow[16];               // 1 = hole in this slot: build it in the blast frame (DoDigNow)
 	protected int m_iMarkWhy = 8;               // WHY_* MarkRect adds (WHY_OTHER unless a caller sets it)
 	protected int m_iBuildWhy = 5;              // BW_* the next BuildTile counts (BW_RESTORE unless a caller sets it)
-	protected int m_aBuildsBy[11];              // builds by reason, this 10 s
+	protected int m_aBuildsBy[12];              // builds by reason, this 10 s
 	protected bool m_bMarkNow;                  // MarkRect also flags m_aSlotNow (hole marks in a go-live)
 	protected bool m_bQueueFront;               // QueueBuild puts the key at the FRONT of m_aOneBuild (DigNow taper neighbours)
 	protected int m_iWouldSkip;                 // builds whose drawn heights changed less than WOULD_SKIP_M
@@ -912,6 +953,7 @@ class MUD_MudSheet
 	protected void Frame(float time)
 	{
 		int tPre = System.GetTickCount();
+		int bPre = s_iBandMsAll;     // stage 2 A1: BuildNowSlots' BandTile
 		if (m_bNowDue)
 			StepNow();
 		else if (!m_aPend.IsEmpty() && System.GetTickCount(m_iPendT) > PEND_MAX_MS)
@@ -919,7 +961,7 @@ class MUD_MudSheet
 			Print(string.Format("MUD one grid: %1 held ops, no voxel go-live in %2 ms -> sheet now", m_aPend.Count(), PEND_MAX_MS), LogLevel.WARNING);
 			ApplyPending();
 		}
-		MUD_Prof.Add(MUD_Prof.SH_PRE, System.GetTickCount(tPre));
+		MUD_Prof.Add(MUD_Prof.SH_PRE, System.GetTickCount(tPre) - (s_iBandMsAll - bPre));
 		if (!m_mEase.IsEmpty() && (!LEV_L6_EASE || time >= m_fNextEase))
 		{
 			if (LEV_L6_EASE)
@@ -965,8 +1007,9 @@ class MUD_MudSheet
 			m_aDying.Remove(dI);
 		}
 		int tZ = System.GetTickCount();
+		int bZ = s_iBandMsAll;     // stage 2 A1: BandTile ms counts as 'band' only, not in the part that called it
 		BuildZones();
-		MUD_Prof.Add(MUD_Prof.SH_ZONES, System.GetTickCount(tZ));
+		MUD_Prof.Add(MUD_Prof.SH_ZONES, System.GetTickCount(tZ) - (s_iBandMsAll - bZ));
 		tZ = System.GetTickCount();
 		GroundJobs();
 		MUD_Prof.Add(MUD_Prof.SH_JOBS, System.GetTickCount(tZ));
@@ -993,9 +1036,10 @@ class MUD_MudSheet
 			if (FOLLOW && !m_bTeleported && (RadiusOn() || m_aBuildTx.IsEmpty()))
 			{
 				int tF = System.GetTickCount();
+				int bF = s_iBandMsAll;     // A1
 				Follow(veh.GetOrigin());
 				m_aStatSec[0] = m_aStatSec[0] + System.GetTickCount(tF);
-				MUD_Prof.Add(MUD_Prof.SH_FOLLOW, System.GetTickCount(tF));
+				MUD_Prof.Add(MUD_Prof.SH_FOLLOW, System.GetTickCount(tF) - (s_iBandMsAll - bF));
 			}
 		}
 		if (m_bPlaced)
@@ -1051,9 +1095,10 @@ class MUD_MudSheet
 			{
 				m_fNextUp = time + UPLOAD_EVERY;
 				tS = System.GetTickCount();
+				int bU = s_iBandMsAll;     // A1
 				Upload();
 				m_aStatSec[4] = m_aStatSec[4] + System.GetTickCount(tS);
-				MUD_Prof.Add(MUD_Prof.SH_UPLOAD, System.GetTickCount(tS));
+				MUD_Prof.Add(MUD_Prof.SH_UPLOAD, System.GetTickCount(tS) - (s_iBandMsAll - bU));
 			}
 		}
 		int ms = System.GetTickCount(t0);
@@ -1296,6 +1341,8 @@ class MUD_MudSheet
 		m_iBoxK1 -= sk;
 		m_Drag.Shift(si, sk);     // L2 / L3 cell sets move with the field (empty while those levers are off)
 		m_Chg.Shift(si, sk);
+		for (int cn = 0; cn < TILES * TILES; cn++)
+			m_aCoNext[cn] = 0;     // stage 2 A3: slot numbers moved (the shift rebuilds its slots anyway)
 		// 3. empty slots: the trail tile there comes back to life, else a spare or new entity
 		int nTx = m_iX0 / TQ;
 		int nTz = m_iZ0 / TQ;
@@ -1388,6 +1435,8 @@ class MUD_MudSheet
 		s_iCoverGen++;
 		if (preset <= 0 && s_iLeverSet != 0)
 			LeverApply(0, why);
+		if (preset <= 0 && s_iFixSet != 0)
+			FixApply(0, why);
 		Print(string.Format("MUD sheet local: preset %1 (enabled %2, sync %3, band in %4 m, fade %5 m) | %6", preset, ENABLED, SYNC, BAND_IN, BAND_FADE, why), LogLevel.NORMAL);
 	}
 
@@ -1571,6 +1620,8 @@ class MUD_MudSheet
 					m_bDirty = true;
 					continue;
 				}
+				if (BAND_BORN_FRONT)
+					BornFront(tx, tz, key);     // stage 2 A5: no mesh yet -> built before the radius list
 				if (!born)
 				{
 					m_mBorn.Set(key, 1);     // outside the window: QueueNear builds it, its band in BuildZoneTile
@@ -1581,6 +1632,30 @@ class MUD_MudSheet
 				m_bDirty = true;
 			}
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A5 BAND_BORN_FRONT: tile tx, tz outside the window (born or re-banded now) without a mesh goes to the front
+	//! of the radius builds (Radius takes m_aFrontTx first; QueueNear's re-sort does not touch it). Only within MESH_R
+	//! of the last radius camera and where the sheet is wanted (as QueueNear).
+	protected void BornFront(int tx, int tz, int key)
+	{
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (st && st.m_Ent)
+			return;     // has its mesh: a re-band rebuilds it (BandStored)
+		if (!m_bLodCam || !SheetWanted(tx, tz))
+			return;
+		float mx = (tx + 0.5) * TILE_M - m_vLodCam[0];
+		float mz = (tz + 0.5) * TILE_M - m_vLodCam[2];
+		if (mx * mx + mz * mz > MESH_R * MESH_R)
+			return;
+		for (int f = 0; f < m_aFrontTx.Count(); f++)
+		{
+			if (m_aFrontTx[f] == tx && m_aFrontTz[f] == tz)
+				return;
+		}
+		m_aFrontTx.Insert(tx);
+		m_aFrontTz.Insert(tz);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1770,7 +1845,7 @@ class MUD_MudSheet
 	protected int UploadWhy(int t)
 	{
 		int pw = m_aPickWhy[t];
-		if (pw == BW_MESHLESS)
+		if (pw == BW_MESHLESS || pw == BW_COBUILD)
 			return pw;
 		int w = m_aSlotWhy[t];
 		if (w == WHY_SLUMP)
@@ -2092,6 +2167,233 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! A3 with EDGE_AUDIT off: the edge records of tiles no longer drawn go (EdgeAudit does it while it runs)
+	protected void EdgePrune()
+	{
+		array<int> gone = {};
+		foreach (int key, array<float> ea : m_mEdgeRec)
+		{
+			if (!ea || !EdgeDrawn(key))
+				gone.Insert(key);
+		}
+		foreach (int g : gone)
+			m_mEdgeRec.Remove(g);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A2: m_aWheelSlot[t] = 1 where a wheel contact of a vehicle lies in live slot t (as PickWheelSlots finds them)
+	protected void WheelSlotMask()
+	{
+		for (int c = 0; c < TILES * TILES; c++)
+			m_aWheelSlot[c] = 0;
+		array<Vehicle> vs = MUD_Wheels.GetAll();
+		if (LEV_L8_VEH)
+			vs = m_aNearVeh;
+		foreach (int vi, Vehicle v : vs)
+		{
+			if (!v)
+				continue;
+			VehicleWheeledSimulation sim;
+			if (LEV_L8_VEH)
+				sim = m_aNearSim[vi];
+			else
+				sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+			if (!sim)
+				continue;
+			int count = sim.WheelCount();
+			for (int w = 0; w < count; w++)
+			{
+				if (!sim.WheelHasContact(w))
+					continue;
+				vector cp = sim.WheelGetContactPosition(w);
+				int i = Math.Round(cp[0] / CELL) - m_iX0;
+				int k = Math.Round(cp[2] / CELL) - m_iZ0;
+				if (i < 0 || i >= N || k < 0 || k >= N)
+					continue;
+				int ti = Math.Min(i / TQ, TILES - 1);     // ints first: Math.Min returns float
+				int tk = Math.Min(k / TQ, TILES - 1);
+				m_aWheelSlot[tk * TILES + ti] = 1;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 part A, after UploadPick. A2 (EDGE_COBUILD_PICK): a dirty zone slot dirtied by the band or a stamp, beside
+	//! a picked wheel slot, is picked too (no SLOT_MIN_S hold, outside UPLOAD_SLOTS; Upload still waits for its traces).
+	//! A3 (EDGE_COBUILD): slots a co-build asked for at the last upload (m_aCoNext) are picked as co-builds.
+	protected void CoPick()
+	{
+		if (EDGE_COBUILD)
+		{
+			for (int n = 0; n < TILES * TILES; n++)
+			{
+				if (m_aCoNext[n] == 0)
+					continue;
+				m_aCoNext[n] = 0;
+				if (m_aSlotZone[n] == 0)
+					continue;
+				m_aSlotDirty[n] = 1;
+				m_aPick[n] = 1;
+				m_aPickWhy[n] = BW_COBUILD;
+				m_aCoLive[n] = 1;
+			}
+		}
+		if (!EDGE_COBUILD_PICK)
+			return;
+		WheelSlotMask();
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aWheelSlot[t] == 0 || m_aSlotDirty[t] == 0 || m_aPick[t] != 1)
+				continue;
+			int ti = t % TILES;
+			int tk = t / TILES;
+			for (int s = 0; s < 4; s++)
+			{
+				int ni = ti;
+				int nk = tk;
+				if (s == 0)
+					nk--;
+				else if (s == 1)
+					nk++;
+				else if (s == 2)
+					ni--;
+				else
+					ni++;
+				if (ni < 0 || ni >= TILES || nk < 0 || nk >= TILES)
+					continue;
+				int u = nk * TILES + ni;
+				if (m_aSlotDirty[u] == 0 || m_aSlotZone[u] == 0 || (m_aSlotWhy[u] & (WHY_BAND | WHY_STAMP)) == 0)
+					continue;
+				if (m_aPick[u] != 0 && m_aPick[u] != 2)
+					continue;
+				m_aPick[u] = 1;
+				m_aPickWhy[u] = BW_COBUILD;
+				m_iCoPick++;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A3 EDGE_COBUILD, after a build of tile tx, tz (its edge record is new): each side whose border verts differ from
+	//! the drawn neighbour's by more than EDGE_CO_STEP, or where one side is drawn raised and the other is not drawn,
+	//! gets the neighbour built too. Live neighbour: in this upload (we are in Upload's slot loop) or the next one.
+	//! Stored neighbour with an entity: now, at most CO_MAX per upload (the rest queued). Unborn neighbours: nothing to
+	//! build. A co-build triggers no co-builds (m_bCoBuilding).
+	protected void CoCheck(int tx, int tz)
+	{
+		array<float> ea = m_mEdgeRec.Get(TrailKey(tx, tz));
+		if (!ea)
+			return;
+		for (int s = 0; s < 4; s++)
+		{
+			int ntx = tx + 1;
+			int ntz = tz;
+			int os = 2;
+			if (s == 0)
+			{
+				ntx = tx;
+				ntz = tz - 1;
+				os = 1;
+			}
+			else if (s == 1)
+			{
+				ntx = tx;
+				ntz = tz + 1;
+				os = 0;
+			}
+			else if (s == 2)
+			{
+				ntx = tx - 1;
+				os = 3;
+			}
+			int nk = TrailKey(ntx, ntz);
+			if (!m_mBorn.Contains(nk))
+				continue;
+			array<float> nb = null;
+			if (EdgeDrawn(nk))
+				nb = m_mEdgeRec.Get(nk);
+			bool need = false;
+			for (int j = 1; j < TQ && !need; j++)
+			{
+				int e = s * TV + j;
+				float y = ea[e];
+				float ny = -30000;
+				float nr = 0;
+				if (nb)
+				{
+					ny = nb[os * TV + j];
+					nr = nb[4 * TV + os * TV + j];
+				}
+				if (y < -9000 && ny < -9000)
+					continue;
+				if (y < -9000)
+					need = nr >= EDGE_RAISED;     // the neighbour shows raised here, we draw nothing
+				else if (ny < -9000)
+					need = ea[4 * TV + e] >= EDGE_RAISED;
+				else
+					need = Math.AbsFloat(y - ny) > EDGE_CO_STEP;
+			}
+			if (need)
+				CoBuild(ntx, ntz);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A3: build neighbour tile tx, tz for a co-build (see CoCheck)
+	protected void CoBuild(int tx, int tz)
+	{
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
+				return;
+			if (m_bInUpload)
+			{
+				if (m_aCoLive[t] != 0)
+					return;
+				m_aCoLive[t] = 1;
+				m_aSlotDirty[t] = 1;
+				m_aPick[t] = 1;
+				m_aPickWhy[t] = BW_COBUILD;
+				m_bCoAny = true;
+				return;
+			}
+			m_aCoNext[t] = 1;
+			m_aSlotDirty[t] = 1;
+			m_bDirty = true;
+			return;
+		}
+		int key = TrailKey(tx, tz);
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (!st || !st.m_Ent)
+			return;     // data only or none: its mesh comes with the radius builds
+		if (m_iCoStoredUp >= CO_MAX)
+		{
+			m_iCoCapped++;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_COBUILD);
+			QueueBuild(tx, tz);
+			return;
+		}
+		m_iCoStoredUp++;
+		m_iCoStored++;
+		int bq = m_aBandQ.Find(key);
+		if (bq >= 0)
+		{
+			m_aBandQ.Remove(bq);
+			BandTile(tx, tz, st.m_D, 0, 0);     // its band is due: bring it up to date first
+		}
+		int keepWhy = m_iBuildWhy;
+		m_bCoBuilding = true;
+		m_iBuildWhy = BW_COBUILD;
+		Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
+		if (res)
+			st.m_Res = res;
+		m_bCoBuilding = false;
+		m_iBuildWhy = keepWhy;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! SHEET LOCAL 10 s line (Log10): builds by reason, then reset
 	protected void LocalLog()
 	{
@@ -2099,11 +2401,21 @@ class MUD_MudSheet
 			m_aBuildsBy[BW_WHEEL], m_aBuildsBy[BW_OLDEST], m_aBuildsBy[BW_NEAREST], m_aBuildsBy[BW_MESHLESS], m_aBuildsBy[BW_FREEZE], m_aBuildsBy[BW_RESTORE], m_aBuildsBy[BW_SLUMP], m_aBuildsBy[BW_BAND]);
 		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3, op %5 | born slots waited for traces %4 uploads",
 			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait, m_aBuildsBy[BW_OP]);
-		Print(p1 + p2 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
+		// stage 2 A6: co-builds (the cobuild builds by reason = pick + live + stored + queued ones that ran)
+		string p3 = string.Format(" | cobuild pick %1, cobuild live %2, cobuild stored %3 (capped %4), cobuild builds %5, born front %6",
+			m_iCoPick, m_iCoLive, m_iCoStored, m_iCoCapped, m_aBuildsBy[BW_COBUILD], m_iBornFront);
+		if (!EDGE_AUDIT && EDGE_COBUILD)
+			EdgePrune();
+		Print(p1 + p2 + p3 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
 		m_iWouldSkip = 0;
 		m_iBornWait = 0;
+		m_iCoPick = 0;
+		m_iCoLive = 0;
+		m_iCoStored = 0;
+		m_iCoCapped = 0;
+		m_iBornFront = 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2117,6 +2429,73 @@ class MUD_MudSheet
 		LEV_L6_EASE = s == 1 || s == 5;
 		LEV_L8_VEH = s == 1 || s == 6;
 		Print(string.Format("MUD sheet levers: %1 | %2", LeverNames(), why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB stage 2: fix set s. 0 none, 1 A2, 2 A2 A3, 3 A2 A3 A4 A5 (all A), 4 C1 C2 (band), 5 all C, 6 all A + all C,
+	//! 7 all B (craters), 8 all A + B + C
+	static void FixApply(int s, string why)
+	{
+		s_iFixSet = s;
+		bool a = s == 3 || s == 6 || s == 8;
+		bool c = s == 5 || s == 6 || s == 8;
+		bool b = s == 7 || s == 8;
+		EDGE_COBUILD_PICK = a || s == 1 || s == 2;
+		EDGE_COBUILD = a || s == 2;
+		SKIRT_APRON = a;
+		BAND_BORN_FRONT = a;
+		BAND_INCR = c || s == 4;
+		BAND_MICRO = c || s == 4;
+		BUILD_SKIP_SAME = c;
+		UV64_FAST = c;
+		BAND_STORED_HOLD = c;
+		CRATER_TRACE_NOW = b;
+		CRATER_TAPER_NOW = b;
+		CRATER_EASE_DROP = b;
+		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT numpad * while sheet local runs: the next fix set (FixApply)
+	static void LabFixStep(string why)
+	{
+		int s = s_iFixSet + 1;
+		if (s > FIX_SETS)
+			s = 0;
+		FixApply(s, why);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static string FixNames()
+	{
+		string s = "";
+		if (EDGE_COBUILD_PICK)
+			s += " cobuild_pick";
+		if (EDGE_COBUILD)
+			s += " cobuild";
+		if (SKIRT_APRON)
+			s += " apron";
+		if (BAND_BORN_FRONT)
+			s += " born_front";
+		if (BAND_INCR)
+			s += " band_incr";
+		if (BAND_MICRO)
+			s += " band_micro";
+		if (BUILD_SKIP_SAME)
+			s += " skip_same";
+		if (UV64_FAST)
+			s += " uv64_fast";
+		if (BAND_STORED_HOLD)
+			s += " stored_hold";
+		if (CRATER_TRACE_NOW)
+			s += " crater_trace";
+		if (CRATER_TAPER_NOW)
+			s += " crater_taper";
+		if (CRATER_EASE_DROP)
+			s += " crater_ease";
+		if (s == "")
+			return "off";
+		return s.Trim();
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3507,13 +3886,24 @@ class MUD_MudSheet
 			m_bLodCam = true;
 			LodUpgrade(cp);
 		}
-		if (m_aBuildTx.IsEmpty())
+		if (m_aBuildTx.IsEmpty() && m_aFrontTx.IsEmpty())
 			return;
 		int tB = System.GetTickCount();
 		int built = 0;
 		int buildMs = RAD_BUILD_MS;
 		if (m_bLocal)
 			buildMs = MESH_MS;     // MUD LAB part D
+		// stage 2 A5: born / re-banded tiles first (same ms budget)
+		while (!m_aFrontTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < buildMs))
+		{
+			int fx = m_aFrontTx[0];
+			int fz = m_aFrontTz[0];
+			m_aFrontTx.RemoveOrdered(0);
+			m_aFrontTz.RemoveOrdered(0);
+			BuildZoneTile(fx, fz);
+			m_iBornFront++;
+			built++;
+		}
 		while (!m_aBuildTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < buildMs))
 		{
 			int n = m_aBuildTx.Count();
@@ -3929,9 +4319,10 @@ class MUD_MudSheet
 			}
 		}
 		FillTile(d);
+		int bD = s_iBandMsAll;     // stage 2 A1
 		if (m_bLocal)
 			BandTile(tx, tz, d, 0, 0);     // SHEET LOCAL: band from the touched cells around it
-		MUD_Prof.Add(MUD_Prof.Z_DATA, System.GetTickCount(tZ));
+		MUD_Prof.Add(MUD_Prof.Z_DATA, System.GetTickCount(tZ) - (s_iBandMsAll - bD));
 		tZ = System.GetTickCount();
 		st.m_Ent = SpawnTile(tx, tz, d.m_aG[0]);
 		MUD_Prof.Add(MUD_Prof.Z_SPAWN, System.GetTickCount(tZ));
@@ -7213,94 +7604,123 @@ class MUD_MudSheet
 		int x0 = m_iX0 / TQ;
 		int z0 = m_iZ0 / TQ;
 		UploadPick(x0, z0);
-		for (int tk = 0; tk < TILES; tk++)
+		// stage 2 part A: co-build picks; pass 1 builds the live neighbours an earlier slot's build asked for (A3)
+		m_iCoStoredUp = 0;
+		m_bCoAny = false;
+		for (int c = 0; c < TILES * TILES; c++)
+			m_aCoLive[c] = 0;
+		if (m_bLocal && (EDGE_COBUILD_PICK || EDGE_COBUILD))
+			CoPick();
+		m_bInUpload = true;
+		for (int pass = 0; pass < 2; pass++)
 		{
-			for (int ti = 0; ti < TILES; ti++)
+			if (pass == 1 && !m_bCoAny)
+				break;
+			for (int tk = 0; tk < TILES; tk++)
 			{
-				int t = tk * TILES + ti;
-				if (m_aSlotDirty[t] == 0)
-					continue;
-				if (m_aPick[t] == 2)
+				for (int ti = 0; ti < TILES; ti++)
 				{
-					m_iUpThrottled++;
-					m_bDirty = true;      // D1: built less than SLOT_MIN_S ago - next upload
-					continue;
+					int t = tk * TILES + ti;
+					if (pass == 1 && m_aCoLive[t] == 0)
+						continue;
+					UploadSlot(t, ti, tk, x0, z0);
 				}
-				if (m_aPick[t] == 0)
-				{
-					m_aSlotWait[t] = m_aSlotWait[t] + 1;
-					m_iUpSkipped++;
-					m_bDirty = true;      // S1: next upload
-					continue;
-				}
-				if (m_bLocal && m_aSlotZone[t] != 0 && !SlotTraced(t))
-				{
-					m_iBornWait++;
-					m_bDirty = true;      // SHEET LOCAL: never built before every cell has its ground
-					continue;
-				}
-				m_aSlotDirty[t] = 0;
-				m_aSlotWait[t] = 0;
-				if (m_aSlotZone[t] == 0)
-				{
-					if (m_aTileEnt[t])
-					{
-						m_aTileEnt[t].ClearFlags(EntityFlags.VISIBLE, false);    // no mud outside the zones
-						DropColl(m_aTileEnt[t]);
-					}
-					if (m_aSlotReady[t] != 0)
-						s_iCoverGen++;
-					m_aSlotReady[t] = 0;
-					continue;
-				}
-				if (m_bLocal && m_aSlotBand[t] != 0)
-				{
-					m_aSlotBand[t] = 0;
-					BandTile(x0 + ti, z0 + tk, null, ti, tk);
-				}
-				Pack(ti, tk, m_TD);
-				m_iBuildWhy = UploadWhy(t);
-				Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
-				m_aSlotWhy[t] = 0;
-				if (m_bLocal)
-					CopyLastY(ti, tk);
-				m_aSlotBuiltMs[t] = Math.Round(m_fLast * 1000);
-				if (r)
-					m_aTileRes[t] = r;    // keep the new mesh alive, drop the old one only now
-				int dlKey = (x0 + ti) * 20000 + z0 + tk;     // TEMP delay meter
-				if (r && m_mDlStampT.Contains(dlKey))
-				{
-					float dl = m_fLast - m_mDlStampT.Get(dlKey);
-					m_fDlSum += dl;
-					m_iDlN++;
-					if (dl > m_fDlMax)
-						m_fDlMax = dl;
-					m_fDlDist += dl * m_mDlSpeed.Get(dlKey);
-					m_mDlStampT.Remove(dlKey);
-					m_mDlSpeed.Remove(dlKey);
-				}
-				// LAZY RUT MESH: ready = a mesh drawn with every cell's ground
-				int ready = 0;
-				if (r)
-				{
-					ready = 1;
-					for (int gl = 0; gl < TV * TV; gl++)
-					{
-						if (m_TD.m_aGs[gl] == 0)
-						{
-							ready = 0;
-							break;
-						}
-					}
-				}
-				if (m_aSlotReady[t] != 0 && ready == 0)
-					s_iCoverGen++;
-				m_aSlotReady[t] = ready;
 			}
 		}
+		m_bInUpload = false;
 		m_iStatQuads = m_iBuildQuads;
 		if (m_bLocal && !m_aBandQ.IsEmpty())
 			BandStored();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Upload: live slot t (ti, tk) - built if dirty and picked
+	protected void UploadSlot(int t, int ti, int tk, int x0, int z0)
+	{
+		if (m_aSlotDirty[t] == 0)
+			return;
+		if (m_aPick[t] == 2)
+		{
+			m_iUpThrottled++;
+			m_bDirty = true;      // D1: built less than SLOT_MIN_S ago - next upload
+			return;
+		}
+		if (m_aPick[t] == 0)
+		{
+			m_aSlotWait[t] = m_aSlotWait[t] + 1;
+			m_iUpSkipped++;
+			m_bDirty = true;      // S1: next upload
+			return;
+		}
+		if (m_bLocal && m_aSlotZone[t] != 0 && !SlotTraced(t))
+		{
+			m_iBornWait++;
+			m_bDirty = true;      // SHEET LOCAL: never built before every cell has its ground
+			return;
+		}
+		m_aSlotDirty[t] = 0;
+		m_aSlotWait[t] = 0;
+		if (m_aSlotZone[t] == 0)
+		{
+			if (m_aTileEnt[t])
+			{
+				m_aTileEnt[t].ClearFlags(EntityFlags.VISIBLE, false);    // no mud outside the zones
+				DropColl(m_aTileEnt[t]);
+			}
+			if (m_aSlotReady[t] != 0)
+				s_iCoverGen++;
+			m_aSlotReady[t] = 0;
+			m_aCoLive[t] = 0;
+			return;
+		}
+		if (m_bLocal && m_aSlotBand[t] != 0)
+		{
+			m_aSlotBand[t] = 0;
+			BandTile(x0 + ti, z0 + tk, null, ti, tk);
+		}
+		Pack(ti, tk, m_TD);
+		m_iBuildWhy = UploadWhy(t);
+		m_bCoBuilding = m_aCoLive[t] != 0;     // A3: a co-build asks for no co-builds itself
+		if (m_bCoBuilding)
+			m_iCoLive++;
+		m_aCoLive[t] = 0;
+		Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
+		m_bCoBuilding = false;
+		m_aSlotWhy[t] = 0;
+		if (m_bLocal)
+			CopyLastY(ti, tk);
+		m_aSlotBuiltMs[t] = Math.Round(m_fLast * 1000);
+		if (r)
+			m_aTileRes[t] = r;    // keep the new mesh alive, drop the old one only now
+		int dlKey = (x0 + ti) * 20000 + z0 + tk;     // TEMP delay meter
+		if (r && m_mDlStampT.Contains(dlKey))
+		{
+			float dl = m_fLast - m_mDlStampT.Get(dlKey);
+			m_fDlSum += dl;
+			m_iDlN++;
+			if (dl > m_fDlMax)
+				m_fDlMax = dl;
+			m_fDlDist += dl * m_mDlSpeed.Get(dlKey);
+			m_mDlStampT.Remove(dlKey);
+			m_mDlSpeed.Remove(dlKey);
+		}
+		// LAZY RUT MESH: ready = a mesh drawn with every cell's ground
+		int ready = 0;
+		if (r)
+		{
+			ready = 1;
+			for (int gl = 0; gl < TV * TV; gl++)
+			{
+				if (m_TD.m_aGs[gl] == 0)
+				{
+					ready = 0;
+					break;
+				}
+			}
+		}
+		if (m_aSlotReady[t] != 0 && ready == 0)
+			s_iCoverGen++;
+		m_aSlotReady[t] = ready;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -7775,7 +8195,7 @@ class MUD_MudSheet
 				m_iFarLow++;
 		}
 		Resource res = BuildTileMesh(te, d, tx, tz, live, low);
-		if (m_bLocal && EDGE_AUDIT)
+		if (m_bLocal && (EDGE_AUDIT || EDGE_COBUILD))
 			EdgeRecord(d, tx, tz, res != null);
 		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
 			m_aBuildsBy[m_iBuildWhy] = m_aBuildsBy[m_iBuildWhy] + 1;
@@ -7815,6 +8235,8 @@ class MUD_MudSheet
 				MUD_WorldGroundEntity.SheetLiftDirty(tx * TILE_M, tz * TILE_M);
 			}
 		}
+		if (m_bLocal && EDGE_COBUILD && !m_bCoBuilding)
+			CoCheck(tx, tz);     // stage 2 A3 (last: its builds are timed on their own)
 		return res;
 	}
 
@@ -8122,6 +8544,7 @@ class MUD_MudSheet
 				}
 			}
 			// own skirt over the 2-vertex border steps (same faces as the full one below)
+			m_iSkirtFrom = nv;     // stage 2 A4
 			if ((ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
 			{
 				for (int lsd = 0; lsd < 4; lsd++)
@@ -8396,6 +8819,8 @@ class MUD_MudSheet
 		tPart = System.GetTickCount();
 		int nvColl = nv;        // collider: tile verts / indices only, not the skirt
 		int niColl = ni;
+		if (!low)
+			m_iSkirtFrom = nv;     // stage 2 A4
 		if (!low && (ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
 		{
 			// side 0 south (k 0), 1 north (k TQ), 2 west (i 0), 3 east (i TQ); T0 -> T1 runs so that the quad faces
@@ -8458,6 +8883,30 @@ class MUD_MudSheet
 					tix[ni + 5] = nv + 3;
 					ni += 6;
 					nv += 4;
+				}
+			}
+		}
+		// stage 2 A4 SKIRT_APRON (sheet local): each skirt quad (top0, top1, bottom1, bottom0 from m_iSkirtFrom) gets its
+		// bottom verts moved out from the tile side by the drop (~45 deg) and down to G - BAND_UNDER - 0.02, so the
+		// curtain lies on the ground instead of standing as a wall. Their dirt UVs come from their own position (the top
+		// vert's UV + the offset / SIZE, same frame, its drag kept); TOP_UV64 recomputes all from xz anyway. Own block:
+		// BuildTileMesh is at the 64-locals limit.
+		if (m_bLocal && SKIRT_APRON)
+		{
+			for (int ab = m_iSkirtFrom; ab + 3 < nv; ab += 4)
+			{
+				// outward = (T1 - T0) turned to the right: south -z, north +z, west -x, east +x (see the skirt side order)
+				vector aOut = Vector(tv[ab + 1][2] - tv[ab][2], 0, tv[ab][0] - tv[ab + 1][0]);
+				aOut = aOut * (1 / aOut.Length());
+				for (int au = 0; au < 2; au++)
+				{
+					vector aTop = tv[ab + au];
+					int al = Math.Round(aTop[2] / CELL) * TV + Math.Round(aTop[0] / CELL);
+					float aBy = d.m_aG[al] - BAND_UNDER - 0.02 - orgY;
+					float aDrop = Math.Max(0, aTop[1] - aBy);
+					tv[ab + 3 - au] = Vector(aTop[0] + aOut[0] * aDrop, aBy, aTop[2] + aOut[2] * aDrop);
+					tuv[(ab + 3 - au) * 2] = Math.Clamp(tuv[(ab + au) * 2] + aOut[0] * aDrop / SIZE, 0, 1);
+					tuv[(ab + 3 - au) * 2 + 1] = Math.Clamp(tuv[(ab + au) * 2 + 1] - aOut[2] * aDrop / SIZE, 0, 1);
 				}
 			}
 		}
