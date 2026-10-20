@@ -131,3 +131,12 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   cleared every PreStep and every TakeOp), bilinear as TopAt; a corner without a cached top falls back to TopAt.
   Prebuild line now ends `| dig ahead N ms (worst frame N) | voxel top reads N, col cache 0/1 (misses -> plain read N)`.
   Checkpoint v263 = before. Not compiled.
+- WB 23:56-23:57 (sets 13 / 14, user: still stutters). Set 14 cut the ahead dig 36-37 -> 15-27 ms (reads 2025-4097,
+  0 cache misses). Go-live frame 50-66 ms (set 12 WB: 89-180). Correction: the go-live 'voxel part' did NOT rise with
+  B5 - it is MUD_WorldGround DoVoxCells ('MUD world: voxel cells live' line) rebuilding the rut patches' collider + mesh
+  in that frame, ~7-13 ms per patch, 0 ms where no rut patch is built (off the ruts). Same at set 0 (DS 21:16 / 22:44:
+  10-37 ms). Table (crater, patches, colliders now, meshes now, ms):
+  WB 23:46:49 4/4/4 52 | 23:46:53 4/4/4 55 | 23:47:19 1/1/1 12 | 23:47:23 3/1/3 23 | 23:47:32 4/1/1 14 | 23:48:15 2/1/2 17
+  WB 23:56:56 2/2/2 34 | 23:57:04 4/3/3 44 | 23:57:15 3/1/3 26 | 23:57:23 4/1/3 24 | 23:57:30 2/0/0 0 | 23:57:36 1/1/1 10
+  DS 23:49:24 2/1/2 15 | 23:49:28 4/3/3 24 | 23:49:44 4/2/2 17 | 23:49:48 3/2/2 15 | 23:49:56 4/4/4 33 | 23:50:01 2/0/0 0
+  So the rest of the stutter is the rut side (WorldGround, off limits) - asked the user.
