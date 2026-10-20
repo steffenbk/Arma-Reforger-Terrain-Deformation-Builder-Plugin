@@ -1,117 +1,121 @@
-# Prompt for the local AI: mud lab stage 1 - lab framework + sheet local + wheel spray (2026-10-20)
+# Prompt for the local AI: mud lab stage 1 - lab framework + sheet local + probe field (2026-10-20, v2)
 
-Copy everything below the line into the local AI.
+v2: deformation only (user 2026-10-20). Spray and muddy vehicles are parked. Copy everything below the line.
 
 ---
 
-Build stage 1 of `docs/superpowers/plans/2026-10-20-mud-lab.md` on branch `claude/upbeat-lovelace-q0w022`.
-Stage 1 has three parts: the lab framework, mode 1 "sheet local" and mode 2 "wheel mud spray". Then run one WB smoke
-check (function and look only, no ms) and one DS session (plan sec 4). Stop and report after each launch.
+Build stage 1 of `docs/superpowers/plans/2026-10-20-mud-lab.md` (v2) on branch `claude/upbeat-lovelace-q0w022`.
+Stage 1 has three parts: the lab framework, surface mode "sheet local", and the probe field (wheel track recorder,
+replay, and the first rule lanes). Then run one WB launch (function and look only, no ms) and one DS session (plan
+sec 4). Stop and report after each launch.
 
 ## Read first
 - `CLAUDE.md`.
 - The plan (all of it).
-- `research/2026-10-20-mud-look.md`: why D1 / D2 failed, and the option A details.
+- `research/2026-10-20-mud-look.md`.
 - `results/2026-10-20-mud-two-designs-ds.md`.
-- `research/2026-10-19-whole-map-sheet-issues.md` sec 2-3: crater / dig rebuild, edge fade, upload slots.
+- `research/2026-10-19-whole-map-sheet-issues.md` sec 2-3.
+- `results/2026-10-19-sheet-sync-maths-offline.md`: slump one-pass maths.
 - `mud-gotchas.md`:
   - Enforce limits: 64 locals including parameters, 80 KB VM stack, int[] not bool[], Math.Min/Max return float,
     '%' only on its own int line.
-  - MeshObject rules: a fresh mesh per change, a distinct emat per section, indices go in before vertices, every index
-    below the vertex count.
-- Code you will reuse: `MUD_MudOverlay.c:140-215` (today's numpad 3 cycle and DbgUI label, which become the lab), and
-  `MUD_MudSheet.c` (6624 lines) with `MUD_MudZone.c:62` (`SheetCovers`).
+  - MeshObject rules: a fresh mesh per change, a distinct emat per section, indices before vertices, every index below
+    the vertex count.
+- Code you will reuse:
+  - `MUD_MudOverlay.c:140-215`: the numpad 3 cycle and the DbgUI label;
+  - `MUD_MudSheet.c`, especially `Wheels()` at 4067, `Stamp`, `Slump`, `BuildTileMesh`;
+  - `MUD_MudZone.c:62`: `SheetCovers`.
 
 ## Hard rules
 - **Do not touch the voxel ruts:** rut ops, the rut field, wear, look ruts, patch meshes and colliders, the op format.
-- **The only allowed edits in rut-side files** are the coupling gates the plan lists for sheet local. Each one must keep
-  "sheet off" byte-for-byte today's behaviour. If anything else seems to need a change in a rut file, stop and ask me.
-- **Client only.** Nothing new runs on a DS. Nothing writes J2, ops or snapshots.
+- **The only allowed edits in rut-side files** are the coupling gates the plan lists for sheet local, and each one must
+  keep "sheet off" byte-for-byte today's behaviour. If anything else seems to need a change in a rut file, stop and ask
+  me.
+- **Client only.** Nothing new runs on a DS. Nothing writes J2, ops or snapshots. Probe lanes never submit rut ops.
 - **Defaults off.** New play resets everything to off.
 - **Checkpoints:** `mud_backups/checkpoint.ps1 save "before mud lab"` first, then `... save "before sheet local"` and
-  `... save "before mud spray"` before those parts.
+  `... save "before probe field"` before those parts.
 - **Git:** `git add --ignore-removal .`, commit per part, push to this branch. No PR.
 
 ## Part A - lab framework
-1. Create a new file `Scripts/Game/Mud/MUD_MudLab.c` (plan sec 1).
-   - The mode registry has surface modes (one at a time) and add-ons (stackable).
-   - Use a base class `MUD_LabMode`, or a switch if inheritance fights you.
-   - Move the numpad 3 cycle and the DbgUI label out of MUD_MudOverlay into it. D1 and D2 become registered surface
-     modes with their existing presets. They must behave exactly as before.
-2. Change the call site `MUD_WorldGround.c:1086` from `MUD_MudOverlay.Tick` to `MUD_MudLab.Tick`. Keep the D2 10 s log
-   (`PressLog`) running from the lab.
+1. Create a new file `Scripts/Game/Mud/MUD_MudLab.c` (plan sec 1.3).
+   - Move the numpad 3 cycle and the label out of MUD_MudOverlay into it.
+   - D1 and D2 become registered surface modes with their existing presets, and behave exactly as before.
+2. Change the call site `MUD_WorldGround.c:1086` to `MUD_MudLab.Tick`. Keep D2's `PressLog` running.
 3. Keys, TEST_KIT only:
    - numpad 3 = next surface step;
-   - Left Ctrl + numpad 3 = next add-on combination (check that `KeyCode.KC_LCONTROL` exists, or use a free modifier and
-     tell me which).
-4. Logs (exact formats are in plan sec 1):
-   - the switch line `MUD lab: ...`;
-   - the common 10 s line `MUD lab 10s: ...`, where MUD ms is the same meter as the 2026-10-20 results (say which one).
-   - the DbgUI label shows `step N of M`, the surface name and preset, and the add-ons.
+   - Left Ctrl + numpad 3 = the probe field steps (plan sec 1.3; check that `KeyCode.KC_LCONTROL` exists, or tell me what
+     you used).
+4. Log lines exactly as plan sec 1.3. MUD ms = the same meter as the 2026-10-20 results (say which one).
 
-## Part B - mode 1 "sheet local" (surface)
-1. Switching:
-   - Turn `MUD_MudSheet.ENABLED` into a runtime `static bool` driven by the lab.
-   - Enter starts the sheet from fresh state. Exit deletes every sheet tile entity and frees all sheet data (log the
-     counts).
-2. Couplings off, as in plan sec 2 mode 1:
-   - set `SYNC`, `LAZY_RUT_MESH`, `MUD_LookRuts.SHEET_LOOK` and `SHEET_SKIP` to false (`ONE_GRID` is false already);
-   - make `SheetCovers` return false unless `ENABLED && SYNC`.
-   - Then grep every reference from MUD_VoxelProbe, MUD_LookRuts, MUD_WorldGround, MUD_FinePatch and MUD_CoarseSkin to
-     `MUD_MudSheet.*` / `MUD_MudSync.*` / `SheetCovers`, and list each one with the gate that keeps it inert. That list
-     goes in your report.
-3. Sparse tiles:
-   - no zone pre-build, no RADIUS sweep;
-   - tiles are born around wheels with the BORN preset: (a) on stamp, or (b) within 1 tile of a wheel;
-   - unstamped tiles drop after DROP_S (5 s) with no wheel near;
-   - stamped tiles are kept up to TILE_CAP (1500), dropping the farthest from the camera first.
-4. Edge fade: a side with no sheet tile next to it counts as open and fades over EDGE. Fix `HasTile` / the taper input
-   for local mode only.
-5. Several vehicles:
-   - every vehicle within STAMP_R (80 m) of the camera stamps into tile data;
-   - the nearest LIVE_N (2) get the 10 Hz live window;
-   - the rest rebuild at the stored pace.
-6. Holes:
-   - rebuild crater and dig tiles in the blast frame, not via `UploadPick`;
-   - `DigNow`'s stored path (~3446) also queues its taper neighbours.
-7. Keep the sheet's v206 base height read. Do not invent a new one.
-8. Presets: BORN a / b x THICK 0.15 / 0.08, which is 4 surface steps.
-9. Mode extras in the 10 s line: `born <n> dropped <n> kept <n> cap-drops <n> | live <n> stored-stamp <n> | sh wheels / upload / stored / slump ms`.
+## Part B - surface mode "sheet local"
+Follow plan sec 2:
+1. **Switching.** `ENABLED` becomes a runtime static driven by the lab. Exit frees every tile and all data (log the
+   counts). Enter starts fresh.
+2. **Couplings off** (SYNC, LAZY_RUT_MESH, SHEET_LOOK, SHEET_SKIP false; the `SheetCovers` gate). Then grep every
+   reference from MUD_VoxelProbe, MUD_LookRuts, MUD_WorldGround, MUD_FinePatch and MUD_CoarseSkin to `MUD_MudSheet.*` /
+   `MUD_MudSync.*` / `SheetCovers`, and list each one with the gate that keeps it inert. The list goes in your report.
+3. **Stamping.** `ZoneAtWorld` in `Wheels()` becomes "holed offroad ground" in local mode.
+4. **Sparse tiles:**
+   - BORN preset a / b;
+   - DROP_S 5;
+   - TILE_CAP 1500, dropping the farthest first;
+   - no zone pre-build, no RADIUS sweep.
+5. **Edge fade.** An open side means no sheet tile next to it; fix this for local mode only.
+6. **Several vehicles:** STAMP_R 80 m, LIVE_N 2 live windows, the rest at the stored pace.
+7. **Holes:** crater and dig tiles are built in the blast frame; `DigNow`'s stored path (~3446) queues its taper
+   neighbours.
+8. **Keep v206's base height read.**
+9. **Presets:** BORN a / b x THICK 0.15 / 0.08.
 
-## Part C - mode 2 "wheel mud spray" (add-on)
-1. Find a vanilla wheel dirt or mud particle (`.ptc`) with the Enfusion MCP or the resource browser. Tell me which one,
-   and its GUID.
-2. Emit it client-side at a wheel's contact point while the wheel is in mud: on a sheet-local tile, or on rut dirt
-   (the floor below `FIELD_SOIL_D`, or the mud_rut gamemat).
-   - The rate scales with wheel speed and slip;
-   - cap it per wheel;
-   - emit only within SPRAY_R (60 m) of the camera;
-   - pool or recycle the emitters.
-3. Do NOT edit gamemats in this stage (plan sec 2 mode 2).
-4. Mode extras in the 10 s line: `spray emits <n> live <n>`.
+## Part C - probe field
+1. **Recorder** (plan sec 1.1).
+   - A TEST_KIT toggle (say which input) writes every Stamp input that `Wheels()` would make to
+     `$profile:MUD_wheeltrack_<date>_<n>.csv`, with the columns: t, veh, wheel, lp xyz, cp xyz, speed, half.
+   - It works with the sheet off: the same contact reads, no stamping.
+   - Record three files in WB:
+     - the robot circle (2 min);
+     - a straight line driven 1, 2 and 4 times over the same spot;
+     - a crossing.
+   - Commit the CSVs under `Data/Mud/wheeltracks/`.
+2. **Field and replay.**
+   - Lanes are 12 m wide with 2 m gaps, placed in front of the player on flat holed grass. Each lane has a DbgUI or
+     world label.
+   - Replay moves the track to each lane's origin and re-reads the ground height at the lane (read only).
+   - Two replay speeds: 1x, and "all at once" for cost runs.
+   - Lane meshes are their own entities and are freed when the field is removed.
+3. **Lanes in this stage.** All of them use renderer R1: the sheet's tile build, as a separate instance per lane, not
+   shared state.
+   - S1, the reference.
+   - S2, volume kept: per stamp, the removed volume = the volume added to the ridges and the bow wave. Log the
+     imbalance.
+   - S3, slow settle: per-cell age; settling cells run at 2-5 Hz for SETTLE_S (start 10 s); the walls sag and the
+     ridges spread.
+   - S5 wet: THICK, SOFT, SLUMP and settle as one preset (wet = deeper first pass, more flow).
+   - S6, one-pass slump 0.6.
+   - If running several sheet instances at once is too tangled in MUD_MudSheet, make the lane a thin copy of its stamp,
+     slump and tile build in a new file `MUD_MudLabLane.c`. Copy the code, do not call into MUD_MudSheet's state. Then
+     tell me.
+4. **Per-lane 10 s line** as in plan sec 1.3.
 
-## WB smoke check (one launch, function and look only)
-On grass, with a Ural:
-1. Cycle through every surface step and add-on. Check that the label, log lines and the step count are right.
-2. In sheet local, for each preset:
-   - Do tiles appear around the wheels, does the mud deform and flow like the old sheet, do the edges fade (no step)?
-   - Look at 2 / 20 / 60 m.
-   - Is there grass on the band?
-   - Does the tyre sit in the groove? Is the felt rut still felt?
-3. Make a crater and a trench in a sheet area.
-4. Switch back to off. Are all tiles gone? Is the ground exactly as before?
-5. Turn spray on, on top of off and on top of sheet local. Take screenshots.
-6. Spawn a second vehicle and drive it about 40 m away.
+## WB launch (function and look only)
+1. Record the three tracks (Part C1).
+2. Cycle through every surface step and check the label, logs and step count. Drive in sheet local, each preset:
+   - Do tiles appear at the wheels? Does it deform and flow like the old sheet?
+   - Do the edges fade? Is there grass on the band? Does the tyre sit in the groove? Is the felt rut still felt?
+   - Make a crater and a trench. Switch to off: are all tiles gone?
+3. Probe field: replay each track into all lanes and look from 2 / 20 / 60 m. Take one screenshot per lane per track,
+   with the lane label in view.
 
 ## DS session
-Run plan sec 4, rows 1-7, with at least 6 runs per numbered row. Write `results/2026-10-2x-mud-lab-stage1-ds.md` with one
-table in the 10 s line's columns, plus the by-eye notes.
+Run plan sec 4, rows 1-5, with at least 6 runs per row (row 5 = 6 replays per track). Write
+`results/2026-10-2x-mud-lab-stage1-ds.md` with a surface table and a lane table, plus the by-eye notes.
 
 ## Report back
-- The files and methods per step, and every line you touched in existing files.
-- The coupling-gate list from Part B step 2.
-- The particle GUID.
-- The compile result, log lines and screenshots per step.
+- The files and methods, and every line you touched in existing files.
+- The coupling-gate list.
+- The recorder input and the CSV paths.
+- The compile result, log lines and screenshots.
 - Anything odd.
 
 Do not tune values or turn anything on by default. I compare and pick.
