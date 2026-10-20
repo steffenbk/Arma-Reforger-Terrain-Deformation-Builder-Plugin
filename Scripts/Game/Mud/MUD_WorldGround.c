@@ -1082,8 +1082,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_KeepScan.Tick(m_fTime);    // TEMP tool 2026-10-17 run 2: keep mask incl. asphalt / concrete terrain (pin cut-out)
 		MUD_Prof.Add(MUD_Prof.KEEPSCAN, System.GetTickCount(tP));
 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet (adds its own MUD_Prof parts)
-		if (m_bRender && (MUD_MudOverlay.ENABLED || PRESS_LIFT || MUD_TestKit.TEST_KIT))
-			MUD_MudOverlay.Tick(m_fTime);    // mud overlay v3 / pressed lift look test 2026-10-19 (client look only; TEST_KIT numpad 3 cycles)
+		if (m_bRender && (MUD_MudOverlay.ENABLED || PRESS_LIFT || MUD_MudSheet.ENABLED || MUD_TestKit.TEST_KIT))
+			MUD_MudLab.Tick(m_fTime);    // mud lab 2026-10-20: surface mode switcher (client look only; TEST_KIT numpad 3 cycles)
 		tP = System.GetTickCount();
 		MUD_VoxelHouse.Tick();    // TEMP probe 2026-10-13
 		MUD_Prof.Add(MUD_Prof.HOUSE, System.GetTickCount(tP));
@@ -7018,7 +7018,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Pressed lift 10 s log (called every frame by MUD_MudOverlay.Tick)
+	//! Pressed lift 10 s log (called every frame by MUD_MudLab.Tick)
 	static void PressLog(float time)
 	{
 		if (!s_Inst || !PRESS_LIFT)

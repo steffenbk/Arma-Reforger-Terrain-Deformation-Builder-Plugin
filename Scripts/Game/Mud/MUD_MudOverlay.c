@@ -8,8 +8,8 @@
 //! felt rut outside the tyre is filled back up into soft walls, ridges stand above the ground. Quads with all four
 //! corners on the felt floor, quads with no stamped corner and quads touching a hole are not drawn.
 //! Off (ENABLED false) = Tick returns at once, nothing made. Called from MUD_WorldGroundEntity's frame (render
-//! machines only). TEST_KIT numpad 3 cycles off -> overlay presets -> pressed lift presets -> off (MUD_WorldGround
-//! PRESS_LIFT); the two never run together.
+//! machines only) through MUD_MudLab (its numpad 3 cycle holds this mode's presets, 2026-10-20); the overlay and the
+//! pressed lift (MUD_WorldGround PRESS_LIFT) never run together.
 class MUD_MudOverlay
 {
 	static bool ENABLED = false;               // default off; the TEST_KIT key turns it on
@@ -89,9 +89,6 @@ class MUD_MudOverlay
 	static const ResourceName MAT_TOP = "{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat";   // = MUD_MudSheet.MAT_TOP
 
 	protected static ref MUD_MudOverlay s_Inst;
-	protected static int s_iCycle;             // TEST_KIT key: 0 off, 1..PRESETS overlay, then pressed lift presets
-	protected static float s_fTickLast = -1;
-	protected static float s_fShownAt = -100;
 
 	protected ref map<int, ref MUD_OvTile> m_mTiles = new map<int, ref MUD_OvTile>();
 	protected ref array<ref MUD_OvVeh> m_aVeh = {};
@@ -141,28 +138,10 @@ class MUD_MudOverlay
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Called every frame by MUD_WorldGroundEntity (render machines, ground ready)
-	static void Tick(float time)
+	//! Called every frame by MUD_MudLab while D1 is the lab's mode (render machines, ground ready). The numpad 3 cycle,
+	//! the new-play reset and the DbgUI label moved to MUD_MudLab (2026-10-20).
+	static void LabFrame(float time)
 	{
-		// a new play keeps the statics: both designs back to off (defaults)
-		if (time < s_fTickLast)
-		{
-			if (ENABLED)
-				SetPreset(0, "new play");
-			if (MUD_WorldGroundEntity.PRESS_LIFT)
-				MUD_WorldGroundEntity.SetPressLift(0, "new play");
-			s_iCycle = 0;
-		}
-		s_fTickLast = time;
-		if (MUD_TestKit.TEST_KIT && Debug.KeyState(KeyCode.KC_NUMPAD3))
-		{
-			Debug.ClearKey(KeyCode.KC_NUMPAD3);
-			Cycle();
-			s_fShownAt = time;
-		}
-		if (MUD_TestKit.TEST_KIT)
-			ShowMode(time);
-		MUD_WorldGroundEntity.PressLog(time);     // pressed lift 10 s log (returns at once while it is off)
 		if (!ENABLED)
 			return;
 		if (!s_Inst || time < s_Inst.m_fLast)
@@ -171,46 +150,19 @@ class MUD_MudOverlay
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! TEST_KIT: which mud look is on, top left (while one is on; 'off' for 3 s after the key)
-	protected static void ShowMode(float time)
+	//! MUD_MudLab 10 s line: 'tiles <n> built <n> kept <n> | <extras>' (built = with a mesh, kept = data only)
+	static string LabCounts()
 	{
-		string txt = "";
-		if (ENABLED && s_iPreset == 1)
-			txt = "DESIGN 1 mud overlay - preset 1: live stamps + re-centre + fallback";
-		else if (ENABLED)
-			txt = "DESIGN 1 mud overlay - preset 2: fallback only (late-join view)";
-		else if (MUD_WorldGroundEntity.PRESS_LIFT)
-			txt = string.Format("DESIGN 2 pressed lift - preset %1: lift %2 m, press %3 m, wear press %4", MUD_WorldGroundEntity.s_iPressPreset, MUD_WorldGroundEntity.s_fPressLiftM, MUD_WorldGroundEntity.s_fPressM, MUD_WorldGroundEntity.s_fWearPress);
-		else if (time - s_fShownAt < 3)
-			txt = "mud look OFF (today's ground)";
-		if (txt == "")
-			return;
-		DbgUI.Begin("MUD look (numpad 3)", 20, 120);
-		DbgUI.Text(string.Format("step %1 of %2: %3", s_iCycle, PRESETS + MUD_WorldGroundEntity.PRESS_PRESETS, txt));
-		DbgUI.End();
-	}
-
-	//------------------------------------------------------------------------------------------------
-	//! TEST_KIT numpad 3: off -> overlay presets -> pressed lift presets -> off
-	protected static void Cycle()
-	{
-		s_iCycle++;
-		if (s_iCycle > PRESETS + MUD_WorldGroundEntity.PRESS_PRESETS)
-			s_iCycle = 0;
-		if (s_iCycle == 0)
+		if (!s_Inst)
+			return "tiles 0 built 0 kept 0 | preset " + s_iPreset.ToString();
+		int built = 0;
+		foreach (int k, MUD_OvTile t : s_Inst.m_mTiles)
 		{
-			SetPreset(0, "key");
-			MUD_WorldGroundEntity.SetPressLift(0, "key");
+			if (t.m_bMesh)
+				built++;
 		}
-		else if (s_iCycle <= PRESETS)
-		{
-			SetPreset(s_iCycle, "key");
-		}
-		else
-		{
-			MUD_WorldGroundEntity.SetPressLift(s_iCycle - PRESETS, "key");
-		}
-		Print(string.Format("MUD mud look cycle: step %1 = overlay %2 preset %3 | pressed lift %4 preset %5", s_iCycle, ENABLED, s_iPreset, MUD_WorldGroundEntity.PRESS_LIFT, MUD_WorldGroundEntity.s_iPressPreset), LogLevel.NORMAL);
+		int tiles = s_Inst.m_mTiles.Count();
+		return string.Format("tiles %1 built %2 kept %3 | preset %4 (detail: 'MUD mud overlay' lines)", tiles, built, tiles - built, s_iPreset);
 	}
 
 	//------------------------------------------------------------------------------------------------

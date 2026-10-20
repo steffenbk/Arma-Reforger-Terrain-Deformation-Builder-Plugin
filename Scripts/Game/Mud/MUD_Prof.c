@@ -79,6 +79,9 @@ class MUD_Prof
 	protected static ref array<int> s_aMax;
 	protected static ref array<int> s_aWorst;   // split of the worst frame
 	protected static ref array<string> s_aNames;
+	protected static ref array<int> s_aAll;     // never reset (MUD_MudLab takes 10 s deltas, 2026-10-20)
+	protected static int s_iMudAll;
+	protected static int s_iFramesAll;
 	protected static int s_iFrames;
 	protected static float s_fT;
 	protected static float s_fDtSum;
@@ -105,8 +108,10 @@ class MUD_Prof
 		s_aSum = {};
 		s_aMax = {};
 		s_aWorst = {};
+		s_aAll = {};
 		for (int i = 0; i < N; i++)
 		{
+			s_aAll.Insert(0);
 			s_aCur.Insert(0);
 			s_aSum.Insert(0);
 			s_aMax.Insert(0);
@@ -175,6 +180,8 @@ class MUD_Prof
 		s_fDtSum += dtMs;
 		s_fDtMax = Math.Max(s_fDtMax, dtMs);
 		s_iMudSum += mudMs;
+		s_iMudAll += mudMs;
+		s_iFramesAll++;
 		s_iMudMax = Math.Max(s_iMudMax, mudMs);
 		s_fEngFrame += eFrame;
 		s_fEngFrameMax = Math.Max(s_fEngFrameMax, eFrame);
@@ -200,6 +207,7 @@ class MUD_Prof
 		{
 			int v = s_aCur[i];
 			s_aSum.Set(i, s_aSum[i] + v);
+			s_aAll.Set(i, s_aAll[i] + v);
 			if (v > s_aMax[i])
 				s_aMax.Set(i, v);
 			if (worst)
@@ -216,6 +224,25 @@ class MUD_Prof
 		s_fT += dt;
 		if (s_fT >= EVERY_S)
 			Report();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! running totals, never reset (MUD_MudLab 10 s line): whole MUD ms, frames, one part's ms
+	static int MudAll()
+	{
+		return s_iMudAll;
+	}
+
+	static int FramesAll()
+	{
+		return s_iFramesAll;
+	}
+
+	static int PartAll(int part)
+	{
+		if (!s_aAll)
+			return 0;
+		return s_aAll[part];
 	}
 
 	//------------------------------------------------------------------------------------------------
