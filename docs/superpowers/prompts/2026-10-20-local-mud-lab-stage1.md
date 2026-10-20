@@ -1,10 +1,10 @@
-# Prompt for the local AI: mud lab stage 1 - lab framework + sheet local + probe field (2026-10-20, v2)
+# Prompt for the local AI: mud lab stage 1 - lab framework + sheet local + probe field (2026-10-20, v3)
 
-v2: deformation only (user 2026-10-20). Spray and muddy vehicles are parked. Copy everything below the line.
+v3: deformation only (user 2026-10-20); sheet local = the deposit band from research/2026-10-20-mud-sheet-deep-dive.md, plus cost levers and sync-lite remote stamps; lane S2 dropped (tried before, invisible). Copy everything below the line.
 
 ---
 
-Build stage 1 of `docs/superpowers/plans/2026-10-20-mud-lab.md` (v2) on branch `claude/upbeat-lovelace-q0w022`.
+Build stage 1 of `docs/superpowers/plans/2026-10-20-mud-lab.md` (v3) on branch `claude/upbeat-lovelace-q0w022`.
 Stage 1 has three parts: the lab framework, surface mode "sheet local", and the probe field (wheel track recorder,
 replay, and the first rule lanes). Then run one WB launch (function and look only, no ms) and one DS session (plan
 sec 4). Stop and report after each launch.
@@ -12,6 +12,7 @@ sec 4). Stop and report after each launch.
 ## Read first
 - `CLAUDE.md`.
 - The plan (all of it).
+- `research/2026-10-20-mud-sheet-deep-dive.md`: why the sheet cost and popped, the deposit band, levers L1-L10.
 - `research/2026-10-20-mud-look.md`.
 - `results/2026-10-20-mud-two-designs-ds.md`.
 - `research/2026-10-19-whole-map-sheet-issues.md` sec 2-3.
@@ -55,18 +56,46 @@ Follow plan sec 2:
 2. **Couplings off** (SYNC, LAZY_RUT_MESH, SHEET_LOOK, SHEET_SKIP false; the `SheetCovers` gate). Then grep every
    reference from MUD_VoxelProbe, MUD_LookRuts, MUD_WorldGround, MUD_FinePatch and MUD_CoarseSkin to `MUD_MudSheet.*` /
    `MUD_MudSync.*` / `SheetCovers`, and list each one with the gate that keeps it inert. The list goes in your report.
-3. **Stamping.** `ZoneAtWorld` in `Wheels()` becomes "holed offroad ground" in local mode.
-4. **Sparse tiles:**
-   - BORN preset a / b;
-   - DROP_S 5;
-   - TILE_CAP 1500, dropping the farthest first;
-   - no zone pre-build, no RADIUS sweep.
-5. **Edge fade.** An open side means no sheet tile next to it; fix this for local mode only.
-6. **Several vehicles:** STAMP_R 80 m, LIVE_N 2 live windows, the rest at the stored pace.
-7. **Holes:** crater and dig tiles are built in the blast frame; `DigNow`'s stored path (~3446) queues its taper
+3. **Builds by reason, FIRST.** Add the 10 s log line before changing anything else:
+   `MUD sheet builds: wheel N, oldest N, nearest N, mesh-less N, freeze N, restore N, slump N | would skip (max change < 3 mm) N`.
+   Run it once on today's sheet in WB, as a function check only. The DS numbers come in the session.
+4. **Stamping.** `ZoneAtWorld` in `Wheels()` becomes "holed offroad ground" in local mode.
+5. **Deposit band** (plan sec 2, deep dive sec 3; this replaces the tile-side fade).
+   - Per world cell, the distance to the nearest touched cell (stamped or pressed). Keep it incrementally: a stamp
+     updates only the cells within BAND_IN + BAND_FADE of the cells it wrote.
+   - Thickness = THICK x band(dist): 1 within BAND_IN, a sine falloff to 0 at BAND_IN + BAND_FADE, and 1 cm UNDER the
+     drawn ground at 0. Quads entirely under the ground are skipped.
+   - Compute it across tile borders, like the taper field. A band change within reach of a tile side marks that
+     neighbour.
+   - Untouched cells have no tile, and `MudAt` returns 0 for unborn cells (callers MUD_TrenchGhost 87,
+     MUD_VehicleAccess 138).
+   - The live window draws and freezes only born slots. Today it does all 16 (Follow 1077, Upload 5248).
+   - No zone pre-build, no RADIUS sweep, no patch lift, no LIFT_BY_DRAWN, no LAZY_RUT_MESH, SPEED_RADIUS off, LOD
+     double build off.
+   - Never build a slot until all its cells are traced. Finish eases in `Freeze`.
+   - MAT_TOP uses the 64 m chunk UV frame, as voxel tops do (MUD_VoxelProbe 576).
+6. **Far data.**
+   - Far touched tiles keep data only, compact: 1 byte per height / drag u / drag v / bare+dirt, ~1.8 KB per tile.
+   - TILE_DATA_CAP 20,000; drop the oldest far tiles first.
+   - Meshes within a fixed 70 m radius, nearest-ahead first, 2 ms/frame budget. A far ring past 40 m is built once at
+     11 x 11 and never upgraded on screen.
+7. **Remote trucks, sync-lite.**
+   - A read-only listener on the rut ops this client receives stamps their segments into tile data with the same Stamp
+     maths.
+   - No hash, quantise, snapshot or DS work. Skip ops from the vehicle you drive.
+   - Tell me where you hooked it. It must be a read after the rut work, with no change to ops or Submit.
+8. **Cost levers** (deep dive sec 2):
+   - L1: carry each slot's dirty flag through Follow; Freeze builds only real changes; no forced upload unless a slot
+     changed.
+   - L2: LimitDrag once per upload over the stamped cells + 1.
+   - L3: slump only on cells changed since the last slump + 1 ring, one pass at 0.6.
+   - L6: EaseTick at upload rate.
+   - L8: vehicle loops get a distance pre-check, a cached sim component and pruned `m_aVeh`.
+   Each lever gets its own static switch for the A/B.
+9. **Holes:** crater and dig tiles are built in the blast frame; `DigNow`'s stored path (~3446) queues its taper
    neighbours.
-8. **Keep v206's base height read.**
-9. **Presets:** BORN a / b x THICK 0.15 / 0.08.
+10. **Keep v206's base height read.**
+11. **Presets:** BAND_IN 0.4 / 0.8 x BAND_FADE 0.8 / 1.2.
 
 ## Part C - probe field
 1. **Recorder** (plan sec 1.1).
@@ -87,8 +116,6 @@ Follow plan sec 2:
 3. **Lanes in this stage.** All of them use renderer R1: the sheet's tile build, as a separate instance per lane, not
    shared state.
    - S1, the reference.
-   - S2, volume kept: per stamp, the removed volume = the volume added to the ridges and the bow wave. Log the
-     imbalance.
    - S3, slow settle: per-cell age; settling cells run at 2-5 Hz for SETTLE_S (start 10 s); the walls sag and the
      ridges spread.
    - S5 wet: THICK, SOFT, SLUMP and settle as one preset (wet = deeper first pass, more flow).
