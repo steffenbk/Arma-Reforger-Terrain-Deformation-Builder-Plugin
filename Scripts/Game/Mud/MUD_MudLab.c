@@ -202,9 +202,17 @@ class MUD_LabSheetLocal : MUD_LabMode
 		Snap();
 	}
 	override void Exit() { MUD_MudSheet.LabSet(0, "key"); }
+	//! part C: TEST_KIT numpad 0 cycles the cost lever sets (none -> all -> L1 -> L2 -> L3 -> L6 -> L8 -> none)
+	override void Tick(float time)
+	{
+		if (!MUD_TestKit.TEST_KIT || !Debug.KeyState(KeyCode.KC_NUMPAD0))
+			return;
+		Debug.ClearKey(KeyCode.KC_NUMPAD0);
+		MUD_MudSheet.LabLeverStep("key");
+	}
 	override string Label()
 	{
-		return string.Format("band in %1 m, fade %2 m", MUD_MudSheet.BAND_IN, MUD_MudSheet.BAND_FADE);
+		return string.Format("band in %1 m, fade %2 m | levers (numpad 0): %3", MUD_MudSheet.BAND_IN, MUD_MudSheet.BAND_FADE, MUD_MudSheet.LeverNames());
 	}
 	override int ModeMsAll() { return MUD_Prof.PartAll(MUD_Prof.SHEET) + MUD_Prof.PartAll(MUD_Prof.SHEET_SYNC); }
 	override string Log10s()
@@ -215,8 +223,8 @@ class MUD_LabSheetLocal : MUD_LabMode
 		float st = (MUD_Prof.PartAll(MUD_Prof.SH_STORED) - m_iStAt) / pf;
 		float sl = (MUD_MudSheet.SlumpMsAll() - m_iSlAt) / pf;
 		float ba = (MUD_MudSheet.BandMsAll() - m_iBaAt) / pf;
-		string s = MUD_MudSheet.LabCounts() + string.Format(" | sh wheels %1 / upload %2 / stored %3 / slump %4 / band %5 ms per frame",
-			wh.ToString(-1, 2), up.ToString(-1, 2), st.ToString(-1, 2), sl.ToString(-1, 2), ba.ToString(-1, 2));
+		string s = MUD_MudSheet.LabCounts() + string.Format(" | sh wheels %1 / upload %2 / stored %3 / slump %4 / band %5 ms per frame | levers %6",
+			wh.ToString(-1, 2), up.ToString(-1, 2), st.ToString(-1, 2), sl.ToString(-1, 2), ba.ToString(-1, 2), MUD_MudSheet.LeverNames());
 		Snap();
 		return s;
 	}

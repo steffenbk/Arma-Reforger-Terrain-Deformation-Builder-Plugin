@@ -286,6 +286,29 @@ class MUD_MudSheet
 	static bool TOP_UV64 = true;                // sheet local: the MAT_TOP section uses the 64 m skin chunk UV frame
 	static const float TOP_UV_M = 64;           // = MUD_VoxelProbe.TOP_TILE (grass top UV span)
 	static const int LAB_PRESETS = 4;           // BAND_IN 0.4 / 0.8 x BAND_FADE 0.8 / 1.2
+	// MUD LAB part C cost levers (deep dive research/2026-10-20-mud-sheet-deep-dive.md sec 2): each its own switch,
+	// default off. TEST_KIT numpad 0 while sheet local runs (MUD_LabSheetLocal.Tick) cycles the sets
+	// none -> all -> L1 -> L2 -> L3 -> L6 -> L8 -> none; sheet local off (or a new play) = none.
+	static bool LEV_L1_CARRY = false;           // L1: slot dirty flags move with their tiles in Follow (no blanket dirty)
+	static bool LEV_L2_DRAG = false;            // L2: LimitDrag once per upload over the stamped cells + 1
+	static bool LEV_L3_SLUMP = false;           // L3: slump only changed cells + 1 ring, one pass at L3_FACTOR
+	static bool LEV_L6_EASE = false;            // L6: EaseTick at upload rate, not every frame
+	static bool LEV_L8_VEH = false;             // L8: near vehicles only, cached sims, map by vehicle, pruned
+	static const int LEVER_SETS = 6;
+	static const float L3_FACTOR = 0.6;
+	static const float VEH_NEAR_M = 10;         // L8: a vehicle origin this far outside the window still stamps
+	static const float VEH_PRUNE_S = 5;         // L8: dead / far vehicle entries go this often ...
+	static const float VEH_PRUNE_M = 50;        // ... when this far outside the near box
+	protected static int s_iLeverSet;
+	protected bool m_bSlotsKeep;                // L1: UpdateSlots leaves the dirty flags (Follow carried them)
+	protected ref MUD_MudSheetCells m_Drag = new MUD_MudSheetCells();     // L2: cells stamps wrote since the last upload
+	protected ref MUD_MudSheetCells m_Chg = new MUD_MudSheetCells();      // L3: cells changed since the last slump
+	protected int m_iSlumpGen;                  // L3: work set mark (m_Chg.m_aGen)
+	protected float m_fNextEase;                // L6
+	protected ref map<Vehicle, ref MUD_MudSheetVeh> m_mVeh = new map<Vehicle, ref MUD_MudSheetVeh>();   // L8
+	protected ref array<Vehicle> m_aNearVeh = {};                        // L8: this frame's near vehicles ...
+	protected ref array<VehicleWheeledSimulation> m_aNearSim = {};       // ... and their sims
+	protected float m_fVehPrune;
 	protected static int s_iLabPreset;
 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
 	static const int BW_WHEEL = 0;
@@ -858,8 +881,12 @@ class MUD_MudSheet
 			ApplyPending();
 		}
 		MUD_Prof.Add(MUD_Prof.SH_PRE, System.GetTickCount(tPre));
-		if (!m_mEase.IsEmpty())
+		if (!m_mEase.IsEmpty() && (!LEV_L6_EASE || time >= m_fNextEase))
+		{
+			if (LEV_L6_EASE)
+				m_fNextEase = time + UPLOAD_EVERY;     // L6: at upload rate
 			EaseTick(time);
+		}
 		if (!m_aOneBuild.IsEmpty())
 			FlushOneBuild();
 		bool frozen = false;
@@ -935,10 +962,17 @@ class MUD_MudSheet
 		if (m_bPlaced)
 		{
 			int tS = System.GetTickCount();
-			foreach (Vehicle v : MUD_Wheels.GetAll())
+			if (LEV_L8_VEH)
 			{
-				if (v)
-					Wheels(v, time);
+				WheelsNear(time);
+			}
+			else
+			{
+				foreach (Vehicle v : MUD_Wheels.GetAll())
+				{
+					if (v)
+						Wheels(v, time);
+				}
 			}
 			m_aStatSec[1] = m_aStatSec[1] + System.GetTickCount(tS);
 			MUD_Prof.Add(MUD_Prof.SH_WHEELS, System.GetTickCount(tS));
@@ -1115,6 +1149,8 @@ class MUD_MudSheet
 		int newBuilt[16];       // D1: a kept tile's last build time moves with it (new slots 0 = build at once)
 		int newUnlift[16];      // LIFT BY DRAWN: the same for the on-screen flag
 		int newBand[16];        // SHEET LOCAL: the same for the band-due flag
+		int newDirty[16];       // L1: the same for the dirty flag and its reasons (entering slots: dirty)
+		int newWhy[16];
 		for (int t0 = 0; t0 < TILES * TILES; t0++)
 		{
 			newEnt.Insert(null);
@@ -1122,6 +1158,8 @@ class MUD_MudSheet
 			newBuilt[t0] = 0;
 			newUnlift[t0] = 0;
 			newBand[t0] = 0;
+			newDirty[t0] = 1;
+			newWhy[t0] = WHY_OTHER;
 		}
 		for (int tk = 0; tk < TILES; tk++)
 		{
@@ -1138,6 +1176,8 @@ class MUD_MudSheet
 					newBuilt[ntk * TILES + nti] = m_aSlotBuiltMs[t];
 					newUnlift[ntk * TILES + nti] = m_aSlotUnlift[t];
 					newBand[ntk * TILES + nti] = m_aSlotBand[t];
+					newDirty[ntk * TILES + nti] = m_aSlotDirty[t];
+					newWhy[ntk * TILES + nti] = m_aSlotWhy[t];
 					continue;
 				}
 				if (!te)
@@ -1161,6 +1201,11 @@ class MUD_MudSheet
 			m_aSlotBuiltMs[tb] = newBuilt[tb];
 			m_aSlotUnlift[tb] = newUnlift[tb];
 			m_aSlotBand[tb] = newBand[tb];
+			if (LEV_L1_CARRY)
+			{
+				m_aSlotDirty[tb] = newDirty[tb];
+				m_aSlotWhy[tb] = newWhy[tb];
+			}
 		}
 		LiftDirtyWindow(wantX / TQ, wantZ / TQ, oldTx, oldTz);
 		// 2. field data moves by whole tiles
@@ -1210,6 +1255,8 @@ class MUD_MudSheet
 		m_iBoxI1 -= si;
 		m_iBoxK0 -= sk;
 		m_iBoxK1 -= sk;
+		m_Drag.Shift(si, sk);     // L2 / L3 cell sets move with the field (empty while those levers are off)
+		m_Chg.Shift(si, sk);
 		// 3. empty slots: the trail tile there comes back to life, else a spare or new entity
 		int nTx = m_iX0 / TQ;
 		int nTz = m_iZ0 / TQ;
@@ -1227,6 +1274,12 @@ class MUD_MudSheet
 				MUD_MudSheetStore st = m_mTrail.Get(key);
 				if (st && st.m_Ent)
 				{
+					if (LEV_L1_CARRY && StoreCurrent(st, key))
+					{
+						m_aSlotDirty[t2] = 0;     // L1: comes back with a current full mesh - clean
+						m_aSlotWhy[t2] = 0;
+						m_aSlotBand[t2] = 0;
+					}
 					Unpack(st.m_D, ti2, tk2);
 					m_aSlotUnlift[t2] = st.m_D.m_iUnlift;
 					newEnt[t2] = st.m_Ent;
@@ -1259,7 +1312,9 @@ class MUD_MudSheet
 		m_aTileEnt = newEnt;
 		m_aTileRes = newRes;
 		m_Ent = m_aTileEnt[0];
+		m_bSlotsKeep = LEV_L1_CARRY;
 		UpdateSlots();
+		m_bSlotsKeep = false;
 		m_iUntraced = 0;
 		for (int u = 0; u < NN; u++)
 		{
@@ -1268,6 +1323,8 @@ class MUD_MudSheet
 		}
 		m_bIdxDirty = true;
 		m_bDirty = true;
+		if (LEV_L1_CARRY && !AnySlotDirty())
+			return;         // L1: no slot really changed - no forced upload
 		m_fNextUp = 0;      // upload at once, else the old mesh shows one shift off
 	}
 
@@ -1290,6 +1347,8 @@ class MUD_MudSheet
 		if (preset == 2 || preset == 4)
 			BAND_FADE = 1.2;
 		s_iCoverGen++;
+		if (preset <= 0 && s_iLeverSet != 0)
+			LeverApply(0, why);
 		Print(string.Format("MUD sheet local: preset %1 (enabled %2, sync %3, band in %4 m, fade %5 m) | %6", preset, ENABLED, SYNC, BAND_IN, BAND_FADE, why), LogLevel.NORMAL);
 	}
 
@@ -1802,6 +1861,303 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part C: lever set s (0 none, 1 all, 2 L1, 3 L2, 4 L3, 5 L6, 6 L8)
+	static void LeverApply(int s, string why)
+	{
+		s_iLeverSet = s;
+		LEV_L1_CARRY = s == 1 || s == 2;
+		LEV_L2_DRAG = s == 1 || s == 3;
+		LEV_L3_SLUMP = s == 1 || s == 4;
+		LEV_L6_EASE = s == 1 || s == 5;
+		LEV_L8_VEH = s == 1 || s == 6;
+		Print(string.Format("MUD sheet levers: %1 | %2", LeverNames(), why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT numpad 0 while sheet local runs: the next lever set (none -> all -> L1 -> L2 -> L3 -> L6 -> L8 -> none)
+	static void LabLeverStep(string why)
+	{
+		int s = s_iLeverSet + 1;
+		if (s > LEVER_SETS)
+			s = 0;
+		LeverApply(s, why);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static string LeverNames()
+	{
+		string s = "";
+		if (LEV_L1_CARRY)
+			s += " L1";
+		if (LEV_L2_DRAG)
+			s += " L2";
+		if (LEV_L3_SLUMP)
+			s += " L3";
+		if (LEV_L6_EASE)
+			s += " L6";
+		if (LEV_L8_VEH)
+			s += " L8";
+		if (s == "")
+			return "off";
+		return s.Trim();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L1: does any live slot need a build?
+	protected bool AnySlotDirty()
+	{
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aSlotDirty[t] != 0)
+				return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L1: stored tile key (store st) shows a current full mesh: built, no rebuild queued or held, no band due, not low
+	protected bool StoreCurrent(MUD_MudSheetStore st, int key)
+	{
+		if (!st || !st.m_Ent || !st.m_Res || st.m_D.m_iLow != 0)
+			return false;
+		return !m_aOneBuild.Contains(key) && !m_aHeldBuild.Contains(key) && !m_aBandQ.Contains(key);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L2: LimitDrag once per upload over the cells stamps wrote since the last one + 1 ring (all inside 1..N-2), two
+	//! sweeps in opposite raster order as LimitDrag, clamps inline
+	protected void LimitDragCells()
+	{
+		array<int> list = m_Drag.m_aList;
+		int n0 = list.Count();
+		for (int a = 0; a < n0; a++)
+		{
+			int va = list[a];
+			int ia = va % N;
+			int ka = va / N;
+			for (int dk = -1; dk <= 1; dk++)
+			{
+				for (int di = -1; di <= 1; di++)
+				{
+					int ci = ia + di;
+					int ck = ka + dk;
+					if (ci >= 1 && ci <= N - 2 && ck >= 1 && ck <= N - 2)
+						m_Drag.Add(ck * N + ci);
+				}
+			}
+		}
+		list.Sort();
+		int cnt = list.Count();
+		for (int sweep = 0; sweep < 2; sweep++)
+		{
+			for (int b = 0; b < cnt; b++)
+			{
+				int v = list[b];
+				if (sweep == 1)
+					v = list[cnt - 1 - b];
+				int i = v % N;
+				int k = v / N;
+				if (i < 1 || i > N - 2 || k < 1 || k > N - 2)
+					continue;
+				float ou = m_F.m_aOu[v];
+				float ov = m_F.m_aOv[v];
+				for (int q = 0; q < 4; q++)
+				{
+					int nb = v - 1;
+					if (q == 1)
+						nb = v + 1;
+					else if (q == 2)
+						nb = v - N;
+					else if (q == 3)
+						nb = v + N;
+					float lo = m_F.m_aOu[nb] - DRAG_LIM;
+					if (ou < lo)
+						ou = lo;
+					else if (ou > lo + 2 * DRAG_LIM)
+						ou = lo + 2 * DRAG_LIM;
+					float lo2 = m_F.m_aOv[nb] - DRAG_LIM;
+					if (ov < lo2)
+						ov = lo2;
+					else if (ov > lo2 + 2 * DRAG_LIM)
+						ov = lo2 + 2 * DRAG_LIM;
+				}
+				m_F.m_aOu[v] = ou;
+				m_F.m_aOv[v] = ov;
+			}
+		}
+		m_Drag.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L3 Slump: only the cells that changed since the last slump (Grow marks them) + 1 ring, one pass at L3_FACTOR
+	//! (offline: equal to 3 passes at 0.25, results/2026-10-19-sheet-sync-maths-offline.md), mud flows only inside
+	//! that set; the changed rectangle is marked once
+	protected void SlumpCells()
+	{
+		if (m_Chg.m_aList.IsEmpty())
+			return;
+		m_iSlumpGen++;
+		array<int> work = {};
+		foreach (int vc : m_Chg.m_aList)
+		{
+			int ic = vc % N;
+			int kc = vc / N;
+			for (int dk = -1; dk <= 1; dk++)
+			{
+				for (int di = -1; di <= 1; di++)
+				{
+					int wi = ic + di;
+					int wk = kc + dk;
+					if (wi < 0 || wi >= N || wk < 0 || wk >= N)
+						continue;
+					int wv = wk * N + wi;
+					if (m_Chg.m_aGen[wv] == m_iSlumpGen)
+						continue;
+					m_Chg.m_aGen[wv] = m_iSlumpGen;
+					work.Insert(wv);
+					m_T.m_aD[wv] = 0;
+				}
+			}
+		}
+		m_Chg.Clear();
+		float step = REPOSE * CELL;
+		bool moved = false;
+		foreach (int v : work)
+		{
+			float da = m_F.m_aD[v];
+			if (da <= 0)
+				continue;
+			int i = v % N;
+			int k = v / N;
+			float sa = GroundAt(v) + da;
+			float give = 0;
+			for (int n = 0; n < 4; n++)
+			{
+				int ni = i;
+				int nk = k;
+				if (n == 0)
+					ni++;
+				else if (n == 1)
+					ni--;
+				else if (n == 2)
+					nk++;
+				else
+					nk--;
+				if (ni < 0 || ni >= N || nk < 0 || nk >= N)
+					continue;
+				int nv = nk * N + ni;
+				if (m_Chg.m_aGen[nv] != m_iSlumpGen)
+					continue;     // only the set is applied (as the box in Slump)
+				float drop = sa - GroundAt(nv) - m_F.m_aD[nv] - step;
+				if (drop <= 0)
+					continue;
+				float f = Math.Min(drop * L3_FACTOR * 0.5, da * 0.25);
+				if (f < 0.0002)
+					continue;
+				m_T.m_aD[nv] = m_T.m_aD[nv] + f;
+				give += f;
+				moved = true;
+			}
+			m_T.m_aD[v] = m_T.m_aD[v] - give;
+		}
+		if (!moved)
+			return;
+		int ri0 = N;
+		int ri1 = -1;
+		int rk0 = N;
+		int rk1 = -1;
+		foreach (int v3 : work)
+		{
+			float dd = m_T.m_aD[v3];
+			if (dd == 0)
+				continue;
+			m_F.m_aD[v3] = m_F.m_aD[v3] + dd;
+			int i3 = v3 % N;
+			int k3 = v3 / N;
+			Grow(i3, k3);     // marks it changed for the next slump (L3), keeps the Slump box when L3 goes off
+			if (Math.AbsFloat(dd) <= SLUMP_SHOW)
+				continue;
+			if (i3 < ri0)
+				ri0 = i3;
+			if (i3 > ri1)
+				ri1 = i3;
+			if (k3 < rk0)
+				rk0 = k3;
+			if (k3 > rk1)
+				rk1 = k3;
+		}
+		if (ri1 < 0)
+			return;
+		MarkRect(ri0, ri1, rk0, rk1);
+		m_bDirty = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L8 Frame: the vehicles near the window (origin within VEH_NEAR_M of it; their sims cached), then Wheels for each
+	protected void WheelsNear(float time)
+	{
+		m_aNearVeh.Clear();
+		m_aNearSim.Clear();
+		float wx0 = m_iX0 * CELL - VEH_NEAR_M;
+		float wz0 = m_iZ0 * CELL - VEH_NEAR_M;
+		float wx1 = (m_iX0 + N - 1) * CELL + VEH_NEAR_M;
+		float wz1 = (m_iZ0 + N - 1) * CELL + VEH_NEAR_M;
+		foreach (Vehicle v : MUD_Wheels.GetAll())
+		{
+			if (!v)
+				continue;
+			vector o = v.GetOrigin();
+			if (o[0] < wx0 || o[0] > wx1 || o[2] < wz0 || o[2] > wz1)
+				continue;
+			MUD_MudSheetVeh mv = m_mVeh.Get(v);
+			if (!mv)
+			{
+				mv = new MUD_MudSheetVeh();
+				mv.m_Veh = v;
+				mv.m_Sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+				m_iNextVehId++;
+				mv.m_iId = m_iNextVehId;
+				m_mVeh.Set(v, mv);
+				m_aVeh.Insert(mv);
+			}
+			if (!mv.m_Sim)
+				continue;
+			m_aNearVeh.Insert(v);
+			m_aNearSim.Insert(mv.m_Sim);
+			WheelsSim(v, mv.m_Sim, mv, time);
+		}
+		if (time < m_fVehPrune)
+			return;
+		m_fVehPrune = time + VEH_PRUNE_S;
+		// dead or far entries go (a far one comes back as a new entry: its last wheel points are stale anyway)
+		for (int n = m_aVeh.Count() - 1; n >= 0; n--)
+		{
+			MUD_MudSheetVeh pv = m_aVeh[n];
+			bool keep = pv && pv.m_Veh;
+			if (keep)
+			{
+				vector po = pv.m_Veh.GetOrigin();
+				keep = po[0] >= wx0 - VEH_PRUNE_M && po[0] <= wx1 + VEH_PRUNE_M && po[2] >= wz0 - VEH_PRUNE_M && po[2] <= wz1 + VEH_PRUNE_M;
+			}
+			if (keep)
+				continue;
+			if (pv && pv.m_Veh)
+				m_mVeh.Remove(pv.m_Veh);
+			m_aVeh.Remove(n);
+		}
+		// keys of deleted vehicles (null) cannot be looked up: rebuild the map when it holds more than the list
+		if (m_mVeh.Count() > m_aVeh.Count())
+		{
+			m_mVeh.Clear();
+			foreach (MUD_MudSheetVeh kv : m_aVeh)
+			{
+				if (kv && kv.m_Veh)
+					m_mVeh.Set(kv.m_Veh, kv);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Map key of world tile tx, tz (Arland is < 4300 tiles a side, so tz < 20000 never overlaps)
 	static int TrailKey(int tx, int tz)
 	{
@@ -2036,6 +2392,8 @@ class MUD_MudSheet
 			m_aSlotZone[t] = 0;
 			if (inZ)
 				m_aSlotZone[t] = 1;
+			if (m_bSlotsKeep)
+				continue;     // L1: Follow carried each slot's dirty flag
 			m_aSlotDirty[t] = 1;
 			m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_OTHER;
 		}
@@ -4779,6 +5137,13 @@ class MUD_MudSheet
 			mv.m_iId = m_iNextVehId;
 			m_aVeh.Insert(mv);
 		}
+		WheelsSim(veh, sim, mv, time);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Wheels of veh (its sim and sheet entry found): stamps from each wheel's last contact to its new one
+	protected void WheelsSim(Vehicle veh, VehicleWheeledSimulation sim, MUD_MudSheetVeh mv, float time)
+	{
 		int count = sim.WheelCount();
 		while (mv.m_aLast.Count() < count)
 		{
@@ -5469,6 +5834,8 @@ class MUD_MudSheet
 					m_bTouchNew = true;
 					m_iTouchCells++;
 				}
+				if (LEV_L2_DRAG)
+					m_Drag.Add(v);     // L2: LimitDragCells at the next upload
 				float d0 = m_F.m_aD[v];     // mud depth when this vehicle's pass over the cell began
 				if (GRADUAL)
 				{
@@ -5568,7 +5935,7 @@ class MUD_MudSheet
 					Grow(i, k);
 			}
 		}
-		if (DRAG_LIM > 0)
+		if (DRAG_LIM > 0 && !LEV_L2_DRAG)
 			LimitDrag(i0, i1, k0, k1);
 		m_bDirty = true;
 		if (m_bTouchNew)
@@ -5661,6 +6028,8 @@ class MUD_MudSheet
 		m_iBoxI1 = Math.Min(N - 1, Math.Max(m_iBoxI1, i + 1));
 		m_iBoxK0 = Math.Max(0, Math.Min(m_iBoxK0, k - 1));
 		m_iBoxK1 = Math.Min(N - 1, Math.Max(m_iBoxK1, k + 1));
+		if (LEV_L3_SLUMP && i >= 0 && i < N && k >= 0 && k < N)
+			m_Chg.Add(k * N + i);     // L3: slump looks here next time
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -5675,6 +6044,11 @@ class MUD_MudSheet
 	//! Mud flows to each lower 4-neighbour where its surface (ground + mud) is steeper than REPOSE; volume kept
 	protected void Slump()
 	{
+		if (LEV_L3_SLUMP)
+		{
+			SlumpCells();
+			return;
+		}
 		if (m_iBoxI1 < m_iBoxI0)
 			return;
 		m_iBoxI0 = Math.Max(0, m_iBoxI0);
@@ -5930,6 +6304,8 @@ class MUD_MudSheet
 	protected void Upload()
 	{
 		m_bDirty = false;
+		if (DRAG_LIM > 0 && !m_Drag.m_aList.IsEmpty())
+			LimitDragCells();     // L2 (cells stay listed only while it is on, or one last time after)
 		if (!m_Ent)
 			return;
 		m_iStatUploads++;
@@ -6113,7 +6489,10 @@ class MUD_MudSheet
 			float cx = ((x0 + dI) * TQ + TQ / 2) * CELL;
 			float cz = ((z0 + dK) * TQ + TQ / 2) * CELL;
 			float best = 100000000.0;
-			foreach (Vehicle v : MUD_Wheels.GetAll())
+			array<Vehicle> pvs = MUD_Wheels.GetAll();
+			if (LEV_L8_VEH)
+				pvs = m_aNearVeh;     // L8: only the vehicles near the window
+			foreach (Vehicle v : pvs)
 			{
 				if (!v)
 					continue;
@@ -6148,11 +6527,18 @@ class MUD_MudSheet
 		int picked = 0;
 		if (WHEEL_SLOTS_MAX <= 0)
 			return 0;
-		foreach (Vehicle v : MUD_Wheels.GetAll())
+		array<Vehicle> vs = MUD_Wheels.GetAll();
+		if (LEV_L8_VEH)
+			vs = m_aNearVeh;     // L8: near vehicles, their sims cached
+		foreach (int vi, Vehicle v : vs)
 		{
 			if (!v)
 				continue;
-			VehicleWheeledSimulation sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+			VehicleWheeledSimulation sim;
+			if (LEV_L8_VEH)
+				sim = m_aNearSim[vi];
+			else
+				sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
 			if (!sim)
 				continue;
 			int count = sim.WheelCount();
@@ -7355,6 +7741,53 @@ class MUD_MudSheetEase
 	float m_fT0;
 }
 
+//! MUD LAB part C (L2 / L3): a set of window cells (index k * N + i), listed once each; m_aGen = scratch marks
+class MUD_MudSheetCells
+{
+	int m_aIn[6561];
+	int m_aGen[6561];
+	ref array<int> m_aList = {};
+
+	void Add(int v)
+	{
+		if (m_aIn[v] != 0)
+			return;
+		m_aIn[v] = 1;
+		m_aList.Insert(v);
+	}
+
+	void Clear()
+	{
+		foreach (int v : m_aList)
+			m_aIn[v] = 0;
+		m_aList.Clear();
+	}
+
+	//! Follow moved the field by si, sk cells: cells that stay move with it, the rest go (scratch marks reset)
+	void Shift(int si, int sk)
+	{
+		if (m_aList.IsEmpty())
+			return;
+		int n = MUD_MudSheet.N;
+		array<int> keep = {};
+		foreach (int v : m_aList)
+		{
+			m_aIn[v] = 0;
+			int i = v % n;
+			int k = v / n;
+			int ni = i - si;
+			int nk = k - sk;
+			if (ni >= 0 && ni < n && nk >= 0 && nk < n)
+				keep.Insert(nk * n + ni);
+		}
+		m_aList.Clear();
+		foreach (int kv : keep)
+			Add(kv);
+		for (int g = 0; g < n * n; g++)
+			m_aGen[g] = 0;
+	}
+}
+
 class MUD_MudSheetVeh
 {
 	Vehicle m_Veh;
@@ -7365,6 +7798,7 @@ class MUD_MudSheetVeh
 	float m_fEff0 = -1;             // gearbox efficiency before the mud (-1: not read yet)
 	float m_fEffSet = 1;            // factor last set on it
 	int m_iId;                      // GRADUAL: which vehicle made a pass
+	VehicleWheeledSimulation m_Sim; // L8: cached
 }
 
 //! SYNC: one own stamp (prediction) waiting for the rut op that holds it
