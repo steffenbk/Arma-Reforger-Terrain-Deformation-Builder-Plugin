@@ -107,3 +107,7 @@ Nothing new runs on a DS except the server crater line (TEST_KIT, print only). N
   copies ours; beside nothing drawn the raised border goes down to the band-0 height. The change ramps in over 4 vert
   rows (1, 0.75, 0.5, 0.25); corners stay. Meter: `edge match: sides copied N, moved + co-built N, faded N`.
   Checkpoint v260 = before. Not compiled.
+- User 23:2x: set 11 = no more edges (checkpoint v261). Crater on the sheet still shows a little late. Set 11 has no
+  B fixes. Added set 12 = set 11 + B2 B3 B4. DS log (sets 7/8, 22:47-22:49): with B on, the hole's core tiles all build
+  in the go-live frame (sheet part 25-47 ms of that frame, ~2 ms per tile), taper tiles past the TAPER_NOW_MAX cap
+  still come +1..+6 frames later. recv -> go-live is 50-120 ms (the voxel ahead build), the same off the sheet.

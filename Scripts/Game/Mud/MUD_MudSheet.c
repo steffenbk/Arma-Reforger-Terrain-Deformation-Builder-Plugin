@@ -398,7 +398,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 11;
+	static const int FIX_SETS = 12;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -3348,13 +3348,13 @@ class MUD_MudSheet
 		s_iFixSet = s;
 		bool a = s == 3 || s == 6 || s == 8;
 		bool c = s == 5 || s == 6 || s == 8;
-		bool b = s == 7 || s == 8;
+		bool b = s == 7 || s == 8 || s == 12;     // set 12 = set 11 + all B (crater)
 		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s >= 9;
 		EDGE_COBUILD = a || s == 2 || s >= 9;     // A8 needs A3 to lift the fade again
 		SKIRT_APRON = a;
 		EDGE_DRAPE = s >= 9;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
 		EDGE_OPEN_FADE = s == 10;          // A8: set 10 = set 9 + open fade
-		EDGE_MATCH = s == 11;              // A9: set 11 = set 9 + edge match
+		EDGE_MATCH = s >= 11;              // A9: set 11 = set 9 + edge match
 		BAND_BORN_FRONT = a || s >= 9;
 		BAND_INCR = c || s == 4;
 		BAND_MICRO = c || s == 4;
