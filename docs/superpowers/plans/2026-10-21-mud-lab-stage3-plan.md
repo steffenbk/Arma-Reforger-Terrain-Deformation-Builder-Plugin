@@ -6,10 +6,7 @@ For: `prompts/2026-10-21-local-mud-lab-stage3.md` (the three jobs) - to be carri
 the numbers already in the repo. Labels: PROVEN-CODE (file:line on branch claude/upbeat-lovelace-q0w022 at b68d7b0),
 MEASURED (a repo doc says so), INFERENCE (not proven yet - the meters in Part 0 are there to prove or kill it).
 
-A draft of every meter and switch below exists as an **uncompiled patch**:
-`plans/2026-10-21-mud-lab-stage3-draft.patch` (git apply, against b68d7b0; ~700 lines in MUD_MudSheet.c,
-MUD_WorldGround.c, MUD_LookRuts.c). Use it as a starting point or ignore it - it was never compiled or run. Its line
-names match the names in this plan.
+Nothing is built yet: the local session writes the meters and switches from this plan (start fresh).
 
 ## 0. Measure first (Part 0) - what the local session must read and add
 
@@ -182,12 +179,43 @@ Rank them by MEASURED ms saved per effort after the session; stop and let the us
 - Test (two clients side by side, both sheet local + set 15, later the final set): same hole, same rut look, no truck
   floating / sinking on either; 'MUD corr ... mine 1' snaps per client. Compare both clients' crater lines.
 
-## 5. One combined test session (after the build)
+## 5. Part E (optional, same WB session) - tunnel darkness (PARKED 2026-10-17, user asks again 2026-10-21)
+
+### 5.1 What is proven already (docs only - this cloud session cannot read the logs on the PC)
+From mud-gotchas.md 476-478 and docs/features/trenches-tunnels/README.md:
+- Tunnel space outside every probe box gets full OUTDOOR ambient (day-lit inside); eye adaptation then blows it out.
+  Probes at the centre of every grid cell a dig touches (TUNNEL_DARK_STEP 4 m / 2.5 m up, BoxLerp 0.15) fixed the
+  day-bright pockets. Not the cause then: sun, NOSHADOW, CastShadow, lids, NearPlane, capture refresh, TopColorEV.
+- Lit spots that stay INSIDE full probe cover are AMBIENT (IBL) on our wall material (diag Scene lighting > Ambient off
+  removes them). A wall material with DiffuseIBL / SpecularIBL 0 killed them but looked all black. Graded materials
+  MUD_TunnelDark1/2 + MUD_TunnelDark (IBL 0.5 / 0.25 / 0.1 by roof depth, DARK_MAT) exist and were NEVER tested.
+- Our heightfield (MatTerrainObject) casts no sun shadow (PROVEN WB, VoxelProbe 508 comment); voxel brick tops use
+  the same MAT_TOP. Lids did not stop the spots.
+- NOT TRIED: the probe's own exposure override. IDA found GameEnvironmentProbeEntity props EnableHDRModifications,
+  UserEVMode (0 Automatic / 1 Relative EV / 2 Absolute LV), UserEV_LV. MudTunnelProbe.et sets none of them.
+  "Eye focus moving when I look certain directions" = auto exposure (eye adaptation) measuring the bright mouth or
+  the dark wall - exactly what a probe-local exposure override is for (INFERENCE until tested).
+
+### 5.2 Steps (WB look only; no MP / op / J2 change: probes and materials are client look)
+1. pak / vanilla search first: which vanilla probes (caves, bunkers, ProbeEnvCave_base children, building interiors)
+   set EnableHDRModifications / UserEVMode / UserEV_LV, and to what. Copy their values as the starting point.
+2. TUNNEL_DARK + DARK_MAT true (behind the TEST_KIT key or a runtime static switch, default off).
+3. Look test A: graded IBL walls only. B: + probe exposure override (UserEVMode 1 Relative EV, a few EV steps down;
+   then 2 Absolute LV) in MudTunnelProbe.et / _1.._4. Per test, a tunnel 4-6 m deep with a bend: look at the mouth,
+   away from it, at the floor, at the roof, at noon and at dusk. User says: dark enough? light leaks? exposure pumping?
+4. If light still comes through: diag Scene lighting > Ambient off (ambient?), System textures > Show shadowmap (sun
+   through the roof? then the brick tops / heightfield do not cast - test a dirt top section or a shadow-only lid
+   per brick), Clustering > Probes shapes (a hole in probe cover?).
+5. Stop and report with screenshots described; the user picks. Update docs/features/trenches-tunnels/README.md and
+   mud-gotchas with what is proven.
+
+## 6. One combined test session (after the build)
 WB (look / function only):
 1. Compile clean. Sheet local (numpad 3), numpad * to set 15, then 16, 17 ... 21: each name on screen.
 2. Drive straight 20 s, circle 20 s (tight), stop 12 s, per set 15 / 16 / 17 - striped wedges by eye? TURN METER lines.
 3. Set 20 / 21: drive over old ruts; look at the band edge, a crater on the ruts, a tunnel mouth, drive 80 m away and
    back (mesh radius) - any grass-coloured rut or rut poking through the mud?
 4. Craters on the ruts with set 18 (live notes still pre-build).
+5. Part E tunnel darkness looks (sec 5.2), if built.
 DS (ms only, >= 6 runs per row, an off row): rows off / set 15 / 17 / 19 / 20 / 21 for: driving on ruts, crater on the
 ruts, crater off the ruts, tunnel dig, trench. Plus Part D join and the two-client check.

@@ -19,10 +19,7 @@ wrote a plan. It could NOT read my logs, compile or launch - that is your part.
    for the turn edges (A-1 drape cut at cap leaves the striped vertical skirt, A-2 co-builds copy every side, A-3
    corners never matched, A-4 undrawn slots after a window shift), the under-sheet look cost map, switches A10-A12,
    B8-B10, D1, the Part C idea table and the Part D code reading. Line numbers in it are for commit b68d7b0.
-4. `docs/superpowers/plans/2026-10-21-mud-lab-stage3-draft.patch` - an UNCOMPILED draft of the meters and switches
-   (`git apply` against b68d7b0 works). Read it; use what is right, fix what is wrong. Known gaps: B10
-   (MESH_UNDER_HOLD) is not in a fix set yet (add set 21), and nothing in it was ever compiled.
-5. `docs/superpowers/results/2026-10-20-mud-lab-stage2-build-report.md` (latest state), `docs/superpowers/research/
+4. `docs/superpowers/results/2026-10-20-mud-lab-stage2-build-report.md` (latest state), `docs/superpowers/research/
    mud-gotchas.md` (64 locals incl. params, 80 KB VM stack - BuildTileMesh is near both, string.Format max 9 values,
    '%' / '&' on their own int line, 256 KB per class, MeshObject rules), `.remember/remember.md` if you have it.
 
@@ -34,10 +31,13 @@ wrote a plan. It could NOT read my logs, compile or launch - that is your part.
    compile errors. Write every table you can from the existing logs + the "before" numbers in plan sec 0.3 into
    `docs/superpowers/results/2026-10-21-mud-lab-stage3-measure.md`; mark the rows the next launch must fill.
    Commit + push.
-3. **Build the switches** (each its own static bool, default off, new numpad * sets after 15; checkpoint before each
-   part): A10 / A11 / A12 (sets 16-17), D1 (18), B8 (19), B9 (20), B10 (21). Change FixApply's B5-B7 tests to `>=` so
+3. **Build the switches** from scratch (no code exists yet; each its own static bool, default off, new numpad * sets
+   after 15; checkpoint before each part): A10 / A11 / A12 (sets 16-17), D1 (18), B8 (19), B9 (20), B10 (21). Change FixApply's B5-B7 tests to `>=` so
    later sets keep them. Server, ops, J2, rut data, wear, colliders' shape: untouched (plan says where each piece
    lives). Compile clean. Commit + push per part (`git add --ignore-removal .`).
+   **Part E (tunnel darkness, plan sec 5)** rides in the same WB session if you have room: pak search for vanilla probe
+   exposure settings first, then TUNNEL_DARK + DARK_MAT behind a switch and the probe exposure override
+   (EnableHDRModifications / UserEVMode / UserEV_LV). Look only; no MP change. If it does not fit, say so and leave it.
 4. **One combined session** (plan sec 5): WB look / function first, then the DS (ms only, >= 6 runs per row, an off
    row), Part D join with 30+ craters and two clients on one crater. Give me ONE numbered checklist for the whole
    session. Read the logs yourself afterwards; never ask me to paste them.
