@@ -108,3 +108,70 @@ DS - ms only (>= 6 runs per row, robot: driver seat, stopped, hold Space 3 s):
 10. Part D join (b): rejoin, turn sheet local + set 15 as fast as possible during the join, then set 18. Holes all there?
 11. Two clients side by side, both sheet local + set 21: same crater - same hole, same rut look, no truck floating or
     sinking on either.
+
+## 6. DS session 2026-10-21 19:52-20:02 (client PeerPlugin1/logs/logs_2026-10-21_19-52-30, sheet local preset 1)
+
+One client only: no join test (items 9-10) and no two-client test (11) in this session. No sheet-off row.
+User skipped item 4 'set 20 on old ruts' by eye; mortar craters done on every set.
+CAVEAT: MUD_StutterRobot flips VIEW_TRIM / LOOK_PACE / LAYOUT_SPLIT per run (odd runs 1, even runs 0), so runs 3 and 5
+differ from 2 / 4 / 6 in that too. Runs 3-6 were stopped early (83 / 54 / 43 / 33 s); cost climbs as a run lays more
+ruts, so 'first 6' = the first six 5 s windows of every run (same time since start).
+
+### 6.1 Robot reverse circle per set (client, 5 s 'MUD prof' windows, ms per frame)
+
+| run | set | VT/LP | windows | MUD all | MUD first 6 | sheet first 6 | rebuild first 6 | rb mesh first 6 | rebuild all | look meshes / 10 s (ms) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | 15 | 0 | 23 | 6.22 | 6.05 | 4.25 | 0.82 | 0.56 | 1.07 | 122 (514 ms) |
+| 3 | 17 | 1 | 16 | 6.99 | 6.64 | 4.70 | 0.93 | 0.61 | 1.20 | 130 (533 ms) |
+| 4 | 19 | 0 | 11 | 5.67 | 5.47 | 3.98 | 0.50 | 0.27 | 0.59 | 18 (70 ms) |
+| 5 | 20 | 1 | 8 | 6.47 | 6.51 | 5.01 | 0.55 | 0.28 | 0.58 | 21 (79 ms) |
+| 6 | 21 | 0 | 6 | 5.99 | 5.99 | 4.36 | 0.66 | 0.38 | 0.66 | 33 (129 ms) |
+
+(look meshes column = mean of the 10 s look-rut lines after each run's first one.)
+
+### 6.2 What each switch did
+- B8 (set 19): look-rut cuts 168-175 -> 9-18 per 10 s, look meshes ~125 (~520 ms) -> ~20 (~75 ms) per 10 s,
+  rebuild part ~1.1 -> ~0.6 ms/frame. The one clear saving (~0.45 ms/frame). Look by eye not checked this session.
+- B9 (set 20): groove section upload is only 20-38 ms per 10 s at set 15 (~0.03 ms/frame) = the most B9 can save.
+  It fired at the end of run 5 only (14 builds without groove, 1 patch listed, 6 rebuilt from the list). Negligible.
+- B10 (set 21): 'would hold' 0-3 of 57-155 queued per 10 s at set 15, held 1 in the whole session. Nearly never
+  passes; no saving. Not worth keeping as built.
+- A10-A12 (sets 16-17, in every later set): WORSE edges. 10 s edge audit at set 15: step > 3 cm 0, open 0 in all 11
+  samples. From set 17 on: step > 3 cm up to 193 (max 32 cm), open up to 152. TURN METER turning step > 3 cm: set 15
+  0-5 per 10 s, sets 17-21 36-304. 'co-build sides sent later' 85-354 per 10 s. Set 16 (A10 alone) was on for 0.5 s
+  only, so A10 vs A11 / A12 is not split by this log (inference: the 'sent later' sides = A11 is the main suspect).
+- D1 (set 18): no join this session - untested. Craters live on set 18+ took the pre-build as before (lines below).
+- The sheet is the big cost: 'sheet' 3.4-5.7 ms of MUD 5-7 ms per frame while driving (sh upload ~2 ms). Ruts
+  (rebuild + look ruts + vox) are ~1-1.6 ms/frame.
+
+### 6.3 Mortar craters per set (client; every crater 1 op, pre-build on)
+
+| set | craters | go-live after (ms) | builds held | close (ms) | dig ahead worst frame (ms) | worst frame ms (MUD ms) in the crater 5 s windows |
+|---|---|---|---|---|---|---|
+| 21 (before reset) | 2 | 157, 124 | 25, 24 | 16, 18 | 15, 16 | 94.8 (28), 66.3 (42) |
+| 15 | 2 | 135, 159 | 34, 32 | 29, 15 | 13, 16 | 79.7 (8), 67.6 (25) |
+| 17 | 3 | 158, 120, 113 | 37, 32, 27 | 24, 11, 21 | 16, 14, 14 | 76.7 (23), 72.7 (26), 76.8 (22) |
+| 19 | 2 | 131, 87 | 28, 23 | 12, 27 | 15, 11 | 82.6 (23), 65.9 (8) |
+| 20 | 3 | 106, 119, 115 | 24, 19, 27 | 19, 0, 22 | 11, 8, 18 | 75.1 (21) |
+| 21 | 8 | 105, 124, 97, 118, 78, 103, 88, 107 | 25, 34, 19, 29, 23, 24, 22, 25 | 16, 28, 9, 22, 30, 10, 10, 13 | 15, 20, 11, 17, 11, 15, 10, 9 | 54.3 (7), 85.4 (24), 69.1 (24), 67.3 (45), 86.1 (22), 63.8 (23), 56.3 (28) |
+
+Checksum: 2 + 2 + 3 + 2 + 3 + 8 = 20 = the 20 'MUD sheet prebuild' lines in the log. Sets 16-21 change nothing on
+craters (none of them targets the crater path except D1, which only acts while joining / in bursts). Crater worst
+frames are 55-95 ms with MUD 7-45 ms of it: the rest is the engine (explosion), same on every set.
+
+## 7. v010 (pre-voxel, 2026-10-12 22:58) - code read 2026-10-21, NOT measured
+
+Backup: Versions backup/v010_2026-10-12_2258_pre-voxel-test. Same project GUID 6A8F47B45144E6D6 as today.
+- Ruts: wheel Press / Cut straight into the fine patch heights (m_aH); server sends changed rects every
+  m_fColliderInterval (SendChanges / OnLive / ApplyRect). No voxel probe, no J2 ops, no look ruts, no band mesher,
+  no sheet. WorldGround 6344 lines (today 10085).
+- Rebuild: at most ONE mesh and ONE collider per frame (Rebuild picks the oldest due patch of each, MayRun budget,
+  COST_MESH 1 / COST_COLLIDER 4), each patch at most every m_fMeshInterval / m_fColliderInterval. Mesh = fixed
+  33 x 33 grid (1089 verts, 6144 indices, cached index list), groove section always on.
+- No 'MUD prof' meter (MUD_Prof does not exist there) and the robot runs 20 s (RUN_SEC 20): a v010 DS run today would
+  not give numbers comparable to section 6 without a small meter port.
+- No DS log of the v010 days survives (oldest DS / client logs: 2026-10-20). The 10-19 'mesh vs voxel' test
+  (results/2026-10-19-mesh-vs-voxel-ruts-ds.md) was the heightfield path INSIDE today's code (RUTS false, v228), not
+  v010: client 3.35 vs voxel 2.53, server 5.61 vs 3.27 ms/frame, 6 vs 0 corrections.
+- 'No performance issues in WB' is a WB impression; testing rules: WB is never a perf measure. Today's numbers say the
+  difference is mostly the sheet (3.4-5.7 ms/frame) - v010 has no sheet at all.
