@@ -236,3 +236,107 @@ Read:
   is the only row with robot corrections (10). The server does not run the sheet (B = A there).
 - Limits: one run per row. A and B differ in the robot's odd / even flip (VIEW_TRIM / LOOK_PACE / LAYOUT_SPLIT) and B started
   ~24 m from A (<1038.7, 2565.2> vs <1045.5, 2589.3>; C <1035.8, 2605.4>). The world in C is today's copy.
+
+## 10. v010 + today's sheet (row D) - built 2026-10-21, NOT compiled yet
+
+Into addons/Mud v010 test (outside this repo): MUD_MudSheet.c, MUD_MudLab.c, MUD_CraterTrace.c, MUD_MudZone.c,
+MUD_TestKit.c copied unchanged from this build (TEST_KIT true: numpad 3 / numpad * work as here). New MUD_V010Shim.c
+stands in for what v010 lacks, answering as this build does where none of it exists: MUD_VoxelProbe (no column, no rut
+field: TopAt / SurfaceAt / ColumnAt / DrawsAt false, FieldFloorAt FLOOR_NONE), MUD_LookRuts (SheetFloorAt FLOOR_NONE),
+MUD_MudSync (empty layer, as sheet local with SYNC false), MUD_VoxelOp / MUD_VoxelSubEntity (types only).
+v010 MUD_WorldGround: the fix-set statics; DugUndug = v010 Heights (the sheet's ground on hole cells); SheetLiftDirty /
+VoxCellsChanged / PressLog empty; EOnFrame runs MUD_MudSheet.Tick + MUD_MudLab.Tick before Wheels (as here);
+MarkDirty grows one box a frame and the next frame calls MUD_MudSheet.FloorChanged on it (as the rut op re-ground here).
+MUD_CoarseSkin: empty SetVoxCells (ONE_GRID only). Static name check (scratchpad v010check.py, control run on this build):
+no missing class or member left.
+Row D = v010 project, numpad 3 (sheet local), numpad * to set 19, fresh truck, one robot run; compare with row B.
+Compiled clean in WB 2026-10-21 20:55:57 (no script error; the DS / client logs below hold 1 SCRIPT (E) each: coarse
+baked heights '$Testingplanvechmsh:Data/Mud/mud_heights.c' did not open - tracing, the same line as row C, so C and D
+both trace the coarse skin).
+
+## 11. DS session 2026-10-21 20:57-21:01: row D (v010 + today's sheet local, set 19), ONE robot run
+
+Logs: client PeerPlugin1/logs/logs_2026-10-21_20-57-18, server server/logs/logs_2026-10-21_20-57-16 (-addons MudV010Test,
+CLI line checked). Sheet local preset 1 20:58:40, 'set 19' line 20:58:54; robot run 1 (odd: VIEW_TRIM / LOOK_PACE /
+LAYOUT_SPLIT 1) 20:58:57.7-21:00:57.7 at <1033.3, 2595.0>, 'driving on ours 119.2 s, road 0 s'. Same parsers as sec 9
+(ds4.py; engine split eng.py); control: re-running both on row B's log gives sec 9's B row exactly (5.36 / 12.82 /
+3.65 / 1.01 / 7.42). The set 19 line here lacks 'pre_live_only look_under_skip' (B has them): v010 has no look ruts, so
+B8 has nothing to act on there.
+
+Client (the driving player), B and C copied from sec 9:
+
+| Row | blocks | frame avg ms (fps) | frame max | engine render / GPU / sim ms | MUD avg ms | MUD worst ms | frames > 33 ms (MUD half+) | robot corrections |
+|---|---|---|---|---|---|---|---|---|
+| B current, sheet local set 19 | 23 | 12.82 (78) | 61 | 3.65 / 1.01 / 7.42 | 5.36 | 53 | 258 (8) | 10 |
+| C v010 | 23 | 10.40 (96) | 36 | 3.75 / 2.26 / 3.65 | 1.69 | 6 | 1 (0) | 0 |
+| D v010 + sheet local set 19 | 23 | 12.88 (78) | 63 | 3.53 / 0.33 / 8.22 | 6.14 | 56 | 291 (7) | 7 ('mine 1' lines in the whole log: 7) |
+
+Client parts D (avg / worst): sheet 4.23/56 (sh upload 1.84/22, t quads 0.56/22, sh wheels 0.55/5, t engine 0.52/16,
+t setup 0.44/12, sh stored 0.20/7, t skirt 0.19/7, sh follow 0.16/10), ahead 0.80/4, rebuild 0.61/4 (rb mesh 0.30/2,
+rb collider 0.23/2, rb smooth 0.07/2).
+
+Server: D MUD 2.11 ms avg, worst 10 (rebuild 0.94/6, rb collider 0.73/5, wheels 0.85/10, ahead 0.12/5); C 2.30 / 26.
+Sheet local does not run on the server, so D = C there within one run's noise.
+
+Read:
+- The sheet costs the same on the old ground: C -> D adds +4.45 ms client MUD (sheet 4.23), B's sheet was 3.87. The ground
+  under it (voxel or v010 heightfield) is not what makes the sheet slow.
+- Engine 'simulation' rises with it (C 3.65 -> D 8.22, +4.57 vs MUD +4.45). INFERENCE: the script frame is counted inside
+  'simulation', so this is the same cost, not a second one.
+- Robot corrections came back with the sheet on v010 too (C 0 -> D 7; B 10). The sheet has no collider (COLLIDE false), so
+  INFERENCE: the corrections follow the long frames (291 over 33 ms), not the sheet's shape. Unproven: one run per row.
+- Limits: one run per row; D is an odd robot run, B an even one; D started ~10 m from C.
+- Next: the synced sheet DS test (main project, MUD_MudSheet.ENABLED true since v271), not run yet.
+
+## 12. Synced sheet on the hosted server, standalone game 2026-10-21 21:07-21:10 (fresh-agent review)
+
+Log: client only, ArmaReforger/logs/logs_2026-10-21_21-07-21 (server "Terrain deformation test", mod published as
+"Terrain deformation" at 21:05 = main project with ENABLED true, SYNC true, SPARSE false; log lines 'sheet sync',
+'all offroad 1' confirm). The folder addons/Terrain deformation was overwritten at 21:10 with 10-12 scripts (no sheet)
+and published again 21:11 - not what was played. Human driver, 5-19 m/s, ~750 m of loops, crossed own tracks.
+User: decent fps, a lot of far-away track pop-in.
+
+| 5 s window end | fps | frame ms | MUD ms | sheet | sheet sync | speed m/s | note |
+|---|---|---|---|---|---|---|---|
+| 21:08:12 | 138.3 | 7.23 | 0.77 | 0.69 | - | - | loading |
+| 21:08:17 | 154.1 | 6.49 | 0.09 | 0.03 | - | - | |
+| 21:08:22 | 110.7 | 9.03 | 1.33 | 1.16 | 0.00 | - | spawned |
+| 21:08:27 | 99.3 | 10.07 | 1.38 | 1.12 | 0.00 | 0.0 | first ring, 471 to build |
+| 21:08:32 | 81.9 | 12.20 | 1.79 | 1.53 | - | 0.0 | |
+| 21:08:37 | 89.7 | 11.15 | 1.54 | 0.76 | 0.15 | 5.2 | offroad driving from here |
+| 21:08:42 | 90.5 | 11.05 | 2.91 | 1.85 | 0.37 | 10.0 | |
+| 21:08:47 | 91.6 | 10.92 | 3.36 | 2.18 | 0.43 | 10.0 | |
+| 21:08:52 | 103.2 | 9.69 | 3.03 | 1.82 | 0.56 | 11.0 | one 52 ms frame (sync worst 39) |
+| 21:08:57 | 100.8 | 9.93 | 3.43 | 1.98 | 0.57 | 13.8 | |
+| 21:09:02 | 90.7 | 11.03 | 2.87 | 1.51 | 0.48 | 11.7 | |
+| 21:09:07 | 91.1 | 10.97 | 3.29 | 1.95 | 0.61 | 13.1 | |
+| 21:09:12 | 86.1 | 11.61 | 4.35 | 2.86 | 0.62 | 14.7 | |
+| 21:09:17 | 85.0 | 11.77 | 4.34 | 2.66 | 0.78 | 14.9 | |
+| 21:09:22 | 94.2 | 10.61 | 2.99 | 1.82 | 0.48 | 10.6 | |
+| 21:09:27 | 89.7 | 11.14 | 4.04 | 2.83 | 0.51 | 12.1 | |
+| 21:09:32 | 76.6 | 13.06 | 4.63 | 3.23 | 0.55 | 10.6 | |
+| 21:09:37 | 94.3 | 10.61 | 3.60 | 2.29 | 0.49 | 9.0 | |
+| 21:09:42 | 91.3 | 10.95 | 3.66 | 2.30 | 0.53 | 10.8 | |
+| 21:09:47 | 96.0 | 10.42 | 1.64 | 0.75 | 0.21 | 6.6 | onto road |
+| 21:09:52 | 103.8 | 9.63 | 0.57 | 0.13 | 0.02 | 4.8 | road |
+| 21:09:57 | 104.7 | 9.56 | 0.95 | 0.50 | 0.01 | 3.9 | road |
+| 21:10:02 | 103.1 | 9.70 | 0.88 | 0.27 | 0.02 | 3.2 | road |
+
+Checksum: 23 windows = 11347 frames = 115.2 s. Offroad driving 21:08:37-21:09:42 (6382 frames, frame-weighted, also
+matched by profile/MUD_prof_46781.csv): 91.0 fps, 10.98 ms frame, MUD 3.41 ms (31 %), sheet 2.12 + sync 0.51. 3 frames
+over 33 ms, 112 over 20 ms. 4 'mine 1' corrections (21:08:50 0.52 m at the 52 ms frame; 21:09:30; 2x 21:09:45).
+Not an A/B with DS rows B / D (different setup: game alone, human driver, synced not local).
+
+Pop-in (checked against the log 2026-10-21):
+- PROVEN mechanism, INFERENCE that it is what the user saw: tracks live almost only in the sheet. 'MUD rut wear 10 s'
+  sums worn-only 16138 vs cut 1715 samples (WEAR_PASSES 1), so ~90 % of a drive-through cuts nothing into the real
+  ground. Sheet tiles exist only inside the build ring; 'build radius' lines read 40 m x6, 39.0, 29.7, 27.2, 25.3, 20
+  (SPEED_RADIUS shrinks it when fast); meshes drop past 46 m. 'to build 0' while driving = no backlog: tracks pop AT the ring.
+- PROVEN runs, smaller pop: LOD_M 20 m tiles built at 0.3 m quads, 'queued back to full' 251-305 per 10 s inside 17 m.
+- PROVEN runs, likely minor: LAZY_RUT_MESH holds patch meshes under the sheet ('held patch-frames' 2084-7850 / 10 s).
+- Ruled out by the log: look ruts' own meshes ('look meshes 0'), build backlog, far-patch hold, patch sleep.
+Other problems: MUD_MudSync m_mTiles is only ever Set (lines 867, 1639, 2045), never removed - 'tiles touched' 702 at
+the end (~7.9 MB at 11.2 KB a tile, INFERENCE from the code comment). Every client runs every rut op (no distance
+check, INFERENCE: cost grows with trucks map-wide). Published addon ID 'Terraindeformation' but MUD_CoarseSkin.c:92 and
+MUD_RoadLookProbe.c:17 hard-code '$Testingplanvechmsh:' - log: 'baked heights ... did not open - tracing', then
+'MUD coarse: work 5114 ms ... 1 frames' = a 5 s freeze at load.

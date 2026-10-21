@@ -28,6 +28,8 @@ class MUD_MudSheet
 	// LIFT_BY_DRAWN built but the user still saw the step / pop). Lessons: docs/features/mud-sheet/README.md top.
 	// MUD LAB (2026-10-20, prompts/2026-10-20-local-mud-lab-stage1.md): runtime switch, only MUD_MudLab turns it on, as
 	// SHEET LOCAL (SYNC false): client-only, no sync layer, the deposit band (tiles only where wheels went). Off = parked.
+	// SYNCED SHEET DS TEST (user 2026-10-21, v271 = before): on from the start with SYNC true = the synced sheet
+	// on every machine (server sync layer too). numpad 3 still switches to sheet local; its step 0 = off.
 	static bool ENABLED = false;
 	// SYNCED SHEET Stage 2 (2026-10-18, v179 = before): the drawn mud = the sync layer (MUD_MudSync: pressed from the
 	// replicated rut ops, the same on every machine) + this machine's own stamps at the tyres it sees (prediction),
