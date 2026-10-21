@@ -802,6 +802,13 @@ class MUD_WorldGroundEntity : GenericEntity
 	// mud lab stage 2 B7 (user OK 2026-10-21, fix set 15): with sheet local on, DoVoxCells builds the patch colliders in the
 	// go-live frame as before, but their meshes one per frame after it (the sheet draws over them). Default off.
 	static bool VOX_MESH_LATER = false;
+	// mud lab stage 3 B9 (fix set 20, sheet local): a band patch mesh without its groove section when every revealed vert
+	// is under the sheet's full cover (heights and sink unchanged); a listed patch rebuilds when that cover is lost. Default off.
+	static bool GROOVE_UNDER_OFF = false;
+	// stage 3 B10 (fix set 21, sheet local): a queued band mesh rebuild is held when every changed vert is under the sheet's
+	// full cover and its shown height (less its groove sink) is at least 2 cm under the new ground + LIFT; the kept input
+	// and the changed box stay, the changed verts join the B9 watch list. Look only, colliders untouched. Default off.
+	static bool MESH_UNDER_HOLD = false;
 	protected ref array<int> m_aVoxLater = {};     // B7: patch keys whose go-live mesh waits (one per frame, VoxLaterStep)
 	protected int m_iVoxLaterN;                    // B7 meters, per run of the list: meshes built, frames, ms, worst, re-queued
 	protected int m_iVoxLaterF;
@@ -863,6 +870,19 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iBHold;
 	protected int m_iBQueued;
 	protected int m_iBHoldVerts;
+	// stage 3 B9 / B10 (mud lab fix sets 20 / 21, sheet local)
+	protected bool m_bGrooveNow;                  // B9: this build draws the groove section
+	protected ref array<float> m_aBRevP = {};     // B9: this build's revealed verts (world x, z pairs)
+	protected ref map<int, ref array<float>> m_mBWatch = new map<int, ref array<float>>();     // B9 / B10 watch list: patch key -> world x, z pairs that need the sheet's full cover
+	protected ref array<int> m_aBWatchK = {};     // the listed keys (one re-checked per frame, round robin)
+	protected int m_iBWatchI;
+	protected int m_iBWatchP;                     // next point of that patch (BWATCH_PTS a frame)
+	static const int BWATCH_PTS = 300;            // B9 / B10: watch points re-checked per frame
+	static const int BWATCH_MAX = 4096;           // B10: a patch's watch list max floats (else the rebuild goes on and resets it)
+	protected ref array<float> m_aBHoldP = {};    // B10: this queued build's changed verts (world x, z pairs)
+	protected int m_iBHeld;                       // 10 s: queued rebuilds held
+	protected int m_iBGrDrop;                     // 10 s: band mesh builds without the groove section
+	protected int m_iBWatchRe;                    // 10 s: listed patches rebuilt (cover lost / switches or sheet local off)
 	protected int m_iColSkipSmall;      // log: skips per 10 s ('MUD world: budget' line)
 	protected float m_fSinceWheelLog;
 	protected int m_iPresses;
@@ -1108,6 +1128,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_KeepScan.Tick(m_fTime);    // TEMP tool 2026-10-17 run 2: keep mask incl. asphalt / concrete terrain (pin cut-out)
 		MUD_Prof.Add(MUD_Prof.KEEPSCAN, System.GetTickCount(tP));
 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet (adds its own MUD_Prof parts)
+		if (!m_aBWatchK.IsEmpty())
+			BWatchTick();     // stage 3 B9 / B10
 		if (m_bRender && (PRESS_LIFT || MUD_MudSheet.ENABLED || MUD_TestKit.TEST_KIT))
 			MUD_MudLab.Tick(m_fTime);    // mud lab 2026-10-20: surface mode switcher (client look only; TEST_KIT numpad 3 cycles)
 		tP = System.GetTickCount();
@@ -7760,8 +7782,119 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected void BRevNote(vector q)
 	{
 		m_iBRev++;
-		if (!MUD_MudSheet.FullCoverAt(m_fBWx0 + q[0], m_fBWz0 + q[2]))
+		if (m_iBRevOut > 0 && !MUD_TestKit.TEST_KIT)
+			return;     // B9: the groove stays - no more queries
+		float x = m_fBWx0 + q[0];
+		float z = m_fBWz0 + q[2];
+		if (!MUD_MudSheet.FullCoverAt(x, z))
+		{
 			m_iBRevOut++;
+		}
+		else if (GROOVE_UNDER_OFF && m_iBRevOut == 0)
+		{
+			m_aBRevP.Insert(x);     // stage 3 B9: watched while the groove section is off
+			m_aBRevP.Insert(z);
+		}
+	}
+
+	//! stage 3 B9: draw the groove section this build? Off when every revealed vert is under the sheet's full cover
+	protected void BGrooveDecide()
+	{
+		m_bGrooveNow = m_bGroove;
+		if (GROOVE_UNDER_OFF && m_bBMeter && m_iBRev > 0 && m_iBRevOut == 0)
+			m_bGrooveNow = false;
+	}
+
+	//! B9: a band mesh is built - list it (its revealed verts) when its groove section is off, else unlist it
+	protected void BWatchSet(MUD_FinePatch p)
+	{
+		if (m_bGroove && !m_bGrooveNow)
+		{
+			m_iBGrDrop++;
+			array<float> pts = new array<float>();
+			pts.Copy(m_aBRevP);
+			if (!m_mBWatch.Contains(p.m_iKey))
+				m_aBWatchK.Insert(p.m_iKey);
+			m_mBWatch.Set(p.m_iKey, pts);
+		}
+		else if (m_mBWatch.Contains(p.m_iKey))
+		{
+			BWatchDrop(p.m_iKey);
+		}
+	}
+
+	protected void BWatchDrop(int key)
+	{
+		m_mBWatch.Remove(key);
+		int ix = m_aBWatchK.Find(key);
+		if (ix >= 0)
+			m_aBWatchK.Remove(ix);
+	}
+
+	//! B9 / B10: re-check one listed patch per frame; a vert out of the sheet's full cover (tile dropped / hidden, crater,
+	//! window moved) rebuilds that patch in full. Both switches off or sheet local off: every listed patch rebuilds now.
+	protected void BWatchTick()
+	{
+		if ((!GROOVE_UNDER_OFF && !MESH_UNDER_HOLD) || !MUD_MudSheet.LocalOn())
+		{
+			for (int k = 0; k < m_aBWatchK.Count(); k++)
+				BWatchRebuild(m_aBWatchK[k]);
+			m_aBWatchK.Clear();
+			m_mBWatch.Clear();
+			return;
+		}
+		if (m_iBWatchI >= m_aBWatchK.Count())
+			m_iBWatchI = 0;
+		int key = m_aBWatchK[m_iBWatchI];
+		array<float> pts = m_mBWatch.Get(key);
+		bool lost = !pts;
+		if (pts)
+		{
+			int end = m_iBWatchP + BWATCH_PTS * 2;
+			if (end > pts.Count())
+				end = pts.Count();
+			for (int i = m_iBWatchP; i + 1 < end; i += 2)
+			{
+				if (!MUD_MudSheet.FullCoverAt(pts[i], pts[i + 1]))
+				{
+					lost = true;
+					break;
+				}
+			}
+			m_iBWatchP = end;
+			if (!lost && end < pts.Count())
+				return;     // this patch goes on next frame
+		}
+		m_iBWatchP = 0;
+		if (!lost)
+		{
+			m_iBWatchI++;
+			return;
+		}
+		BWatchRebuild(key);
+		BWatchDrop(key);
+	}
+
+	//! B9 / B10: queue a full rebuild of patch key (no same / small skip, no B10 hold: m_fMeshBuiltAt -100)
+	protected void BWatchRebuild(int key)
+	{
+		m_iBWatchRe++;
+		MUD_FinePatch p = m_mPatches.Get(key);
+		if (!p || !m_bRender)
+			return;
+		p.m_bMeshDirty = true;     // as VoxLaterStep's queued branch
+		p.m_bMBoxAll = true;
+		p.m_bRutMesh = false;
+		p.m_bHMesh = true;
+		p.m_fMeshBuiltAt = -100;
+		if (LOOK_PACE)
+			p.m_fMeshHoldTo = -100;
+		if (!p.m_bQueued)
+		{
+			p.m_bQueued = true;
+			p.m_fQueuedAt = m_fTime;
+			m_aDirty.Insert(p.m_iKey);
+		}
 	}
 
 	//! B meter: this band mesh build is done
@@ -7780,16 +7913,17 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! stage 3 Part 0 B10 meter (switch not built): would this queued rebuild be held? The shown mesh is the kept input,
 	//! same skin classes, nothing hidden owed, and every changed vert is under the sheet's full cover with its shown
 	//! height (less its groove sink) at least 2 cm under the new height + LIFT. Meter only: the build goes on.
-	protected void BHoldMeter(MUD_FinePatch p, bool hideOwed, int rfX0, int rfZ0)
+	protected bool BHoldMeter(MUD_FinePatch p, bool hideOwed, int rfX0, int rfZ0)
 	{
 		m_iBQueued++;
 		if (hideOwed || !p.m_aMeshY || !p.m_aMeshD || !p.m_aMeshSkin || !p.m_MeshRes || p.m_fMeshBuiltAt < -50)
-			return;
+			return false;
 		for (int c = 0; c < SKIN * SKIN; c++)
 		{
 			if (m_Band.m_aSkin[c] != p.m_aMeshSkin[c])
-				return;
+				return false;
 		}
+		m_aBHoldP.Clear();
 		float sink = m_fRevealGap * 3;
 		float wx0 = m_fX0 + rfX0 * m_fFine;
 		float wz0 = m_fZ0 + rfZ0 * m_fFine;
@@ -7802,8 +7936,10 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (m_Band.m_aY[v] == p.m_aMeshY[v] && m_Band.m_aD[v] == p.m_aMeshD[v])
 					continue;
 				changed++;
-				if (!MUD_MudSheet.FullCoverAt(wx0 + vx * m_fFine, wz0 + vz * m_fFine))
-					return;
+				float hx = wx0 + vx * m_fFine;
+				float hz = wz0 + vz * m_fFine;
+				if (!MUD_MudSheet.FullCoverAt(hx, hz))
+					return false;
 				float s = 0;
 				if (m_bGroove)
 				{
@@ -7814,14 +7950,40 @@ class MUD_WorldGroundEntity : GenericEntity
 						s = t * t * (3 - 2 * t) * sink;
 				}
 				if (p.m_aMeshY[v] - s > m_Band.m_aY[v] + MUD_MudSheet.LIFT - 0.02)
-					return;
+					return false;
+				if (MESH_UNDER_HOLD)
+				{
+					m_aBHoldP.Insert(hx);     // stage 3 B10: watched while held
+					m_aBHoldP.Insert(hz);
+				}
 			}
 		}
-		if (changed > 0)
+		if (changed == 0)
+			return false;
+		m_iBHold++;
+		m_iBHoldVerts += changed;
+		return true;
+	}
+
+	//! stage 3 B10: room for this hold's verts in the patch's watch list (full: the rebuild goes on and resets the list)
+	protected bool BWatchRoom(MUD_FinePatch p)
+	{
+		array<float> pts = m_mBWatch.Get(p.m_iKey);
+		return !pts || pts.Count() + m_aBHoldP.Count() <= BWATCH_MAX;
+	}
+
+	//! B10: a held build's changed verts join the patch's watch list
+	protected void BWatchAdd(MUD_FinePatch p)
+	{
+		array<float> pts = m_mBWatch.Get(p.m_iKey);
+		if (!pts)
 		{
-			m_iBHold++;
-			m_iBHoldVerts += changed;
+			pts = new array<float>();
+			m_mBWatch.Set(p.m_iKey, pts);
+			m_aBWatchK.Insert(p.m_iKey);
 		}
+		for (int i = 0; i < m_aBHoldP.Count(); i++)
+			pts.Insert(m_aBHoldP[i]);
 	}
 
 	//! B meter 10 s line, then reset
@@ -7830,7 +7992,12 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (!MUD_TestKit.TEST_KIT || (m_iBBuilds == 0 && m_iBQueued == 0))
 			return;
 		Print(string.Format("MUD world B under sheet 10 s: band mesh builds metered %1 - none revealed %2, revealed all under full cover %3, some revealed uncovered %4 | groove section upload %5 ms | B10 would hold %6 of %7 queued (changed verts %8)",
-			m_iBBuilds, m_iBNone, m_iBAllCov, m_iBSome, m_iBGrMs, m_iBHold, m_iBQueued, m_iBHoldVerts), LogLevel.NORMAL);
+			m_iBBuilds, m_iBNone, m_iBAllCov, m_iBSome, m_iBGrMs, m_iBHold, m_iBQueued, m_iBHoldVerts)
+			+ string.Format(" | B9 groove section off %1 builds, watch list %2 patches, rebuilt from it %3 (GROOVE_UNDER_OFF %4) | B10 held %5 (MESH_UNDER_HOLD %6)",
+			m_iBGrDrop, m_aBWatchK.Count(), m_iBWatchRe, GROOVE_UNDER_OFF, m_iBHeld, MESH_UNDER_HOLD), LogLevel.NORMAL);
+		m_iBGrDrop = 0;
+		m_iBHeld = 0;
+		m_iBWatchRe = 0;
 		m_iBBuilds = 0;
 		m_iBNone = 0;
 		m_iBAllCov = 0;
@@ -7926,8 +8093,23 @@ class MUD_WorldGroundEntity : GenericEntity
 			p.m_fMeshHoldTo = p.m_fMeshBuiltAt + MESH_SMALL_MAX_S;     // fix (run 8): the input pass is ~1.2 ms - retry once, at the window end
 			return true;     // PERF IDEA 2: old mesh kept, m_bMeshDirty / m_bLookDirty stay - built on a later pass
 		}
-		if (MUD_TestKit.TEST_KIT && m_bQueueMesh && MUD_MudSheet.LocalOn())
-			BHoldMeter(p, hideOwed, rfX0, rfZ0);     // stage 3 Part 0 B10 'would hold' (meter only, the build goes on)
+		if ((MUD_TestKit.TEST_KIT || MESH_UNDER_HOLD) && m_bQueueMesh && MUD_MudSheet.LocalOn())
+		{
+			// stage 3 Part 0 B10 'would hold' meter; B10 MESH_UNDER_HOLD: the shown mesh stays (the sheet draws over it).
+			// No KeepMeshY / MeshDone: the kept input and the changed box stay for the next real build.
+			if (BHoldMeter(p, hideOwed, rfX0, rfZ0) && MESH_UNDER_HOLD && BWatchRoom(p))
+			{
+				m_iBHeld++;
+				m_bMeshSkipped = true;
+				p.m_bMeshDirty = false;
+				p.m_fLookCutAt = -1;
+				p.m_bLookDirty = false;
+				WhyClear(p);
+				p.m_fLookSince = -1;
+				BWatchAdd(p);
+				return true;
+			}
+		}
 		KeepMeshY(p);
 		// SKIRT DEPTH (2026-10-18, user: see-through gaps while driving): a look rut drawn on one patch before its
 		// neighbour opens a crack at the seam as deep as the rut (up to Rut Max Depth 0.35) + the groove sink
@@ -7961,9 +8143,10 @@ class MUD_WorldGroundEntity : GenericEntity
 			blend = 0.01;
 		float invBlend = 1.0 / blend;
 		float sink = m_fRevealGap * 3;
-		m_bBMeter = MUD_TestKit.TEST_KIT && m_bGroove && MUD_MudSheet.LocalOn();     // stage 3 Part 0 B meter
+		m_bBMeter = (MUD_TestKit.TEST_KIT || GROOVE_UNDER_OFF) && m_bGroove && MUD_MudSheet.LocalOn();     // stage 3 Part 0 B meter, B9
 		m_iBRev = 0;
 		m_iBRevOut = 0;
+		m_aBRevP.Clear();
 		m_fBWx0 = m_fX0 + rfX0 * m_fFine;
 		m_fBWz0 = m_fZ0 + rfZ0 * m_fFine;
 		for (int i = 0; i < nAll; i++)
@@ -7995,12 +8178,13 @@ class MUD_WorldGroundEntity : GenericEntity
 			m_Band.m_Uv.m_aTop[i2 + 1] = 1 - (uz + qz) * invDiv;
 		}
 
+		BGrooveDecide();     // stage 3 B9
 		m_iCsMeshUv += System.GetTickCount(csUv);
 		int csRes = System.GetTickCount();
 		int ni = m_Band.m_iI;
 		int niAll = ni + m_Band.m_iSkirtI;
 		Resource res;
-		if (m_bGroove)
+		if (m_bGrooveNow)
 		{
 			int numVerts2[] = {nAll, nv};
 			int numIndices2[] = {niAll, ni};
@@ -8033,7 +8217,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 		mesh.UpdateIndices(0, m_Band.m_Ib.m_aI);
 		mesh.UpdateVerts(0, m_Band.m_Vb.m_aV, m_Band.m_Uv.m_aTop);
-		if (m_bGroove)
+		if (m_bGrooveNow)
 		{
 			m_iBGrT = System.GetTickCount();
 			mesh.UpdateIndices(1, m_Band.m_Ib.m_aI);       // its first ni: the surface without skirts
@@ -8055,6 +8239,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		p.m_fMeshBuiltAt = m_fTime;     // PERF IDEA 2: m_aMeshY (KeepMeshY above) is this mesh
 		MeshDone(p, hideOwed, rfOn);     // REBUILD 5
 		m_iMeshBuilds++;
+		BWatchSet(p);     // stage 3 B9 (before BBuildNote clears m_bBMeter)
 		if (m_bBMeter)
 			BBuildNote();
 		int ms = System.GetTickCount(t0);

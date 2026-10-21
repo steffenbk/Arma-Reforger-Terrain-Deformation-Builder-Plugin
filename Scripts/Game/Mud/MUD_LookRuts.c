@@ -50,6 +50,10 @@ class MUD_LookRuts
 	// (same rule, crude under the sheet) lands at the same depth = no visible drop. Patch meshes there are hidden
 	// (lazy rut mesh) so they are not marked. false = SHEET_SKIP as before (no look cut under the sheet).
 	static const bool SHEET_LOOK = true;
+	// stage 3 B8 (mud lab fix set 19, sheet local): no look cut for a segment whose two lead-shifted ends lie where sheet
+	// local stamps the wheel itself (MUD_MudSheet.LocalStampsAt) - its band hides the look rut there and the sheet never
+	// reads the look floor in local. Look only: server ops, ruts, wear and colliders are untouched.
+	static bool LOOK_UNDER_SKIP = false;
 	static const float SHEET_GAP = 0.1;     // m behind the rearmost wheel contact, segments under the sheet
 	static const float GAP = 0.2;           // 0.4 until 2026-10-18 (user: ruts not instant). m behind the wheel contact a segment is cut (server: RUT_BEHIND_GAP 1.5)
 	// PER_WHEEL (user 2026-10-18, results/2026-10-18-look-rut-delay-split.md: the rearmost-wheel wait put the look rut
@@ -245,8 +249,15 @@ class MUD_LookRuts
 				vector lead = vector.Zero;
 				if (LEAD)
 					lead = dir * Math.Min(LEAD_MIN + hs * LEAD_S, LEAD_MAX);
-				if (MUD_TestKit.TEST_KIT && MUD_MudSheet.LocalStampsAt(last + lead) && MUD_MudSheet.LocalStampsAt(cp + lead))
-					s_iB8Under++;     // stage 3 Part 0 B8 meter (the cut goes on)
+				if ((LOOK_UNDER_SKIP || MUD_TestKit.TEST_KIT) && MUD_MudSheet.LocalStampsAt(last + lead) && MUD_MudSheet.LocalStampsAt(cp + lead))
+				{
+					s_iB8Under++;     // stage 3 Part 0 B8 meter
+					if (LOOK_UNDER_SKIP)
+					{
+						t.m_aLast.Set(w, cp);
+						continue;     // stage 3 B8: the sheet stamps this wheel itself here
+					}
+				}
 				t.m_aPendA.Insert(last + lead);
 				t.m_aPendB.Insert(cp + lead);
 				t.m_aPendT.Insert(now);
@@ -288,7 +299,7 @@ class MUD_LookRuts
 					s_iVeh, s_iNoContact, s_iCuts, s_iWritten, s_iCaught, s_iExpired, s_iDirty, s_mTiles.Count(), s_iMs)
 					+ string.Format(" | look meshes %1 (%2 ms), replaced by a shallower server rut %3 (+ %5 within REPLACE_MIN, no rebuild), segments under the sheet %4 (SHEET_LOOK: cut for the sheet, else skipped)", s_iMeshes, s_iMeshMs, s_iReplaced, s_iUnder, s_iNearCaught)
 					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn)
-					+ string.Format(" | B8 meter: segments sheet local stamps itself %1", s_iB8Under), LogLevel.NORMAL);
+					+ string.Format(" | B8 meter: segments sheet local stamps itself %1 (LOOK_UNDER_SKIP %2: skipped when on)", s_iB8Under, LOOK_UNDER_SKIP), LogLevel.NORMAL);
 			float dlDist = s_fDlDistSum / Math.Max(1, s_iDlMeshN);
 			if (s_iDlCutN > 0 || s_iDlMeshN > 0)
 				Print(string.Format("MUD delay look 10 s (TEMP): wheel -> look cut avg %1 max %2 ms (%3 segments) | wheel -> drawn mesh avg %4 max %5 ms, ~%6 m behind the wheel (%7 meshes) | GAP %8 m, LOOK_MESH_EVERY %9 s",

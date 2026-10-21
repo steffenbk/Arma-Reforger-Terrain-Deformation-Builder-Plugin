@@ -358,6 +358,11 @@ class MUD_MudSheet
 	static bool EDGE_MATCH = false;             // A9: borders copy the drawn neighbour's; a border that must move rebuilds both now
 	static bool EDGE_OPEN_FADE = false;         // A8: a side whose neighbour is not drawn (and not built this upload) fades over EDGE
 	static bool EDGE_DRAPE = false;             // A7 (user idea 2026-10-20): skirt curves over and down as a quarter round (wins over A4)
+	static bool EDGE_DRAPE_FIT = false;         // stage 3 A10: skirt quads a drape cut at the cap left get the A4 apron shape
+	static bool EDGE_CO_SIDE = false;           // stage 3 A11: a co-build copies only the side(s) facing the tile(s) that asked
+	static bool EDGE_CORNER = false;            // stage 3 A12: a copied side also takes the neighbour's two corner verts
+	static bool PRE_LIVE_ONLY = false;          // stage 3 D1: no crater pre-build while joining or past PRE_FRAME_MAX notes a frame
+	static const int PRE_FRAME_MAX = 3;         // D1: crater notes per sheet frame (the rest take the normal go-live dig)
 	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
 	static const float EDGE_CO_STEP = 0.03;     // A3: m between our border vert and the neighbour's = co-build (EDGE_STEP)
 	static const int CO_MAX = 4;                // A3: stored neighbours built at once per upload; the rest are queued
@@ -404,7 +409,7 @@ class MUD_MudSheet
 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
-	static const int FIX_SETS = 15;
+	static const int FIX_SETS = 21;
 	protected static int s_iFixSet;
 	// part A meters (10 s, LocalLog) and state
 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
@@ -418,6 +423,14 @@ class MUD_MudSheet
 	protected bool m_bCoAny;                    // A3: some slot got m_aCoLive in this upload
 	protected int m_aCoLive[16];                // A3: 1 = build in this upload (co-build)
 	protected int m_aCoNext[16];                // A3: 1 = build at the next upload (co-build)
+	protected int m_aCoSide[16];                // stage 3 A11: sides (1 << S N W E) a live co-build copies unconditionally
+	protected int m_aCoNextSide[16];            // A11: the same for m_aCoNext
+	protected int m_iCoSideMask;                // A11: side mask of the co-build running now
+	protected int m_iCoLater;                   // A11: co-build sides over 3 cm sent to a later build (10 s)
+	protected int m_iApFrom;                    // A4 / A10: skirt verts the apron shape runs over (m_iApTo -1 = none)
+	protected int m_iApTo;
+	protected int m_iMj0;                       // A12: border verts a matched side moves (1..TQ-1, copying: 0..TQ)
+	protected int m_iMj1;
 	protected int m_aWheelSlot[16];             // A2: 1 = a wheel contact lies in the slot (this upload)
 	protected ref array<int> m_aFrontTx = {};   // A5: tiles built before the radius list
 	protected ref array<int> m_aFrontTz = {};
@@ -512,6 +525,8 @@ class MUD_MudSheet
 	protected int m_iDFrameN;
 	protected int m_iDFrameMax;
 	protected int m_iDCapDrop;
+	protected int m_iPreFrameN;                 // stage 3 D1: crater notes this sheet frame
+	protected int m_iPreSkip;                   // D1: notes left to the normal go-live dig (10 s)
 	protected int m_iTchKey = -1;               // TouchAt cache
 	protected MUD_MudSheetStore m_TchSt;
 	static const float UPLOAD_EVERY = 0.1;      // s between mesh rebuilds (10 Hz, as the KB mud tile)
@@ -1052,6 +1067,7 @@ class MUD_MudSheet
 				m_iDFrameMax = m_iDFrameN;     // stage 3 Part 0 D meter: most crater notes in one sheet frame
 			m_iDFrameN = 0;
 		}
+		m_iPreFrameN = 0;     // stage 3 D1
 		int tPre = System.GetTickCount();
 		int bPre = s_iBandMsAll;     // stage 2 A1: BuildNowSlots' BandTile
 		if (m_bNowDue)
@@ -1448,7 +1464,10 @@ class MUD_MudSheet
 		m_Drag.Shift(si, sk);     // L2 / L3 cell sets move with the field (empty while those levers are off)
 		m_Chg.Shift(si, sk);
 		for (int cn = 0; cn < TILES * TILES; cn++)
+		{
 			m_aCoNext[cn] = 0;     // stage 2 A3: slot numbers moved (the shift rebuilds its slots anyway)
+			m_aCoNextSide[cn] = 0;
+		}
 		if (m_bLocal && BAND_INCR)
 			DistShift(sti, stk);     // stage 2 C1
 		for (int sgr = 0; sgr < TILES * TILES; sgr++)
@@ -2748,8 +2767,18 @@ class MUD_MudSheet
 	{
 		if (MUD_TestKit.TEST_KIT)
 			PreMeter();     // stage 3 Part 0 D meter
+		if (PRE_LIVE_ONLY && (!SCR_PlayerController.GetLocalControlledEntity() || m_iPreFrameN >= PRE_FRAME_MAX))
+		{
+			m_iPreSkip++;
+			return;     // stage 3 D1: joining (replay) or a burst - not noted: the normal go-live dig (PreTaken false)
+		}
+		m_iPreFrameN++;
 		if (m_aPreWp.Count() >= 32)
+		{
+			if (MUD_TestKit.TEST_KIT)
+				m_iDCapDrop += m_aPreWp.Count();
 			PreForget();     // go-lives that never came: start clean
+		}
 		m_aPreLo.Insert(op.m_vLo);
 		m_aPreHi.Insert(op.m_vHi);
 		m_aPreWp.Insert(op.m_vWp);
@@ -3489,12 +3518,15 @@ class MUD_MudSheet
 				if (m_aCoNext[n] == 0)
 					continue;
 				m_aCoNext[n] = 0;
+				int ns = m_aCoNextSide[n];
+				m_aCoNextSide[n] = 0;
 				if (m_aSlotZone[n] == 0)
 					continue;
 				m_aSlotDirty[n] = 1;
 				m_aPick[n] = 1;
 				m_aPickWhy[n] = BW_COBUILD;
 				m_aCoLive[n] = 1;
+				m_aCoSide[n] = m_aCoSide[n] | ns;     // stage 3 A11
 			}
 		}
 		if (!EDGE_COBUILD_PICK)
@@ -3593,14 +3625,16 @@ class MUD_MudSheet
 					need = Math.AbsFloat(y - ny) > EDGE_CO_STEP;
 			}
 			if (need)
-				CoBuild(ntx, ntz);
+				CoBuild(ntx, ntz, os);
 		}
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! A3: build neighbour tile tx, tz for a co-build (see CoCheck)
-	protected void CoBuild(int tx, int tz)
+	//! A3: build neighbour tile tx, tz for a co-build (see CoCheck); os = its side facing the tile that asked (stage 3
+	//! A11: with EDGE_CO_SIDE only those sides are copied unconditionally)
+	protected void CoBuild(int tx, int tz, int os)
 	{
+		int bit = 1 << os;
 		if (m_bPlaced && IsLive(tx, tz))
 		{
 			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
@@ -3608,6 +3642,7 @@ class MUD_MudSheet
 				return;
 			if (m_bInUpload)
 			{
+				m_aCoSide[t] = m_aCoSide[t] | bit;     // A11: a second asker adds its side
 				if (m_aCoLive[t] != 0)
 					return;
 				m_aCoLive[t] = 1;
@@ -3618,6 +3653,7 @@ class MUD_MudSheet
 				return;
 			}
 			m_aCoNext[t] = 1;
+			m_aCoNextSide[t] = m_aCoNextSide[t] | bit;
 			m_aSlotDirty[t] = 1;
 			m_bDirty = true;
 			return;
@@ -3644,12 +3680,88 @@ class MUD_MudSheet
 		}
 		int keepWhy = m_iBuildWhy;
 		m_bCoBuilding = true;
+		m_iCoSideMask = bit;     // A11
 		m_iBuildWhy = BW_COBUILD;
 		Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
 		if (res)
 			st.m_Res = res;
 		m_bCoBuilding = false;
+		m_iCoSideMask = 0;
 		m_iBuildWhy = keepWhy;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A11: does the co-build running now copy side s unconditionally? (without A11: every side, as A3 / A9)
+	protected bool CoSideOk(int s)
+	{
+		if (!EDGE_CO_SIDE)
+			return true;
+		int bit = m_iCoSideMask & (1 << s);
+		return bit != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A11, after a co-build of tile tx, tz: a side it kept (over EDGE_CO_STEP, m_aMatchCo) gets its neighbour
+	//! built LATER, never now (no chains): live -> the next upload as a co-build copying the side facing us; stored ->
+	//! a plain queued build (A9 then copies or co-builds us)
+	protected void CoLater(int tx, int tz)
+	{
+		for (int s = 0; s < 4; s++)
+		{
+			if (m_aMatchCo[s] == 0)
+				continue;
+			int ntx = tx;
+			int ntz = tz;
+			int os = 2;
+			if (s == 0)
+			{
+				ntz = tz - 1;
+				os = 1;
+			}
+			else if (s == 1)
+			{
+				ntz = tz + 1;
+				os = 0;
+			}
+			else if (s == 2)
+			{
+				ntx = tx - 1;
+				os = 3;
+			}
+			else
+			{
+				ntx = tx + 1;
+			}
+			m_iCoLater++;
+			if (m_bPlaced && IsLive(ntx, ntz))
+			{
+				int t = (ntz - m_iZ0 / TQ) * TILES + ntx - m_iX0 / TQ;
+				if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
+					continue;
+				int bit = 1 << os;
+				m_aCoNext[t] = 1;
+				m_aCoNextSide[t] = m_aCoNextSide[t] | bit;
+				m_aSlotDirty[t] = 1;
+				m_bDirty = true;
+				continue;
+			}
+			int key = TrailKey(ntx, ntz);
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Ent)
+				continue;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_COBUILD);
+			QueueBuild(ntx, ntz);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A12: vertex rows the A9 ramp moves at border vert j (a corner moves only itself)
+	protected int RampRows(int j)
+	{
+		if (j == 0 || j == TQ)
+			return 1;
+		return 4;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3799,8 +3911,6 @@ class MUD_MudSheet
 		if (!SCR_PlayerController.GetLocalControlledEntity())
 			m_iDJoin++;
 		m_iDFrameN++;
-		if (m_aPreWp.Count() >= 32)
-			m_iDCapDrop += m_aPreWp.Count();
 	}
 
 	protected string DMeter()
@@ -3810,7 +3920,7 @@ class MUD_MudSheet
 		int most = m_iDFrameMax;
 		if (m_iDFrameN > most)
 			most = m_iDFrameN;
-		return string.Format(" | PART D notes %1 (joining %2, most in one frame %3, dropped at the 32 cap %4)", m_iDNotes, m_iDJoin, most, m_iDCapDrop);
+		return string.Format(" | PART D notes %1 (joining %2, most in one frame %3, dropped at the 32 cap %4, D1 left to the go-live %5)", m_iDNotes, m_iDJoin, most, m_iDCapDrop, m_iPreSkip);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3898,6 +4008,9 @@ class MUD_MudSheet
 			p3 += string.Format(" | sides faded (beside not drawn) %1", m_iOpenFade);
 		if (EDGE_MATCH)
 			p3 += string.Format(" | edge match: sides copied %1, moved + co-built %2, faded (beside not drawn) %3", m_iMatchCopy, m_iMatchMove, m_iMatchFade);
+		if (EDGE_CO_SIDE)
+			p3 += string.Format(" | co-build sides sent later %1", m_iCoLater);     // stage 3 A11
+		m_iCoLater = 0;
 		if (BUILD_SKIP_SAME)
 			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
 		if (BAND_STORED_HOLD)
@@ -3909,6 +4022,7 @@ class MUD_MudSheet
 		m_iDJoin = 0;
 		m_iDFrameMax = 0;
 		m_iDCapDrop = 0;
+		m_iPreSkip = 0;
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
 		m_iWouldSkip = 0;
@@ -3946,7 +4060,7 @@ class MUD_MudSheet
 
 	//------------------------------------------------------------------------------------------------
 	//! MUD LAB stage 2: fix set s. 0 none, 1 A2, 2 A2 A3, 3 A2 A3 A4 A5 (all A), 4 C1 C2 (band), 5 all C, 6 all A + all C,
-	//! 7 all B (craters), 8 all A + B + C
+	//! 7 all B (craters), 8 all A + B + C; stage 3: 16 = 15 + A10, 17 = 16 + A11 + A12, 18 = 17 + D1, 19 = 18 + B8, 20 = 19 + B9, 21 = 20 + B10
 	static void FixApply(int s, string why)
 	{
 		s_iFixSet = s;
@@ -3968,9 +4082,16 @@ class MUD_MudSheet
 		CRATER_TRACE_NOW = b;
 		CRATER_TAPER_NOW = b;
 		CRATER_EASE_DROP = b;
-		CRATER_PREBUILD = s == 13 || s == 14 || s == 15;     // B5: set 13 = set 12 + prebuild
-		PRE_COL_CACHE = s == 14 || s == 15;     // B6: set 14 = set 13 + column cache
-		MUD_WorldGroundEntity.VOX_MESH_LATER = s == 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
+		CRATER_PREBUILD = s >= 13;     // B5: set 13 = set 12 + prebuild (stage 3: later sets keep B5-B7)
+		PRE_COL_CACHE = s >= 14;     // B6: set 14 = set 13 + column cache
+		MUD_WorldGroundEntity.VOX_MESH_LATER = s >= 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
+		EDGE_DRAPE_FIT = s >= 16;     // stage 3 A10: set 16 = set 15 + drape fit
+		EDGE_CO_SIDE = s >= 17;       // A11 + A12: set 17 = set 16 + co-build sides + corners
+		EDGE_CORNER = s >= 17;
+		PRE_LIVE_ONLY = s >= 18;      // D1: set 18 = set 17 + pre-build for live craters only
+		MUD_LookRuts.LOOK_UNDER_SKIP = s >= 19;     // B8: set 19 = set 18 + no look cuts where the sheet stamps
+		MUD_WorldGroundEntity.GROOVE_UNDER_OFF = s >= 20;     // B9: set 20 = set 19 + no groove section under full cover
+		MUD_WorldGroundEntity.MESH_UNDER_HOLD = s >= 21;      // B10: set 21 = set 20 + queued rut meshes held under the sheet
 		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
 	}
@@ -4031,6 +4152,20 @@ class MUD_MudSheet
 			s += " col_cache";
 		if (MUD_WorldGroundEntity.VOX_MESH_LATER)
 			s += " vox_mesh_later";
+		if (EDGE_DRAPE_FIT)
+			s += " drape_fit";
+		if (EDGE_CO_SIDE)
+			s += " co_side";
+		if (EDGE_CORNER)
+			s += " corner";
+		if (PRE_LIVE_ONLY)
+			s += " pre_live_only";
+		if (MUD_LookRuts.LOOK_UNDER_SKIP)
+			s += " look_under_skip";
+		if (MUD_WorldGroundEntity.GROOVE_UNDER_OFF)
+			s += " groove_under_off";
+		if (MUD_WorldGroundEntity.MESH_UNDER_HOLD)
+			s += " mesh_under_hold";
 		if (s == "")
 			return "off";
 		return s.Trim();
@@ -9246,7 +9381,10 @@ class MUD_MudSheet
 		m_iCoStoredUp = 0;
 		m_bCoAny = false;
 		for (int c = 0; c < TILES * TILES; c++)
+		{
 			m_aCoLive[c] = 0;
+			m_aCoSide[c] = 0;     // stage 3 A11
+		}
 		if (m_bLocal && (EDGE_COBUILD_PICK || EDGE_COBUILD))
 			CoPick();
 		m_bInUpload = true;
@@ -9313,6 +9451,7 @@ class MUD_MudSheet
 				s_iCoverGen++;
 			m_aSlotReady[t] = 0;
 			m_aCoLive[t] = 0;
+			m_aCoSide[t] = 0;
 			return;
 		}
 		if (m_bLocal && m_aSlotBand[t] != 0)
@@ -9327,9 +9466,12 @@ class MUD_MudSheet
 		if (m_bCoBuilding)
 			m_iCoLive++;
 		m_aCoLive[t] = 0;
+		m_iCoSideMask = m_aCoSide[t];     // stage 3 A11
+		m_aCoSide[t] = 0;
 		Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
 		m_bTurnBuilt = true;
 		m_bCoBuilding = false;
+		m_iCoSideMask = 0;
 		m_aSlotWhy[t] = 0;
 		if (m_bLocal)
 			CopyLastY(ti, tk);
@@ -9902,15 +10044,17 @@ class MUD_MudSheet
 				if (mco[mb] == 0)
 					continue;
 				if (mb == 0)
-					CoBuild(tx, tz - 1);
+					CoBuild(tx, tz - 1, 1);
 				else if (mb == 1)
-					CoBuild(tx, tz + 1);
+					CoBuild(tx, tz + 1, 0);
 				else if (mb == 2)
-					CoBuild(tx - 1, tz);
+					CoBuild(tx - 1, tz, 3);
 				else
-					CoBuild(tx + 1, tz);
+					CoBuild(tx + 1, tz, 2);
 			}
 		}
+		if (m_bLocal && EDGE_MATCH && EDGE_CO_SIDE && m_bCoBuilding && res)
+			CoLater(tx, tz);     // stage 3 A11: sides this co-build kept - their neighbours build later, not now
 		if (m_bLocal && EDGE_COBUILD && !m_bCoBuilding)
 			CoCheck(tx, tz);     // stage 2 A3 (last: its builds are timed on their own)
 		return res;
@@ -10126,7 +10270,7 @@ class MUD_MudSheet
 				m_aMatchCo[ms] = 0;
 				array<float> mnb = EdgeNb(tx, tz, ms);
 				int mos = m_iMatchOs * TV;
-				bool mCopy = m_bCoBuilding;
+				bool mCopy = m_bCoBuilding && CoSideOk(ms);     // stage 3 A11: only the side(s) that asked (switch on)
 				if (mnb && !mCopy)
 				{
 					mCopy = true;
@@ -10150,18 +10294,25 @@ class MUD_MudSheet
 					m_iMatchCopy++;
 				else
 					m_iMatchFade++;
-				for (int mj = 1; mj < TQ; mj++)
+				m_iMj0 = 1;
+				m_iMj1 = TQ;
+				if (EDGE_CORNER && mnb)
+				{
+					m_iMj0 = 0;     // stage 3 A12: a copied side takes the neighbour's corner verts too (W / E after S / N)
+					m_iMj1 = TV;
+				}
+				for (int mj = m_iMj0; mj < m_iMj1; mj++)
 				{
 					int ml = EdgeL(ms, mj);
 					float mT = d.m_aG[ml] - BAND_UNDER;     // beside nothing drawn: down to the band-0 height
 					if (mnb && mnb[mos + mj] > -9000)
 						mT = mnb[mos + mj];
-					else if (vy[ml] <= mT)
-						continue;
+					else if (vy[ml] <= mT || mj == 0 || mj == TQ)
+						continue;     // A12: a corner the neighbour does not draw stays ours
 					float mDy = mT - vy[ml];
 					if (MUD_TestKit.TEST_KIT && m_bCoBuilding && mnb && mnb[mos + mj] > -9000 && Math.AbsFloat(mDy) > EDGE_CO_STEP)
 						m_bTurnCo = true;     // stage 3 Part 0: a co-build copies this side over a > 3 cm step (A-2)
-					for (int mr = 0; mr < 4; mr++)
+					for (int mr = 0; mr < RampRows(mj); mr++)
 						vy[EdgeIn(ms, mj, mr)] = vy[EdgeIn(ms, mj, mr)] + mDy * (1 - mr * 0.25);
 				}
 				if (m_bTurnCo)
@@ -10685,34 +10836,15 @@ class MUD_MudSheet
 				}
 			}
 		}
-		// stage 2 A4 SKIRT_APRON (sheet local): each skirt quad (top0, top1, bottom1, bottom0 from m_iSkirtFrom) gets its
-		// bottom verts moved out from the tile side by the drop (~45 deg) and down to G - BAND_UNDER - 0.02, so the
-		// curtain lies on the ground instead of standing as a wall. Their dirt UVs come from their own position (the top
-		// vert's UV + the offset / SIZE, same frame, its drag kept); TOP_UV64 recomputes all from xz anyway. Own block:
-		// BuildTileMesh is at the 64-locals limit.
+		m_iApFrom = m_iSkirtFrom;     // A4 / A10 range (members: BuildTileMesh is at the 64-locals limit)
+		m_iApTo = -1;
 		if (m_bLocal && SKIRT_APRON && !EDGE_DRAPE)
-		{
-			for (int ab = m_iSkirtFrom; ab + 3 < nv; ab += 4)
-			{
-				// outward = (T1 - T0) turned to the right: south -z, north +z, west -x, east +x (see the skirt side order)
-				vector aOut = Vector(tv[ab + 1][2] - tv[ab][2], 0, tv[ab][0] - tv[ab + 1][0]);
-				aOut = aOut * (1 / aOut.Length());
-				for (int au = 0; au < 2; au++)
-				{
-					vector aTop = tv[ab + au];
-					int al = Math.Round(aTop[2] / CELL) * TV + Math.Round(aTop[0] / CELL);
-					float aBy = d.m_aG[al] - BAND_UNDER - 0.02 - orgY;
-					float aDrop = Math.Max(0, aTop[1] - aBy);
-					tv[ab + 3 - au] = Vector(aTop[0] + aOut[0] * aDrop, aBy, aTop[2] + aOut[2] * aDrop);
-					tuv[(ab + 3 - au) * 2] = Math.Clamp(tuv[(ab + au) * 2] + aOut[0] * aDrop / SIZE, 0, 1);
-					tuv[(ab + 3 - au) * 2 + 1] = Math.Clamp(tuv[(ab + au) * 2 + 1] - aOut[2] * aDrop / SIZE, 0, 1);
-				}
-			}
-		}
+			m_iApTo = nv;
 		// stage 2 A7 EDGE_DRAPE (sheet local, user idea 2026-10-20): each skirt quad (top0, top1, bottom1, bottom0) becomes
 		// a quarter round of radius R = top height over G - BAND_UNDER - 0.02: it leaves the top flat, a middle ring at
 		// 45 deg (R * 0.707 out, R * 0.293 down; 2 new verts) and ends straight down R out. Two quads instead of one;
 		// stops at the vert / index caps (m_iDrapeCut). Own block: BuildTileMesh is at the 64-locals limit.
+		// stage 3 A10 EDGE_DRAPE_FIT: the quads a cut leaves get the A4 apron below (no new verts / indices: no stripes)
 		if (m_bLocal && EDGE_DRAPE)
 		{
 			int dn = (nv - m_iSkirtFrom) / 4;
@@ -10723,6 +10855,11 @@ class MUD_MudSheet
 					m_iDrapeCut++;
 					TurnNote(6, 1);     // stage 3 Part 0 TURN METER: + the skirt quads this cut left undraped
 					TurnNote(7, dn - dq);
+					if (EDGE_DRAPE_FIT)
+					{
+						m_iApFrom = m_iSkirtFrom + dq * 4;     // stage 3 A10: the quads left get the A4 apron
+						m_iApTo = m_iSkirtFrom + dn * 4;
+					}
 					break;
 				}
 				int db = m_iSkirtFrom + dq * 4;
@@ -10753,6 +10890,30 @@ class MUD_MudSheet
 				tix[ni + 5] = db + 3;
 				ni += 6;
 				nv += 2;
+			}
+		}
+		// stage 2 A4 SKIRT_APRON (sheet local): each skirt quad (top0, top1, bottom1, bottom0 from m_iSkirtFrom) gets its
+		// bottom verts moved out from the tile side by the drop (~45 deg) and down to G - BAND_UNDER - 0.02, so the
+		// curtain lies on the ground instead of standing as a wall. Their dirt UVs come from their own position (the top
+		// vert's UV + the offset / SIZE, same frame, its drag kept); TOP_UV64 recomputes all from xz anyway. Own block:
+		// BuildTileMesh is at the 64-locals limit. Stage 3 A10: also the skirt quads a drape cut left (m_iApFrom..m_iApTo).
+		if (m_iApTo >= 0)
+		{
+			for (int ab = m_iApFrom; ab + 3 < m_iApTo; ab += 4)
+			{
+				// outward = (T1 - T0) turned to the right: south -z, north +z, west -x, east +x (see the skirt side order)
+				vector aOut = Vector(tv[ab + 1][2] - tv[ab][2], 0, tv[ab][0] - tv[ab + 1][0]);
+				aOut = aOut * (1 / aOut.Length());
+				for (int au = 0; au < 2; au++)
+				{
+					vector aTop = tv[ab + au];
+					int al = Math.Round(aTop[2] / CELL) * TV + Math.Round(aTop[0] / CELL);
+					float aBy = d.m_aG[al] - BAND_UNDER - 0.02 - orgY;
+					float aDrop = Math.Max(0, aTop[1] - aBy);
+					tv[ab + 3 - au] = Vector(aTop[0] + aOut[0] * aDrop, aBy, aTop[2] + aOut[2] * aDrop);
+					tuv[(ab + 3 - au) * 2] = Math.Clamp(tuv[(ab + au) * 2] + aOut[0] * aDrop / SIZE, 0, 1);
+					tuv[(ab + 3 - au) * 2 + 1] = Math.Clamp(tuv[(ab + au) * 2 + 1] - aOut[2] * aDrop / SIZE, 0, 1);
+				}
 			}
 		}
 		MUD_Prof.Add(MUD_Prof.T_SKIRT, System.GetTickCount(tPart));
