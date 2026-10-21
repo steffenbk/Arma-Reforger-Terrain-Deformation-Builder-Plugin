@@ -493,6 +493,25 @@ class MUD_MudSheet
 	protected int m_iTouchCells;                // cells touched (all time)
 	protected bool m_bTouchNew;                 // the stamp running now touched a new cell
 	protected int m_iBornWait;                  // log: uploads a born slot waited for its traces (10 s)
+	// stage 3 Part 0 TURN METER (TEST_KIT, print only): edges per motion bucket (0 straight, 1 turning, 2 stopped)
+	static const int TURN_K = 10;               // counters per bucket: frames, checks, raised, step, open, corner,
+	                                            // drape cut, skirt quads left, co-copy over 3 cm, born waits
+	static const float TURN_DEG_S = 8;          // smoothed heading change at or over this = turning
+	protected ref array<int> m_aTurnN = new array<int>();
+	protected ref array<float> m_aTurnMax = new array<float>();     // per bucket: biggest step (m)
+	protected float m_fTurnYaw = -1000;         // last heading of the followed vehicle (deg)
+	protected float m_fTurnT;
+	protected float m_fTurnRate;                // smoothed turn rate (deg/s)
+	protected int m_iTurnB = 2;                 // bucket of this frame
+	protected bool m_bTurnBuilt;                // Upload built a live slot
+	protected bool m_bTurnCo;                   // BuildTileMesh: this co-built side copied over a > 3 cm step
+	protected int m_iTurnMs;
+	// stage 3 Part 0 D meter (TEST_KIT): crater notes (PreNote), 10 s
+	protected int m_iDNotes;
+	protected int m_iDJoin;
+	protected int m_iDFrameN;
+	protected int m_iDFrameMax;
+	protected int m_iDCapDrop;
 	protected int m_iTchKey = -1;               // TouchAt cache
 	protected MUD_MudSheetStore m_TchSt;
 	static const float UPLOAD_EVERY = 0.1;      // s between mesh rebuilds (10 Hz, as the KB mud tile)
@@ -1027,7 +1046,12 @@ class MUD_MudSheet
 	protected void Frame(float time)
 	{
 		if (MUD_TestKit.TEST_KIT)
+		{
 			MUD_CraterTrace.Tick();     // stage 2 B1 crater log: prints finished craters
+			if (m_iDFrameN > m_iDFrameMax)
+				m_iDFrameMax = m_iDFrameN;     // stage 3 Part 0 D meter: most crater notes in one sheet frame
+			m_iDFrameN = 0;
+		}
 		int tPre = System.GetTickCount();
 		int bPre = s_iBandMsAll;     // stage 2 A1: BuildNowSlots' BandTile
 		if (m_bNowDue)
@@ -1097,6 +1121,8 @@ class MUD_MudSheet
 			CollPending();
 		}
 		Vehicle veh = NearVehicle();
+		if (MUD_TestKit.TEST_KIT)
+			TurnRate(veh, time);     // stage 3 Part 0 TURN METER: motion bucket of this frame
 		if (veh)
 		{
 			m_fVehY = veh.GetOrigin()[1];
@@ -2720,6 +2746,8 @@ class MUD_MudSheet
 	//! after (data), their meshes build over the next frames and go live together (MUD_VoxelProbe.GoLive)
 	protected void PreNote(MUD_VoxelOp op)
 	{
+		if (MUD_TestKit.TEST_KIT)
+			PreMeter();     // stage 3 Part 0 D meter
 		if (m_aPreWp.Count() >= 32)
 			PreForget();     // go-lives that never came: start clean
 		m_aPreLo.Insert(op.m_vLo);
@@ -3020,7 +3048,7 @@ class MUD_MudSheet
 		Print(string.Format("MUD sheet prebuild: %1 after %2 ms (%3 ahead frames) | crater ops %4, builds held %5, built at close %6, shown %7, moved -> rebuilt %8, close %9 ms",
 			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0))
 			+ string.Format(" | dig ahead %1 ms (worst frame %2) | voxel top reads %3, col cache %4 (misses -> plain read %5)",
-			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall), LogLevel.NORMAL);
+			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall) + DMeter(), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3625,6 +3653,233 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 TURN METER (TEST_KIT, print only): counters per motion bucket (0 straight, 1 turning, 2 stopped)
+	protected void TurnInit()
+	{
+		if (m_aTurnN.Count() == 3 * TURN_K)
+			return;
+		m_aTurnN.Clear();
+		for (int i = 0; i < 3 * TURN_K; i++)
+			m_aTurnN.Insert(0);
+		m_aTurnMax.Clear();
+		for (int b = 0; b < 3; b++)
+			m_aTurnMax.Insert(0);
+	}
+
+	//! TURN METER: counter k of the bucket this frame is in, + n
+	protected void TurnNote(int k, int n)
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return;
+		TurnInit();
+		int c = m_iTurnB * TURN_K + k;
+		m_aTurnN[c] = m_aTurnN[c] + n;
+	}
+
+	//! TURN METER, every sheet frame: the followed vehicle's smoothed turn rate (deg/s) and speed -> bucket
+	protected void TurnRate(Vehicle veh, float time)
+	{
+		if (!veh)
+		{
+			m_iTurnB = 2;
+			m_fTurnYaw = -1000;
+			TurnNote(0, 1);
+			return;
+		}
+		vector fw = veh.GetTransformAxis(2);
+		float yaw = Math.Atan2(fw[0], fw[2]) * Math.RAD2DEG;
+		float spd = 0;
+		Physics ph = veh.GetPhysics();
+		if (ph)
+			spd = ph.GetVelocity().Length();
+		float dt = time - m_fTurnT;
+		if (m_fTurnYaw > -900 && dt > 0.001 && dt < 1)
+		{
+			float dy = yaw - m_fTurnYaw;
+			if (dy > 180)
+				dy = dy - 360;
+			else if (dy < -180)
+				dy = dy + 360;
+			m_fTurnRate = m_fTurnRate * 0.8 + Math.AbsFloat(dy) / dt * 0.2;
+		}
+		m_fTurnYaw = yaw;
+		m_fTurnT = time;
+		m_iTurnB = 0;
+		if (spd < 1)
+			m_iTurnB = 2;
+		else if (m_fTurnRate >= TURN_DEG_S)
+			m_iTurnB = 1;
+		TurnNote(0, 1);
+	}
+
+	//! TURN METER, after an Upload that built a live slot: every drawn live slot's edge record against the drawn
+	//! neighbour's, corners included (EdgeAudit leaves them out): raised verts, step > EDGE_STEP, open, corner steps
+	protected void TurnEdges(int x0, int z0)
+	{
+		int tm = System.GetTickCount();
+		TurnNote(1, 1);
+		int o = m_iTurnB * TURN_K;
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			int ti = t % TILES;
+			int tx = x0 + ti;
+			int tz = z0 + t / TILES;
+			int key = TrailKey(tx, tz);
+			array<float> ea = m_mEdgeRec.Get(key);
+			if (!ea || !EdgeDrawn(key))
+				continue;
+			for (int s = 0; s < 4; s++)
+			{
+				array<float> nb = EdgeNb(tx, tz, s);
+				int os = m_iMatchOs * TV;
+				for (int j = 0; j < TV; j++)
+				{
+					int e = s * TV + j;
+					if (ea[e] < -9000 || ea[4 * TV + e] < EDGE_RAISED)
+						continue;
+					m_aTurnN[o + 2] = m_aTurnN[o + 2] + 1;
+					float ny = -30000;
+					if (nb)
+						ny = nb[os + j];
+					if (ny < -9000)
+					{
+						m_aTurnN[o + 4] = m_aTurnN[o + 4] + 1;
+						continue;
+					}
+					float dy = ea[e] - ny;
+					if (dy <= EDGE_STEP)
+						continue;
+					if (j == 0 || j == TQ)
+						m_aTurnN[o + 5] = m_aTurnN[o + 5] + 1;
+					else
+						m_aTurnN[o + 3] = m_aTurnN[o + 3] + 1;
+					if (dy > m_aTurnMax[m_iTurnB])
+						m_aTurnMax[m_iTurnB] = dy;
+				}
+			}
+		}
+		m_iTurnMs += System.GetTickCount(tm);
+	}
+
+	//! TURN METER part of the 10 s builds line, then reset
+	protected string TurnLog()
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return "";
+		TurnInit();
+		string a = string.Format(" | TURN METER (%1 ms; turning >= %2 deg/s, stopped < 1 m/s; edge records need EDGE_MATCH / AUDIT / COBUILD)", m_iTurnMs, TURN_DEG_S);
+		for (int b = 0; b < 3; b++)
+		{
+			int o = b * TURN_K;
+			string nm = "straight";
+			if (b == 1)
+				nm = "turning";
+			else if (b == 2)
+				nm = "stopped";
+			int mx = Math.Round(m_aTurnMax[b] * 100);
+			a += string.Format(" | %1: %2 frames, %3 checks, raised %4, step > 3 cm %5 (max %6 cm), open %7, corner step %8",
+				nm, m_aTurnN[o], m_aTurnN[o + 1], m_aTurnN[o + 2], m_aTurnN[o + 3], mx, m_aTurnN[o + 4], m_aTurnN[o + 5]);
+			a += string.Format(", drape cut %1 (skirt quads left %2), co-copy over 3 cm %3 sides, born waits %4",
+				m_aTurnN[o + 6], m_aTurnN[o + 7], m_aTurnN[o + 8], m_aTurnN[o + 9]);
+		}
+		for (int c = 0; c < 3 * TURN_K; c++)
+			m_aTurnN[c] = 0;
+		for (int m = 0; m < 3; m++)
+			m_aTurnMax[m] = 0;
+		m_iTurnMs = 0;
+		return a;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 D meter (TEST_KIT, PreNote): crater notes, while joining (no local controlled entity), per frame,
+	//! entries dropped at the 32 cap
+	protected void PreMeter()
+	{
+		m_iDNotes++;
+		if (!SCR_PlayerController.GetLocalControlledEntity())
+			m_iDJoin++;
+		m_iDFrameN++;
+		if (m_aPreWp.Count() >= 32)
+			m_iDCapDrop += m_aPreWp.Count();
+	}
+
+	protected string DMeter()
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return "";
+		int most = m_iDFrameMax;
+		if (m_iDFrameN > most)
+			most = m_iDFrameN;
+		return string.Format(" | PART D notes %1 (joining %2, most in one frame %3, dropped at the 32 cap %4)", m_iDNotes, m_iDJoin, most, m_iDCapDrop);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 B meter (later B9): is world point x, z under the sheet's FULL cover now? Sheet local, live window
+	//! only: nearest vert traced, band >= 0.999, its tile drawn, no bare tile in taper reach (NearBareTile); within 4 rows
+	//! of a side the drawn tile beside is raised at band 1 at that border vert (the A9 ramp). Stored tiles: not covered.
+	static bool FullCoverAt(float x, float z)
+	{
+		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
+			return false;
+		return s_Inst.CoverAt(x, z);
+	}
+
+	protected bool CoverAt(float x, float z)
+	{
+		int i = Math.Round(x / CELL) - m_iX0;
+		int k = Math.Round(z / CELL) - m_iZ0;
+		if (i < 0 || k < 0 || i >= N || k >= N)
+			return false;
+		int v = k * N + i;
+		if (m_F.m_aGs[v] == 0 || m_F.m_aBand[v] < 0.999)
+			return false;
+		int ti = i / TQ;
+		if (ti >= TILES)
+			ti = TILES - 1;
+		int tk = k / TQ;
+		if (tk >= TILES)
+			tk = TILES - 1;
+		int li = i - ti * TQ;
+		int lk = k - tk * TQ;
+		int tx = m_iX0 / TQ + ti;
+		int tz = m_iZ0 / TQ + tk;
+		if (!EdgeDrawn(TrailKey(tx, tz)) || NearBareTile(tx, tz))
+			return false;
+		if (lk < 4 && !CoverSide(tx, tz, 0, li))
+			return false;
+		if (lk > TQ - 4 && !CoverSide(tx, tz, 1, li))
+			return false;
+		if (li < 4 && !CoverSide(tx, tz, 2, lk))
+			return false;
+		if (li > TQ - 4 && !CoverSide(tx, tz, 3, lk))
+			return false;
+		return true;
+	}
+
+	//! CoverAt: the drawn tile beside side s draws border vert j raised at band 1
+	protected bool CoverSide(int tx, int tz, int s, int j)
+	{
+		array<float> nb = EdgeNb(tx, tz, s);
+		if (!nb)
+			return false;
+		int e = m_iMatchOs * TV + j;
+		return nb[e] > -9000 && nb[8 * TV + e] >= 0.999;
+	}
+
+	//! stage 3 Part 0 B8 meter (MUD_LookRuts): does sheet local stamp a wheel at p itself (inside the live window
+	//! +- 2 cells, on TileCovered ground)?
+	static bool LocalStampsAt(vector p)
+	{
+		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
+			return false;
+		int i = Math.Round(p[0] / CELL) - s_Inst.m_iX0;
+		int k = Math.Round(p[2] / CELL) - s_Inst.m_iZ0;
+		if (i < 2 || k < 2 || i > N - 3 || k > N - 3)
+			return false;
+		return MUD_MudZoneEntity.TileCovered(Math.Floor(p[0] / TILE_M), Math.Floor(p[2] / TILE_M));
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! SHEET LOCAL 10 s line (Log10): builds by reason, then reset
 	protected void LocalLog()
 	{
@@ -3649,7 +3904,11 @@ class MUD_MudSheet
 			p3 += string.Format(" | stored band builds held %1", m_iBandHeld);
 		if (!EDGE_AUDIT && EDGE_COBUILD)
 			EdgePrune();
-		Print(p1 + p2 + p3 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
+		Print(p1 + p2 + p3 + FarLog() + EdgeAudit() + TurnLog() + DMeter(), LogLevel.NORMAL);
+		m_iDNotes = 0;     // stage 3 Part 0 D meter (10 s)
+		m_iDJoin = 0;
+		m_iDFrameMax = 0;
+		m_iDCapDrop = 0;
 		for (int b = 0; b < BW_N; b++)
 			m_aBuildsBy[b] = 0;
 		m_iWouldSkip = 0;
@@ -9008,6 +9267,9 @@ class MUD_MudSheet
 		}
 		m_bInUpload = false;
 		m_iStatQuads = m_iBuildQuads;
+		if (MUD_TestKit.TEST_KIT && m_bLocal && m_bTurnBuilt)
+			TurnEdges(x0, z0);     // stage 3 Part 0 TURN METER: the edges right after this upload's builds
+		m_bTurnBuilt = false;
 		if (m_bLocal && !m_aBandQ.IsEmpty())
 			BandStored();
 	}
@@ -9034,6 +9296,7 @@ class MUD_MudSheet
 		if (m_bLocal && m_aSlotZone[t] != 0 && !SlotTraced(t))
 		{
 			m_iBornWait++;
+			TurnNote(9, 1);       // stage 3 Part 0 TURN METER
 			m_bDirty = true;      // SHEET LOCAL: never built before every cell has its ground
 			return;
 		}
@@ -9065,6 +9328,7 @@ class MUD_MudSheet
 			m_iCoLive++;
 		m_aCoLive[t] = 0;
 		Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
+		m_bTurnBuilt = true;
 		m_bCoBuilding = false;
 		m_aSlotWhy[t] = 0;
 		if (m_bLocal)
@@ -9895,8 +10159,15 @@ class MUD_MudSheet
 					else if (vy[ml] <= mT)
 						continue;
 					float mDy = mT - vy[ml];
+					if (MUD_TestKit.TEST_KIT && m_bCoBuilding && mnb && mnb[mos + mj] > -9000 && Math.AbsFloat(mDy) > EDGE_CO_STEP)
+						m_bTurnCo = true;     // stage 3 Part 0: a co-build copies this side over a > 3 cm step (A-2)
 					for (int mr = 0; mr < 4; mr++)
 						vy[EdgeIn(ms, mj, mr)] = vy[EdgeIn(ms, mj, mr)] + mDy * (1 - mr * 0.25);
+				}
+				if (m_bTurnCo)
+				{
+					TurnNote(8, 1);
+					m_bTurnCo = false;
 				}
 			}
 		}
@@ -10450,6 +10721,8 @@ class MUD_MudSheet
 				if (nv + 2 > EDGE_VCAP || ni + 6 > 3360)
 				{
 					m_iDrapeCut++;
+					TurnNote(6, 1);     // stage 3 Part 0 TURN METER: + the skirt quads this cut left undraped
+					TurnNote(7, dn - dq);
 					break;
 				}
 				int db = m_iSkirtFrom + dq * 4;

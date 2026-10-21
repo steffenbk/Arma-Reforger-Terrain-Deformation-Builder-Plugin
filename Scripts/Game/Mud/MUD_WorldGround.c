@@ -848,6 +848,21 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iFillCheckMs;
 	protected bool m_bColGate;          // true only around the rebuild queue's BuildCollider call
 	protected bool m_bQueueMesh;        // TEMP split delay meter: true only around the rebuild queue's BuildMesh call
+	// stage 3 Part 0 B meter (TEST_KIT, sheet local, print only): band mesh builds under the sheet (10 s)
+	protected bool m_bBMeter;           // this band mesh build is metered
+	protected int m_iBRev;              // this build: revealed (dirt) verts
+	protected int m_iBRevOut;           // this build: revealed verts not under the sheet's full cover
+	protected float m_fBWx0;            // this build: patch corner (world x, z)
+	protected float m_fBWz0;
+	protected int m_iBGrT;
+	protected int m_iBBuilds;
+	protected int m_iBNone;
+	protected int m_iBAllCov;
+	protected int m_iBSome;
+	protected int m_iBGrMs;
+	protected int m_iBHold;
+	protected int m_iBQueued;
+	protected int m_iBHoldVerts;
 	protected int m_iColSkipSmall;      // log: skips per 10 s ('MUD world: budget' line)
 	protected float m_fSinceWheelLog;
 	protected int m_iPresses;
@@ -7741,6 +7756,92 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 B meter (TEST_KIT, sheet local, print only): a revealed (dirt) vert of this band mesh, local q
+	protected void BRevNote(vector q)
+	{
+		m_iBRev++;
+		if (!MUD_MudSheet.FullCoverAt(m_fBWx0 + q[0], m_fBWz0 + q[2]))
+			m_iBRevOut++;
+	}
+
+	//! B meter: this band mesh build is done
+	protected void BBuildNote()
+	{
+		m_bBMeter = false;
+		m_iBBuilds++;
+		if (m_iBRev == 0)
+			m_iBNone++;
+		else if (m_iBRevOut == 0)
+			m_iBAllCov++;
+		else
+			m_iBSome++;
+	}
+
+	//! stage 3 Part 0 B10 meter (switch not built): would this queued rebuild be held? The shown mesh is the kept input,
+	//! same skin classes, nothing hidden owed, and every changed vert is under the sheet's full cover with its shown
+	//! height (less its groove sink) at least 2 cm under the new height + LIFT. Meter only: the build goes on.
+	protected void BHoldMeter(MUD_FinePatch p, bool hideOwed, int rfX0, int rfZ0)
+	{
+		m_iBQueued++;
+		if (hideOwed || !p.m_aMeshY || !p.m_aMeshD || !p.m_aMeshSkin || !p.m_MeshRes || p.m_fMeshBuiltAt < -50)
+			return;
+		for (int c = 0; c < SKIN * SKIN; c++)
+		{
+			if (m_Band.m_aSkin[c] != p.m_aMeshSkin[c])
+				return;
+		}
+		float sink = m_fRevealGap * 3;
+		float wx0 = m_fX0 + rfX0 * m_fFine;
+		float wz0 = m_fZ0 + rfZ0 * m_fFine;
+		int changed = 0;
+		for (int vz = 0; vz < PVERTS; vz++)
+		{
+			for (int vx = 0; vx < PVERTS; vx++)
+			{
+				int v = vz * PVERTS + vx;
+				if (m_Band.m_aY[v] == p.m_aMeshY[v] && m_Band.m_aD[v] == p.m_aMeshD[v])
+					continue;
+				changed++;
+				if (!MUD_MudSheet.FullCoverAt(wx0 + vx * m_fFine, wz0 + vz * m_fFine))
+					return;
+				float s = 0;
+				if (m_bGroove)
+				{
+					float t = RevealT(-p.m_aMeshD[v], rfX0 + vx, rfZ0 + vz);
+					if (t > 1)
+						t = 1;
+					if (t > 0)
+						s = t * t * (3 - 2 * t) * sink;
+				}
+				if (p.m_aMeshY[v] - s > m_Band.m_aY[v] + MUD_MudSheet.LIFT - 0.02)
+					return;
+			}
+		}
+		if (changed > 0)
+		{
+			m_iBHold++;
+			m_iBHoldVerts += changed;
+		}
+	}
+
+	//! B meter 10 s line, then reset
+	protected void BUnderLog()
+	{
+		if (!MUD_TestKit.TEST_KIT || (m_iBBuilds == 0 && m_iBQueued == 0))
+			return;
+		Print(string.Format("MUD world B under sheet 10 s: band mesh builds metered %1 - none revealed %2, revealed all under full cover %3, some revealed uncovered %4 | groove section upload %5 ms | B10 would hold %6 of %7 queued (changed verts %8)",
+			m_iBBuilds, m_iBNone, m_iBAllCov, m_iBSome, m_iBGrMs, m_iBHold, m_iBQueued, m_iBHoldVerts), LogLevel.NORMAL);
+		m_iBBuilds = 0;
+		m_iBNone = 0;
+		m_iBAllCov = 0;
+		m_iBSome = 0;
+		m_iBGrMs = 0;
+		m_iBHold = 0;
+		m_iBQueued = 0;
+		m_iBHoldVerts = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Layered-SDF test (Band Mesher on): BuildMesh from the band surface-nets mesher. Same display rule
 	//! (ahead ruts), groove reveal per vertex from the interpolated deformation, skirts in submesh 0 (a separate
 	//! skirt submesh crashed WB, mud-gotchas 2026-10-10). False = overflow or no triangle: BuildMesh builds the grid.
@@ -7825,6 +7926,8 @@ class MUD_WorldGroundEntity : GenericEntity
 			p.m_fMeshHoldTo = p.m_fMeshBuiltAt + MESH_SMALL_MAX_S;     // fix (run 8): the input pass is ~1.2 ms - retry once, at the window end
 			return true;     // PERF IDEA 2: old mesh kept, m_bMeshDirty / m_bLookDirty stay - built on a later pass
 		}
+		if (MUD_TestKit.TEST_KIT && m_bQueueMesh && MUD_MudSheet.LocalOn())
+			BHoldMeter(p, hideOwed, rfX0, rfZ0);     // stage 3 Part 0 B10 'would hold' (meter only, the build goes on)
 		KeepMeshY(p);
 		// SKIRT DEPTH (2026-10-18, user: see-through gaps while driving): a look rut drawn on one patch before its
 		// neighbour opens a crack at the seam as deep as the rut (up to Rut Max Depth 0.35) + the groove sink
@@ -7858,6 +7961,11 @@ class MUD_WorldGroundEntity : GenericEntity
 			blend = 0.01;
 		float invBlend = 1.0 / blend;
 		float sink = m_fRevealGap * 3;
+		m_bBMeter = MUD_TestKit.TEST_KIT && m_bGroove && MUD_MudSheet.LocalOn();     // stage 3 Part 0 B meter
+		m_iBRev = 0;
+		m_iBRevOut = 0;
+		m_fBWx0 = m_fX0 + rfX0 * m_fFine;
+		m_fBWz0 = m_fZ0 + rfZ0 * m_fFine;
 		for (int i = 0; i < nAll; i++)
 		{
 			vector q = m_Band.m_Vb.m_aV[i];
@@ -7878,6 +7986,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				{
 					if (t > 1)
 						t = 1;
+					if (m_bBMeter)
+						BRevNote(q);
 					m_Band.m_Vb.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
 				}
 			}
@@ -7925,8 +8035,11 @@ class MUD_WorldGroundEntity : GenericEntity
 		mesh.UpdateVerts(0, m_Band.m_Vb.m_aV, m_Band.m_Uv.m_aTop);
 		if (m_bGroove)
 		{
+			m_iBGrT = System.GetTickCount();
 			mesh.UpdateIndices(1, m_Band.m_Ib.m_aI);       // its first ni: the surface without skirts
 			mesh.UpdateVerts(1, m_Band.m_Aux.m_aV, m_Band.m_Uv.m_aUnder);
+			if (m_bBMeter)
+				m_iBGrMs += System.GetTickCount(m_iBGrT);     // stage 3 Part 0 B meter
 		}
 		p.m_Ent.SetObject(mesh, "");
 		p.m_Ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
@@ -7942,6 +8055,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		p.m_fMeshBuiltAt = m_fTime;     // PERF IDEA 2: m_aMeshY (KeepMeshY above) is this mesh
 		MeshDone(p, hideOwed, rfOn);     // REBUILD 5
 		m_iMeshBuilds++;
+		if (m_bBMeter)
+			BBuildNote();
 		int ms = System.GetTickCount(t0);
 		m_iMeshMs += ms;
 		m_iBandMeshN++;
@@ -8552,6 +8667,7 @@ class MUD_WorldGroundEntity : GenericEntity
 				m_iBandColMs - m_iCsColIn - m_iCsColCore - m_iCsColGeom - m_iCsColDrop - m_iCsColStatic, m_iBandColMs));
 			Print(string.Format("MUD band: grid path - mesh %1 builds, mean %2 ms, worst %3 | collider %4, mean %5 ms, worst %6 | band fast verts mean %7, fast quads mean %8",
 				m_iGridMeshN, gMeshMean, m_iGridMeshWorst, m_iGridColN, gColMean, m_iGridColWorst, m_iBandFastV / b, m_iBandFastQ / b));
+			BUnderLog();     // stage 3 Part 0 B meter
 			if (BAND_FILL_CHECK)
 				Print(string.Format("MUD band fill check (PERF IDEA 3, TEMP): %1 fills, %2 checked, %3 vertices differ (must be 0), check %4 ms (in the input split)",
 					m_iFillN, m_iFillChecks, m_iFillBad, m_iFillCheckMs));

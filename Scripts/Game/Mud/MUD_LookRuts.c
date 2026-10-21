@@ -116,6 +116,7 @@ class MUD_LookRuts
 	protected static int s_iSheetCut;       // H2: look samples drawn by the sheet / given back to it (10 s log)
 	protected static int s_iSheetBack;
 	protected static int s_iUnder;          // R4: segments not cut because the mud sheet lies there
+	protected static int s_iB8Under;        // stage 3 Part 0 B8 meter: segments sheet local stamps itself (both ends)
 	// TEMP delay meter (2026-10-18, user: ruts show a little after the wheel): s, per 10 s
 	protected static float s_fDlCutSum;     // wheel at a segment's end -> its look cut
 	protected static float s_fDlCutMax;
@@ -244,6 +245,8 @@ class MUD_LookRuts
 				vector lead = vector.Zero;
 				if (LEAD)
 					lead = dir * Math.Min(LEAD_MIN + hs * LEAD_S, LEAD_MAX);
+				if (MUD_TestKit.TEST_KIT && MUD_MudSheet.LocalStampsAt(last + lead) && MUD_MudSheet.LocalStampsAt(cp + lead))
+					s_iB8Under++;     // stage 3 Part 0 B8 meter (the cut goes on)
 				t.m_aPendA.Insert(last + lead);
 				t.m_aPendB.Insert(cp + lead);
 				t.m_aPendT.Insert(now);
@@ -284,7 +287,8 @@ class MUD_LookRuts
 				Print(string.Format("MUD look ruts: 10 s - vehicle-frames %1 (no contact %2), cuts %3, samples written %4, caught up %5, expired %6, dirty marks %7, tiles %8, %9 ms",
 					s_iVeh, s_iNoContact, s_iCuts, s_iWritten, s_iCaught, s_iExpired, s_iDirty, s_mTiles.Count(), s_iMs)
 					+ string.Format(" | look meshes %1 (%2 ms), replaced by a shallower server rut %3 (+ %5 within REPLACE_MIN, no rebuild), segments under the sheet %4 (SHEET_LOOK: cut for the sheet, else skipped)", s_iMeshes, s_iMeshMs, s_iReplaced, s_iUnder, s_iNearCaught)
-					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn), LogLevel.NORMAL);
+					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn)
+					+ string.Format(" | B8 meter: segments sheet local stamps itself %1", s_iB8Under), LogLevel.NORMAL);
 			float dlDist = s_fDlDistSum / Math.Max(1, s_iDlMeshN);
 			if (s_iDlCutN > 0 || s_iDlMeshN > 0)
 				Print(string.Format("MUD delay look 10 s (TEMP): wheel -> look cut avg %1 max %2 ms (%3 segments) | wheel -> drawn mesh avg %4 max %5 ms, ~%6 m behind the wheel (%7 meshes) | GAP %8 m, LOOK_MESH_EVERY %9 s",
@@ -313,6 +317,7 @@ class MUD_LookRuts
 			s_fDlDistSum = 0;
 			s_iDlMeshN = 0;
 			s_iUnder = 0;
+			s_iB8Under = 0;
 			s_iSheetCut = 0;
 			s_iSheetBack = 0;
 			s_iVeh = 0;
