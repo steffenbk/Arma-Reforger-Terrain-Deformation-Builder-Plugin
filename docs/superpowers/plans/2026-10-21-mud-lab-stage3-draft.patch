@@ -1,0 +1,1115 @@
+diff --git a/Scripts/Game/Mud/MUD_LookRuts.c b/Scripts/Game/Mud/MUD_LookRuts.c
+index 6063774..b8e7fbc 100644
+--- a/Scripts/Game/Mud/MUD_LookRuts.c
++++ b/Scripts/Game/Mud/MUD_LookRuts.c
+@@ -51,6 +51,12 @@ class MUD_LookRuts
+ 	// (lazy rut mesh) so they are not marked. false = SHEET_SKIP as before (no look cut under the sheet).
+ 	static const bool SHEET_LOOK = true;
+ 	static const float SHEET_GAP = 0.1;     // m behind the rearmost wheel contact, segments under the sheet
++	// mud lab stage 3 B8 (prompts/2026-10-21-local-mud-lab-stage3.md, sheet local only, LOOK only): a look segment whose
++	// two ends lie where sheet local stamps the wheel itself (MUD_MudSheet.LocalStampsAt: in its live window, on stamp
++	// ground) is not cut - the sheet's band (>= BAND_IN round the tyre, drawn >= 1 cm over the collider ground) hides
++	// it, so its patch mesh rebuild draws nothing anyone sees. Default off (MUD_MudSheet fix sets).
++	static bool LOOK_UNDER_SKIP = false;
++	protected static int s_iUnderLocal;     // B meter (10 s): segments sheet local draws over (skipped with B8, else cut)
+ 	static const float GAP = 0.2;           // 0.4 until 2026-10-18 (user: ruts not instant). m behind the wheel contact a segment is cut (server: RUT_BEHIND_GAP 1.5)
+ 	// PER_WHEEL (user 2026-10-18, results/2026-10-18-look-rut-delay-split.md: the rearmost-wheel wait put the look rut
+ 	// ~7 m behind the front wheel): every wheel's segment is cut once THAT wheel is GAP past it, so the front wheel cuts
+@@ -244,6 +250,15 @@ class MUD_LookRuts
+ 				vector lead = vector.Zero;
+ 				if (LEAD)
+ 					lead = dir * Math.Min(LEAD_MIN + hs * LEAD_S, LEAD_MAX);
++				if (MUD_MudSheet.LocalStampsAt(last[0] + lead[0], last[2] + lead[2]) && MUD_MudSheet.LocalStampsAt(cp[0] + lead[0], cp[2] + lead[2]))
++				{
++					s_iUnderLocal++;     // stage 3 B8 meter
++					if (LOOK_UNDER_SKIP)
++					{
++						t.m_aLast.Set(w, cp);
++						continue;
++					}
++				}
+ 				t.m_aPendA.Insert(last + lead);
+ 				t.m_aPendB.Insert(cp + lead);
+ 				t.m_aPendT.Insert(now);
+@@ -284,7 +299,8 @@ class MUD_LookRuts
+ 				Print(string.Format("MUD look ruts: 10 s - vehicle-frames %1 (no contact %2), cuts %3, samples written %4, caught up %5, expired %6, dirty marks %7, tiles %8, %9 ms",
+ 					s_iVeh, s_iNoContact, s_iCuts, s_iWritten, s_iCaught, s_iExpired, s_iDirty, s_mTiles.Count(), s_iMs)
+ 					+ string.Format(" | look meshes %1 (%2 ms), replaced by a shallower server rut %3 (+ %5 within REPLACE_MIN, no rebuild), segments under the sheet %4 (SHEET_LOOK: cut for the sheet, else skipped)", s_iMeshes, s_iMeshMs, s_iReplaced, s_iUnder, s_iNearCaught)
+-					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn), LogLevel.NORMAL);
++					+ string.Format(" | sheet look samples %1, given back %2 | PER_WHEEL %3, aligned (no extra step) %4 | worn only (WEAR COUNT, no look cut) %5", s_iSheetCut, s_iSheetBack, PER_WHEEL, s_iAligned, s_iWorn)
++					+ string.Format(" | B8 segments sheet local draws over %1 (skipped: %2)", s_iUnderLocal, LOOK_UNDER_SKIP), LogLevel.NORMAL);
+ 			float dlDist = s_fDlDistSum / Math.Max(1, s_iDlMeshN);
+ 			if (s_iDlCutN > 0 || s_iDlMeshN > 0)
+ 				Print(string.Format("MUD delay look 10 s (TEMP): wheel -> look cut avg %1 max %2 ms (%3 segments) | wheel -> drawn mesh avg %4 max %5 ms, ~%6 m behind the wheel (%7 meshes) | GAP %8 m, LOOK_MESH_EVERY %9 s",
+@@ -313,6 +329,7 @@ class MUD_LookRuts
+ 			s_fDlDistSum = 0;
+ 			s_iDlMeshN = 0;
+ 			s_iUnder = 0;
++			s_iUnderLocal = 0;
+ 			s_iSheetCut = 0;
+ 			s_iSheetBack = 0;
+ 			s_iVeh = 0;
+diff --git a/Scripts/Game/Mud/MUD_MudSheet.c b/Scripts/Game/Mud/MUD_MudSheet.c
+index 4fec6ba..eb1d336 100644
+--- a/Scripts/Game/Mud/MUD_MudSheet.c
++++ b/Scripts/Game/Mud/MUD_MudSheet.c
+@@ -404,7 +404,7 @@ class MUD_MudSheet
+ 	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
+ 	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
+ 	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
+-	static const int FIX_SETS = 15;
++	static const int FIX_SETS = 20;             // stage 3: 16-20 (FixApply)
+ 	protected static int s_iFixSet;
+ 	// part A meters (10 s, LocalLog) and state
+ 	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
+@@ -430,6 +430,57 @@ class MUD_MudSheet
+ 	protected int m_iMatchFade;
+ 	protected int m_iOpenFade;                  // A8 meter (10 s): tile sides faded toward a neighbour not drawn
+ 	protected int m_iDrapeCut;                  // A7 meter (10 s): builds whose drape stopped at the vert / index cap
++	// MUD LAB STAGE 3 (prompt prompts/2026-10-21-local-mud-lab-stage3.md, research/2026-10-21-voxel-sheet-optimise.md):
++	// each its own switch, all default off, in the numpad * fix sets after 15 (FixApply).
++	// part A: edges on turns
++	static bool EDGE_DRAPE_FIT = false;         // A10: a drape that hits the vert / index cap lays the rest of the skirt as the apron (no striped wall)
++	static bool EDGE_CO_SIDE = false;           // A11: a co-build copies only the side facing the tile that asked; other sides keep the 3 cm rule (moved ones co-build later)
++	static bool EDGE_CORNER = false;            // A12: a copied side takes the neighbour's two corner verts too (corners were left alone)
++	// part D: crater pre-build in MP
++	static bool PRE_LIVE_ONLY = false;          // D1: B5 notes no crater while this client joins (JIP replay) and at most PRE_FRAME_MAX per frame
++	static const int PRE_FRAME_MAX = 3;
++	// stage 3 part 0 TURN METER (TEST_KIT, EDGE_AUDIT, sheet local; print only): the followed vehicle's heading change and,
++	// after every upload, the live tiles' borders against the drawn tile beside them - per bucket straight / turning / stopped
++	static const float TURN_DEG_S = 8;          // deg/s of heading change (smoothed): turning from here
++	static const float TURN_STOP_MS = 1;        // m/s: slower = stopped
++	protected float m_fTurnYaw;
++	protected float m_fTurnAt = -1;
++	protected float m_fTurnRate;                // deg/s, smoothed
++	protected int m_iTurnB;                     // this frame's bucket: 0 straight, 1 turning, 2 stopped
++	protected float m_fTurnDeg;                 // 10 s: heading change (deg)
++	protected float m_aTurnS[3];                // 10 s per bucket: s spent there
++	protected int m_aEaUps[3];                  // 10 s per bucket: uploads checked
++	protected int m_aEaStep[3];                 //   raised border verts (corners apart) > EDGE_STEP off the drawn neighbour
++	protected int m_aEaOpen[3];                 //   raised border verts with nothing drawn beside
++	protected int m_aEaCorner[3];               //   raised corner verts off / open (each corner counted once per side)
++	protected int m_aEaDrape[3];                //   builds whose drape hit the cap (A7)
++	protected int m_aEaFit[3];                  //   skirt quads laid as the apron after that cap (A10)
++	protected int m_aEaCoBig[3];                //   co-build sides copied over a step > EDGE_CO_STEP (what A11 stops)
++	protected int m_aEaWait[3];                 //   born slots that waited for traces (an undrawn slot beside drawn ones)
++	protected int m_iEaJ;                       //   scratch loop index (BuildTileMesh is near its 64-locals limit)
++	protected int m_iDrapeFitFrom = -1;         // A10: first skirt vert of the quads the drape cap left, and the end
++	protected int m_iDrapeFitTo;
++	protected int m_iCoSideNow = 15;            // A11: sides (bit S N W E) the build that runs now copies unconditionally as a co-build
++	protected int m_aCoSide[16];                // A11: per live slot, the side mask of its coming co-build
++	protected int m_iCoLater;                   // A11 meter (10 s): moved sides in a co-build sent to a later build
++	protected int m_iPreFrameN;                 // D1: crater notes this frame
++	protected float m_fPreFrameT = -1;
++	protected int m_iPreSkipJoin;               // D1 meters (10 s, prebuild line): notes skipped while joining / over the frame cap
++	protected int m_iPreSkipBurst;
++	protected int m_iPreForgot;                 // part D meter: crater notes PreForget dropped at the 32 cap
++	// part B: B9 FullCoverAt's per-tile cache (CoverTile)
++	protected int m_iCovKey = -1;
++	protected float m_fCovT = -1;
++	protected bool m_bCovOk;
++	protected bool m_bCovLive;
++	protected ref MUD_MudSheetTileData m_CovD;  // stored tile's data (null: live slot, read from m_F)
++	protected ref array<float> m_CovNbS;
++	protected ref array<float> m_CovNbN;
++	protected ref array<float> m_CovNbW;
++	protected ref array<float> m_CovNbE;
++	protected int m_iPreNotes;                  // part D meter: crater notes, notes while joining, most notes in one sheet frame
++	protected int m_iPreNotesJoin;
++	protected int m_iPreFrameMax;
+ 	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
+ 	static const int BW_WHEEL = 0;
+ 	static const int BW_OLDEST = 1;
+@@ -1099,6 +1150,8 @@ class MUD_MudSheet
+ 		Vehicle veh = NearVehicle();
+ 		if (veh)
+ 		{
++			if (MUD_TestKit.TEST_KIT && m_bLocal && EDGE_AUDIT)
++				TurnMeter(veh, time);     // stage 3 part 0: straight / turning / stopped bucket for the edge meters
+ 			m_fVehY = veh.GetOrigin()[1];
+ 			Physics vph = veh.GetPhysics();
+ 			if (vph)
+@@ -1422,7 +1475,10 @@ class MUD_MudSheet
+ 		m_Drag.Shift(si, sk);     // L2 / L3 cell sets move with the field (empty while those levers are off)
+ 		m_Chg.Shift(si, sk);
+ 		for (int cn = 0; cn < TILES * TILES; cn++)
++		{
+ 			m_aCoNext[cn] = 0;     // stage 2 A3: slot numbers moved (the shift rebuilds its slots anyway)
++			m_aCoSide[cn] = 0;     // stage 3 A11
++		}
+ 		if (m_bLocal && BAND_INCR)
+ 			DistShift(sti, stk);     // stage 2 C1
+ 		for (int sgr = 0; sgr < TILES * TILES; sgr++)
+@@ -2720,8 +2776,39 @@ class MUD_MudSheet
+ 	//! after (data), their meshes build over the next frames and go live together (MUD_VoxelProbe.GoLive)
+ 	protected void PreNote(MUD_VoxelOp op)
+ 	{
++		bool joining = SCR_PlayerController.GetLocalControlledEntity() == null;
++		m_iPreNotes++;     // stage 3 part D meter (any switch): crater notes, and those while joining / in one frame
++		if (joining)
++			m_iPreNotesJoin++;
++		if (m_fLast != m_fPreFrameT)
++		{
++			m_fPreFrameT = m_fLast;     // a new sheet frame since the last note
++			m_iPreFrameN = 0;
++		}
++		m_iPreFrameN++;
++		if (m_iPreFrameN > m_iPreFrameMax)
++			m_iPreFrameMax = m_iPreFrameN;
++		if (PRE_LIVE_ONLY)
++		{
++			// stage 3 D1: a joiner replays every crater op through Submit -> TakeOp (JOIN_MS a frame). Those (no local
++			// controlled entity yet) and anything past PRE_FRAME_MAX in one frame take the normal go-live dig instead
++			// of one long ahead dig; the 32-entry PreForget below then never drops live craters for replayed ones.
++			if (joining)
++			{
++				m_iPreSkipJoin++;
++				return;
++			}
++			if (m_iPreFrameN > PRE_FRAME_MAX)
++			{
++				m_iPreSkipBurst++;
++				return;
++			}
++		}
+ 		if (m_aPreWp.Count() >= 32)
++		{
++			m_iPreForgot += m_aPreWp.Count();     // stage 3 part D meter
+ 			PreForget();     // go-lives that never came: start clean
++		}
+ 		m_aPreLo.Insert(op.m_vLo);
+ 		m_aPreHi.Insert(op.m_vHi);
+ 		m_aPreWp.Insert(op.m_vWp);
+@@ -3020,7 +3107,25 @@ class MUD_MudSheet
+ 		Print(string.Format("MUD sheet prebuild: %1 after %2 ms (%3 ahead frames) | crater ops %4, builds held %5, built at close %6, shown %7, moved -> rebuilt %8, close %9 ms",
+ 			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0))
+ 			+ string.Format(" | dig ahead %1 ms (worst frame %2) | voxel top reads %3, col cache %4 (misses -> plain read %5)",
+-			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall), LogLevel.NORMAL);
++			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall)
++			+ PreNoteLog(), LogLevel.NORMAL);
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 part D meter: crater notes (B5) since the last call, then reset (prebuild line and the 10 s builds line)
++	protected string PreNoteLog()
++	{
++		if (m_iPreNotes == 0 && m_iPreForgot == 0)
++			return "";
++		string s = string.Format(" | PART D notes %1 (joining %2, most in one frame %3) | D1 live only %4: skipped joining %5, over %6 a frame %7 | dropped at the 32 cap %8",
++			m_iPreNotes, m_iPreNotesJoin, m_iPreFrameMax, PRE_LIVE_ONLY, m_iPreSkipJoin, PRE_FRAME_MAX, m_iPreSkipBurst, m_iPreForgot);
++		m_iPreNotes = 0;
++		m_iPreNotesJoin = 0;
++		m_iPreFrameMax = 0;
++		m_iPreSkipJoin = 0;
++		m_iPreSkipBurst = 0;
++		m_iPreForgot = 0;
++		return s;
+ 	}
+ 
+ 	//------------------------------------------------------------------------------------------------
+@@ -3411,6 +3516,249 @@ class MUD_MudSheet
+ 			m_mEdgeRec.Remove(g);
+ 	}
+ 
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B8 (MUD_LookRuts): does sheet local stamp a wheel at world x, z itself (inside the live window, on the
++	//! holed offroad ground Wheels stamps)? There its band (>= BAND_IN round the tyre) draws over any look rut.
++	static bool LocalStampsAt(float x, float z)
++	{
++		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
++			return false;
++		int i = Math.Round(x / CELL) - s_Inst.m_iX0;
++		int k = Math.Round(z / CELL) - s_Inst.m_iZ0;
++		if (i < 2 || i >= N - 2 || k < 2 || k >= N - 2)
++			return false;
++		return MUD_MudZoneEntity.TileCovered(Math.Floor(x / TILE_M), Math.Floor(z / TILE_M));
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B9 (MUD_WorldGroundEntity patch mesh builds, GROOVE_UNDER_OFF): does sheet local fully hide the ground at
++	//! world x, z? The nearest sheet vertex has its ground, no bare and band 1 (drawn >= LIFT over the ground); its tile
++	//! is drawn at full detail with no bare cell in taper reach; within the A9 ramp (4 rows) of a side, the tile beside is
++	//! drawn and raised at band 1 at that border vert. False = it may be seen (off, band edge, hole, not built, far LOD).
++	static bool FullCoverAt(float x, float z)
++	{
++		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
++			return false;
++		return s_Inst.CoverVert(x, z);
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! B9: FullCoverAt for this instance (tile facts cached per tile and sheet frame: CoverTile)
++	protected bool CoverVert(float x, float z)
++	{
++		int gi = Math.Round(x / CELL);
++		int gk = Math.Round(z / CELL);
++		int tx = gi / TQ;     // world x, z >= 0 on Arland (as Follow)
++		int tz = gk / TQ;
++		int li = gi - tx * TQ;
++		int lk = gk - tz * TQ;
++		int key = TrailKey(tx, tz);
++		if (key != m_iCovKey || m_fLast != m_fCovT)
++			CoverTile(tx, tz, key);
++		if (!m_bCovOk)
++			return false;
++		if (lk < 4 && !CoverSide(m_CovNbS, li))
++			return false;
++		if (lk > TQ - 4 && !CoverSide(m_CovNbN, li))
++			return false;
++		if (li < 4 && !CoverSide(m_CovNbW, lk))
++			return false;
++		if (li > TQ - 4 && !CoverSide(m_CovNbE, lk))
++			return false;
++		if (m_bCovLive)
++		{
++			int v = (gk - m_iZ0) * N + gi - m_iX0;
++			if (v < 0 || v >= NN)
++				return false;
++			return m_F.m_aGs[v] != 0 && m_F.m_aBare[v] == 0 && m_F.m_aBand[v] >= 0.999;
++		}
++		int l = lk * TV + li;
++		return m_CovD.m_aGs[l] != 0 && m_CovD.m_aBare[l] == 0 && m_CovD.m_aBand[l] >= 0.999;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! B9: the facing edge record of a side (null = nothing drawn there): drawn raised at band 1 at border vert j?
++	protected bool CoverSide(array<float> nb, int j)
++	{
++		if (!nb)
++			return false;
++		return nb[j] > -9000 && nb[8 * TV + j] >= 0.999;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! B9: per-tile facts for CoverVert - drawn (live slot or stored mesh, visible, full detail), no bare in taper reach,
++	//! the drawn neighbours' facing border records (each cut to that one side: 0..TV-1 drawn y, 8 TV.. band)
++	protected void CoverTile(int tx, int tz, int key)
++	{
++		m_iCovKey = key;
++		m_fCovT = m_fLast;
++		m_bCovOk = false;
++		m_bCovLive = false;
++		m_CovD = null;
++		m_CovNbS = null;
++		m_CovNbN = null;
++		m_CovNbW = null;
++		m_CovNbE = null;
++		if (!EdgeDrawn(key) || NearBareTile(tx, tz))
++			return;
++		if (IsLive(tx, tz))
++		{
++			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
++			if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
++				return;
++			m_bCovLive = true;
++		}
++		else
++		{
++			MUD_MudSheetStore st = m_mTrail.Get(key);
++			if (!st || !st.m_D || st.m_D.m_iLow != 0)
++				return;
++			m_CovD = st.m_D;
++		}
++		m_CovNbS = CoverNb(tx, tz, 0);
++		m_CovNbN = CoverNb(tx, tz, 1);
++		m_CovNbW = CoverNb(tx, tz, 2);
++		m_CovNbE = CoverNb(tx, tz, 3);
++		m_bCovOk = true;
++	}
++
++	//! B9: the drawn neighbour on side s's facing border (drawn y at 0.., band at 8 TV..), as its own short array
++	protected array<float> CoverNb(int tx, int tz, int s)
++	{
++		array<float> nb = EdgeNb(tx, tz, s);
++		if (!nb)
++			return null;
++		int os = m_iMatchOs * TV;
++		array<float> a = {};
++		a.Resize(9 * TV);
++		for (int j = 0; j < TV; j++)
++		{
++			a[j] = nb[os + j];
++			a[8 * TV + j] = nb[8 * TV + os + j];
++		}
++		return a;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 part 0 TURN METER (TEST_KIT, sheet local): heading change of the followed vehicle -> m_iTurnB (0 straight,
++	//! 1 turning: smoothed heading change >= TURN_DEG_S, 2 stopped: < TURN_STOP_MS), time per bucket, total degrees
++	protected void TurnMeter(Vehicle veh, float time)
++	{
++		float yaw = veh.GetYawPitchRoll()[0];
++		float dt = time - m_fTurnAt;
++		if (m_fTurnAt < 0 || dt <= 0 || dt > 1)
++		{
++			m_fTurnAt = time;     // first frame / a jump: start again
++			m_fTurnYaw = yaw;
++			return;
++		}
++		float dy = yaw - m_fTurnYaw;
++		if (dy > 180)
++			dy -= 360;
++		else if (dy < -180)
++			dy += 360;
++		dy = Math.AbsFloat(dy);
++		m_fTurnAt = time;
++		m_fTurnYaw = yaw;
++		m_fTurnDeg += dy;
++		m_fTurnRate = m_fTurnRate * 0.8 + dy / dt * 0.2;
++		float speed = 0;
++		Physics ph = veh.GetPhysics();
++		if (ph)
++			speed = ph.GetVelocity().Length();
++		int b = 0;
++		if (speed < TURN_STOP_MS)
++			b = 2;
++		else if (m_fTurnRate >= TURN_DEG_S)
++			b = 1;
++		m_iTurnB = b;
++		m_aTurnS[b] = m_aTurnS[b] + dt;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 part 0 TURN METER, after every upload: each drawn live slot's border verts drawn EDGE_RAISED over the
++	//! ground against the drawn tile beside it (its edge record), counted into this frame's bucket: step > EDGE_STEP
++	//! either way, open (nothing drawn there), corner verts (off or open) apart. Unlike EdgeAudit (a 10 s snapshot) this
++	//! sees what was on screen at each upload. A pair of live tiles counts its seam from both sides.
++	protected void EdgeLive()
++	{
++		int b = m_iTurnB;
++		m_aEaUps[b] = m_aEaUps[b] + 1;
++		int x0 = m_iX0 / TQ;
++		int z0 = m_iZ0 / TQ;
++		for (int t = 0; t < TILES * TILES; t++)
++		{
++			if (m_aSlotZone[t] == 0)
++				continue;
++			int tx = x0 + t % TILES;
++			int tz = z0 + t / TILES;
++			int key = TrailKey(tx, tz);
++			if (!EdgeDrawn(key))
++				continue;
++			array<float> ea = m_mEdgeRec.Get(key);
++			if (!ea)
++				continue;
++			for (int s = 0; s < 4; s++)
++			{
++				array<float> nb = EdgeNb(tx, tz, s);
++				int os = m_iMatchOs;
++				for (int j = 0; j < TV; j++)
++				{
++					int e = s * TV + j;
++					if (ea[e] < -9000 || ea[4 * TV + e] < EDGE_RAISED)
++						continue;
++					float ny = -30000;
++					if (nb)
++						ny = nb[os * TV + j];
++					if (ny > -9000 && Math.AbsFloat(ea[e] - ny) <= EDGE_STEP)
++						continue;
++					if (j == 0 || j == TQ)
++						m_aEaCorner[b] = m_aEaCorner[b] + 1;
++					else if (ny < -9000)
++						m_aEaOpen[b] = m_aEaOpen[b] + 1;
++					else
++						m_aEaStep[b] = m_aEaStep[b] + 1;
++				}
++			}
++		}
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 part 0 TURN METER: 10 s part of the 'MUD sheet builds:' line, then reset
++	protected string TurnLog()
++	{
++		if (!MUD_TestKit.TEST_KIT || !EDGE_AUDIT)
++			return "";
++		float ts0 = m_aTurnS[0];
++		float ts1 = m_aTurnS[1];
++		float ts2 = m_aTurnS[2];
++		string s = string.Format(" | TURN METER: heading %1 deg, s straight %2 turning %3 stopped %4, A11 later %5",
++			Math.Round(m_fTurnDeg), ts0.ToString(-1, 1), ts1.ToString(-1, 1), ts2.ToString(-1, 1), m_iCoLater);
++		for (int b = 0; b < 3; b++)
++		{
++			string nm = "straight";
++			if (b == 1)
++				nm = "turning";
++			else if (b == 2)
++				nm = "stopped";
++			s += string.Format(" | %1: uploads %2, edge verts step %3 open %4 corner %5, drape cut %6 (fit quads %7), co-copy over 3 cm %8",
++				nm, m_aEaUps[b], m_aEaStep[b], m_aEaOpen[b], m_aEaCorner[b], m_aEaDrape[b], m_aEaFit[b], m_aEaCoBig[b]);
++			s += string.Format(", born waits %1", m_aEaWait[b]);
++			m_aTurnS[b] = 0;
++			m_aEaUps[b] = 0;
++			m_aEaStep[b] = 0;
++			m_aEaOpen[b] = 0;
++			m_aEaCorner[b] = 0;
++			m_aEaDrape[b] = 0;
++			m_aEaFit[b] = 0;
++			m_aEaCoBig[b] = 0;
++			m_aEaWait[b] = 0;
++		}
++		m_fTurnDeg = 0;
++		m_iCoLater = 0;
++		return s;
++	}
++
+ 	//------------------------------------------------------------------------------------------------
+ 	//! A2: m_aWheelSlot[t] = 1 where a wheel contact of a vehicle lies in live slot t (as PickWheelSlots finds them)
+ 	protected void WheelSlotMask()
+@@ -3565,19 +3913,24 @@ class MUD_MudSheet
+ 					need = Math.AbsFloat(y - ny) > EDGE_CO_STEP;
+ 			}
+ 			if (need)
+-				CoBuild(ntx, ntz);
++				CoBuild(ntx, ntz, os);
+ 		}
+ 	}
+ 
+ 	//------------------------------------------------------------------------------------------------
+ 	//! A3: build neighbour tile tx, tz for a co-build (see CoCheck)
+-	protected void CoBuild(int tx, int tz)
++	//! os (stage 3 A11): its side facing the tile that asks (-1 = every side, as before)
++	protected void CoBuild(int tx, int tz, int os = -1)
+ 	{
++		int mask = 15;
++		if (os >= 0)
++			mask = 1 << os;
+ 		if (m_bPlaced && IsLive(tx, tz))
+ 		{
+ 			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+ 			if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
+ 				return;
++			m_aCoSide[t] = m_aCoSide[t] | mask;     // stage 3 A11
+ 			if (m_bInUpload)
+ 			{
+ 				if (m_aCoLive[t] != 0)
+@@ -3616,14 +3969,43 @@ class MUD_MudSheet
+ 		}
+ 		int keepWhy = m_iBuildWhy;
+ 		m_bCoBuilding = true;
++		m_iCoSideNow = mask;     // stage 3 A11
+ 		m_iBuildWhy = BW_COBUILD;
+ 		Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
+ 		if (res)
+ 			st.m_Res = res;
+ 		m_bCoBuilding = false;
++		m_iCoSideNow = 15;
+ 		m_iBuildWhy = keepWhy;
+ 	}
+ 
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 A11 EDGE_CO_SIDE: neighbour tx, tz of a co-build that kept its own border toward it (side os of the
++	//! neighbour faces it). Live: a co-build of that side at the next upload (CoPick, EDGE_COBUILD). Stored with a mesh:
++	//! queued as a plain build (the 3 cm rule then copies, or co-builds the asking tile back). Never built now.
++	protected void CoLater(int tx, int tz, int os)
++	{
++		m_iCoLater++;
++		if (m_bPlaced && IsLive(tx, tz))
++		{
++			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
++			if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
++				return;
++			m_aCoSide[t] = m_aCoSide[t] | (1 << os);
++			m_aCoNext[t] = 1;
++			m_aSlotDirty[t] = 1;
++			m_bDirty = true;
++			return;
++		}
++		int key = TrailKey(tx, tz);
++		MUD_MudSheetStore st = m_mTrail.Get(key);
++		if (!st || !st.m_Ent)
++			return;
++		if (!m_mQWhy.Contains(key))
++			m_mQWhy.Set(key, BW_COBUILD);
++		QueueBuild(tx, tz);
++	}
++
+ 	//------------------------------------------------------------------------------------------------
+ 	//! SHEET LOCAL 10 s line (Log10): builds by reason, then reset
+ 	protected void LocalLog()
+@@ -3649,7 +4031,7 @@ class MUD_MudSheet
+ 			p3 += string.Format(" | stored band builds held %1", m_iBandHeld);
+ 		if (!EDGE_AUDIT && EDGE_COBUILD)
+ 			EdgePrune();
+-		Print(p1 + p2 + p3 + FarLog() + EdgeAudit(), LogLevel.NORMAL);
++		Print(p1 + p2 + p3 + FarLog() + EdgeAudit() + TurnLog() + PreNoteLog(), LogLevel.NORMAL);     // stage 3: + TURN METER, part D
+ 		for (int b = 0; b < BW_N; b++)
+ 			m_aBuildsBy[b] = 0;
+ 		m_iWouldSkip = 0;
+@@ -3709,9 +4091,17 @@ class MUD_MudSheet
+ 		CRATER_TRACE_NOW = b;
+ 		CRATER_TAPER_NOW = b;
+ 		CRATER_EASE_DROP = b;
+-		CRATER_PREBUILD = s == 13 || s == 14 || s == 15;     // B5: set 13 = set 12 + prebuild
+-		PRE_COL_CACHE = s == 14 || s == 15;     // B6: set 14 = set 13 + column cache
+-		MUD_WorldGroundEntity.VOX_MESH_LATER = s == 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
++		CRATER_PREBUILD = s >= 13;     // B5: set 13 = set 12 + prebuild
++		PRE_COL_CACHE = s >= 14;     // B6: set 14 = set 13 + column cache
++		MUD_WorldGroundEntity.VOX_MESH_LATER = s >= 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
++		// stage 3 (each set = the one before + one part): 16 A10 drape fit, 17 A11 co-build side + A12 corners,
++		// 18 D1 prebuild live only, 19 B8 no look ruts where sheet local stamps, 20 B9 no dirt section under full cover
++		EDGE_DRAPE_FIT = s >= 16;
++		EDGE_CO_SIDE = s >= 17;
++		EDGE_CORNER = s >= 17;
++		PRE_LIVE_ONLY = s >= 18;
++		MUD_LookRuts.LOOK_UNDER_SKIP = s >= 19;
++		MUD_WorldGroundEntity.GROOVE_UNDER_OFF = s >= 20;
+ 		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
+ 		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
+ 	}
+@@ -3772,6 +4162,18 @@ class MUD_MudSheet
+ 			s += " col_cache";
+ 		if (MUD_WorldGroundEntity.VOX_MESH_LATER)
+ 			s += " vox_mesh_later";
++		if (EDGE_DRAPE_FIT)
++			s += " drape_fit";
++		if (EDGE_CO_SIDE)
++			s += " co_side";
++		if (EDGE_CORNER)
++			s += " corner";
++		if (PRE_LIVE_ONLY)
++			s += " pre_live_only";
++		if (MUD_LookRuts.LOOK_UNDER_SKIP)
++			s += " look_under_skip";
++		if (MUD_WorldGroundEntity.GROOVE_UNDER_OFF)
++			s += " groove_under_off";
+ 		if (s == "")
+ 			return "off";
+ 		return s.Trim();
+@@ -9008,6 +9410,8 @@ class MUD_MudSheet
+ 		}
+ 		m_bInUpload = false;
+ 		m_iStatQuads = m_iBuildQuads;
++		if (MUD_TestKit.TEST_KIT && m_bLocal && EDGE_AUDIT)
++			EdgeLive();     // stage 3 part 0 TURN METER
+ 		if (m_bLocal && !m_aBandQ.IsEmpty())
+ 			BandStored();
+ 	}
+@@ -9034,6 +9438,7 @@ class MUD_MudSheet
+ 		if (m_bLocal && m_aSlotZone[t] != 0 && !SlotTraced(t))
+ 		{
+ 			m_iBornWait++;
++			m_aEaWait[m_iTurnB] = m_aEaWait[m_iTurnB] + 1;     // stage 3 TURN METER
+ 			m_bDirty = true;      // SHEET LOCAL: never built before every cell has its ground
+ 			return;
+ 		}
+@@ -9064,8 +9469,13 @@ class MUD_MudSheet
+ 		if (m_bCoBuilding)
+ 			m_iCoLive++;
+ 		m_aCoLive[t] = 0;
++		m_iCoSideNow = m_aCoSide[t];     // stage 3 A11: the sides that asked (none recorded = every side)
++		if (m_iCoSideNow == 0)
++			m_iCoSideNow = 15;
++		m_aCoSide[t] = 0;
+ 		Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
+ 		m_bCoBuilding = false;
++		m_iCoSideNow = 15;
+ 		m_aSlotWhy[t] = 0;
+ 		if (m_bLocal)
+ 			CopyLastY(ti, tk);
+@@ -9638,13 +10048,31 @@ class MUD_MudSheet
+ 				if (mco[mb] == 0)
+ 					continue;
+ 				if (mb == 0)
+-					CoBuild(tx, tz - 1);
++					CoBuild(tx, tz - 1, 1);     // stage 3 A11: + the neighbour's side facing us
+ 				else if (mb == 1)
+-					CoBuild(tx, tz + 1);
++					CoBuild(tx, tz + 1, 0);
+ 				else if (mb == 2)
+-					CoBuild(tx - 1, tz);
++					CoBuild(tx - 1, tz, 3);
++				else
++					CoBuild(tx + 1, tz, 2);
++			}
++		}
++		else if (m_bLocal && EDGE_MATCH && EDGE_CO_SIDE && m_bCoBuilding && res)
++		{
++			// stage 3 A11: a co-build kept its own border on a side it did not copy (> EDGE_CO_STEP off) - that
++			// neighbour builds later (live: next upload as a co-build of that side; stored: queued), never now (no chain)
++			for (int lb = 0; lb < 4; lb++)
++			{
++				if (m_aMatchCo[lb] == 0)
++					continue;
++				if (lb == 0)
++					CoLater(tx, tz - 1, 1);
++				else if (lb == 1)
++					CoLater(tx, tz + 1, 0);
++				else if (lb == 2)
++					CoLater(tx - 1, tz, 3);
+ 				else
+-					CoBuild(tx + 1, tz);
++					CoLater(tx + 1, tz, 2);
+ 			}
+ 		}
+ 		if (m_bLocal && EDGE_COBUILD && !m_bCoBuilding)
+@@ -9862,7 +10290,22 @@ class MUD_MudSheet
+ 				m_aMatchCo[ms] = 0;
+ 				array<float> mnb = EdgeNb(tx, tz, ms);
+ 				int mos = m_iMatchOs * TV;
+-				bool mCopy = m_bCoBuilding;
++				// stage 3 A11 EDGE_CO_SIDE: a co-build copies only the side(s) facing the tile(s) that asked for it
++				bool mCopy = m_bCoBuilding && (!EDGE_CO_SIDE || (m_iCoSideNow & (1 << ms)) != 0);
++				if (MUD_TestKit.TEST_KIT && mnb && mCopy)
++				{
++					// stage 3 TURN METER: a forced copy over a step > EDGE_CO_STEP (a ramp toward a stale border)
++					m_iEaJ = 1;
++					while (m_iEaJ < TQ)
++					{
++						if (mnb[mos + m_iEaJ] > -9000 && Math.AbsFloat(vy[EdgeL(ms, m_iEaJ)] - mnb[mos + m_iEaJ]) > EDGE_CO_STEP)
++						{
++							m_aEaCoBig[m_iTurnB] = m_aEaCoBig[m_iTurnB] + 1;
++							break;
++						}
++						m_iEaJ++;
++					}
++				}
+ 				if (mnb && !mCopy)
+ 				{
+ 					mCopy = true;
+@@ -9898,6 +10341,15 @@ class MUD_MudSheet
+ 					for (int mr = 0; mr < 4; mr++)
+ 						vy[EdgeIn(ms, mj, mr)] = vy[EdgeIn(ms, mj, mr)] + mDy * (1 - mr * 0.25);
+ 				}
++				// stage 3 A12 EDGE_CORNER: the two corner verts of a copied side take the neighbour's drawn corners too
++				// (W / E after S / N: the last copy wins at a shared corner)
++				if (EDGE_CORNER && mnb)
++				{
++					if (mnb[mos] > -9000)
++						vy[EdgeL(ms, 0)] = mnb[mos];
++					if (mnb[mos + TQ] > -9000)
++						vy[EdgeL(ms, TQ)] = mnb[mos + TQ];
++				}
+ 			}
+ 		}
+ 		// SHEET LOCAL 'would skip' meter: the biggest drawn height change since this tile's last build (own block:
+@@ -10442,6 +10894,7 @@ class MUD_MudSheet
+ 		// a quarter round of radius R = top height over G - BAND_UNDER - 0.02: it leaves the top flat, a middle ring at
+ 		// 45 deg (R * 0.707 out, R * 0.293 down; 2 new verts) and ends straight down R out. Two quads instead of one;
+ 		// stops at the vert / index caps (m_iDrapeCut). Own block: BuildTileMesh is at the 64-locals limit.
++		m_iDrapeFitFrom = -1;     // stage 3 A10
+ 		if (m_bLocal && EDGE_DRAPE)
+ 		{
+ 			int dn = (nv - m_iSkirtFrom) / 4;
+@@ -10450,6 +10903,13 @@ class MUD_MudSheet
+ 				if (nv + 2 > EDGE_VCAP || ni + 6 > 3360)
+ 				{
+ 					m_iDrapeCut++;
++					if (MUD_TestKit.TEST_KIT)
++						m_aEaDrape[m_iTurnB] = m_aEaDrape[m_iTurnB] + 1;     // stage 3 TURN METER
++					if (EDGE_DRAPE_FIT)
++					{
++						m_iDrapeFitFrom = m_iSkirtFrom + dq * 4;     // stage 3 A10: the quads left get the apron below
++						m_iDrapeFitTo = m_iSkirtFrom + dn * 4;
++					}
+ 					break;
+ 				}
+ 				int db = m_iSkirtFrom + dq * 4;
+@@ -10482,6 +10942,30 @@ class MUD_MudSheet
+ 				nv += 2;
+ 			}
+ 		}
++		// stage 3 A10 EDGE_DRAPE_FIT: the skirt quads the drape cap left (dirt-heavy tiles, most on turns: more SMOOTH_EDGE
++		// cuts) stood as a vertical curtain with streaked UVs (= the striped wedge). They get the A4 apron instead: bottom
++		// verts out by the drop and down to G - BAND_UNDER - 0.02, UVs from their own position - no new verts or indices.
++		// Own block: BuildTileMesh is near the 64-locals limit.
++		if (m_bLocal && EDGE_DRAPE && EDGE_DRAPE_FIT && m_iDrapeFitFrom >= 0)
++		{
++			for (int fitB = m_iDrapeFitFrom; fitB + 3 < m_iDrapeFitTo; fitB += 4)
++			{
++				vector fitOut = Vector(tv[fitB + 1][2] - tv[fitB][2], 0, tv[fitB][0] - tv[fitB + 1][0]);
++				fitOut = fitOut * (1 / fitOut.Length());
++				for (int fitU = 0; fitU < 2; fitU++)
++				{
++					vector fitTop = tv[fitB + fitU];
++					int fitL = Math.Round(fitTop[2] / CELL) * TV + Math.Round(fitTop[0] / CELL);
++					float fitBy = d.m_aG[fitL] - BAND_UNDER - 0.02 - orgY;
++					float fitDrop = Math.Max(0, fitTop[1] - fitBy);
++					tv[fitB + 3 - fitU] = Vector(fitTop[0] + fitOut[0] * fitDrop, fitBy, fitTop[2] + fitOut[2] * fitDrop);
++					tuv[(fitB + 3 - fitU) * 2] = Math.Clamp(tuv[(fitB + fitU) * 2] + fitOut[0] * fitDrop / SIZE, 0, 1);
++					tuv[(fitB + 3 - fitU) * 2 + 1] = Math.Clamp(tuv[(fitB + fitU) * 2 + 1] - fitOut[2] * fitDrop / SIZE, 0, 1);
++				}
++				if (MUD_TestKit.TEST_KIT)
++					m_aEaFit[m_iTurnB] = m_aEaFit[m_iTurnB] + 1;
++			}
++		}
+ 		MUD_Prof.Add(MUD_Prof.T_SKIRT, System.GetTickCount(tPart));
+ 		tPart = System.GetTickCount();
+ 		if (ni + niTop == 0)
+diff --git a/Scripts/Game/Mud/MUD_WorldGround.c b/Scripts/Game/Mud/MUD_WorldGround.c
+index b43becb..60be818 100644
+--- a/Scripts/Game/Mud/MUD_WorldGround.c
++++ b/Scripts/Game/Mud/MUD_WorldGround.c
+@@ -808,6 +808,39 @@ class MUD_WorldGroundEntity : GenericEntity
+ 	protected int m_iVoxLaterMs;
+ 	protected int m_iVoxLaterWorst;
+ 	protected int m_iVoxLaterQ;
++	// mud lab stage 3 B9 (prompts/2026-10-21-local-mud-lab-stage3.md, sheet local only, LOOK only): a band patch mesh whose
++	// revealed (dirt) verts all lie under the sheet's full cover (MUD_MudSheet.FullCoverAt) is built without its groove
++	// (dirt) section; NgStep re-checks one such patch per frame and rebuilds it with the section once a vert is no longer
++	// covered (or sheet local / the switch goes off). Heights, sink and colliders as before. Default off (fix sets).
++	static bool GROOVE_UNDER_OFF = false;
++	// mud lab stage 3 B10 (sheet local only, LOOK only): a queued patch mesh rebuild whose every changed vertex lies under
++	// the sheet's full cover AND whose shown (stale) height there, less its groove sink, stays UH_MARGIN under the new
++	// ground + the sheet's LIFT (the sheet never draws lower than that) is not built: the shown mesh stays, hidden. Its
++	// changed box is kept, so the next build reads it; NgStep re-checks those verts and rebuilds once one is uncovered.
++	static bool MESH_UNDER_HOLD = false;
++	static const float UH_MARGIN = 0.02;
++	protected ref array<int> m_aUhV = {};     // B10 scratch: this pass's changed grid verts
++	protected int m_iUhTried;      // B10 10 s meters: queued band builds tested, would hold / held, changed verts, test ms
++	protected int m_iUhWould;
++	protected int m_iUhHeld;
++	protected int m_iUhVerts;
++	protected int m_iUhMs;
++	protected ref map<int, ref array<int>> m_mNg = new map<int, ref array<int>>();   // B9: patch key -> its revealed grid verts
++	protected ref array<int> m_aNgKeys = {};     // B9: m_mNg's keys, re-checked round robin (NgStep)
++	protected int m_iNgAt;
++	protected ref array<int> m_aNgV = {};        // B9 scratch: this build's revealed grid verts ...
++	protected ref array<int> m_aNgMark = {};     // ... deduped by generation stamp (1089)
++	protected int m_iNgGen;
++	protected int m_iNgBuilds;     // B 10 s meters (sheet local, TEST_KIT or B9): band mesh builds checked, none revealed,
++	protected int m_iNgNone;       //   revealed but all covered, groove dropped, re-checks, rebuilt (cover lost), and the
++	protected int m_iNgCovered;    //   groove section's uploads (UpdateIndices + UpdateVerts section 1: n, ms)
++	protected int m_iNgDropped;
++	protected int m_iNgChecks;
++	protected int m_iNgLost;
++	protected int m_iNgCheckMs;
++	protected int m_iNgGrooveN;
++	protected int m_iNgGrooveMs;
++	protected int m_iNgCoverMs;    //   ms of the FullCoverAt checks inside the builds
+ 	static const bool COARSE_PLATE = true;     // 5: flat-floor patches get 2 plate tris per hole skin cell
+ 	protected int m_aWhyBuild[16];     // 0 REBUILD_WHY (TEMP): queued mesh builds per dirt kind bits (1 look, 2 floor, 4 height, 8 sweep)
+ 	protected int m_iWhySkips;         //   queued small skips
+@@ -1087,6 +1120,8 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		int tP = System.GetTickCount();
+ 		if (!m_aVoxLater.IsEmpty())
+ 			VoxLaterStep();     // stage 2 B7: one go-live patch mesh per frame
++		if (!m_aNgKeys.IsEmpty())
++			NgStep();     // stage 3 B9: one grooveless patch re-checked per frame
+ 		MUD_VoxelProbe.Tick(m_fTime);    // TEMP probe 2026-10-12
+ 		MUD_Prof.Add(MUD_Prof.VOX, System.GetTickCount(tP));
+ 		tP = System.GetTickCount();
+@@ -7799,6 +7834,21 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			m_iFullN++;
+ 		}
+ 		FillBandOn(p);     // before the skips: MeshSame / KeepMeshY read m_aSkin
++		if (UnderHold(p, hideOwed, bLift, bx0, bx1, bz0, bz1, rfX0, rfZ0))
++		{
++			// stage 3 B10 MESH_UNDER_HOLD: the change is hidden under the sheet - the shown mesh stays (kept input and
++			// changed box too: the next build reads it all); NgStep rebuilds it once a changed vert is uncovered
++			m_iUhHeld++;
++			m_bMeshSkipped = true;
++			p.m_bMeshDirty = false;
++			p.m_fLookCutAt = -1;
++			p.m_bLookDirty = false;
++			WhyClear(p);
++			p.m_fLookSince = -1;
++			NgAdd(p, m_aUhV);
++			m_iCsMeshIn += System.GetTickCount(csIn);
++			return true;
++		}
+ 		int inMs = System.GetTickCount(csIn);
+ 		m_iCsMeshIn += inMs;
+ 		if (part)
+@@ -7858,6 +7908,20 @@ class MUD_WorldGroundEntity : GenericEntity
+ 			blend = 0.01;
+ 		float invBlend = 1.0 / blend;
+ 		float sink = m_fRevealGap * 3;
++		// stage 3 B9 / B meter (sheet local): are all revealed (dirt) verts under the sheet's full cover?
++		bool ngCheck = m_bGroove && m_bRender && (GROOVE_UNDER_OFF || MUD_TestKit.TEST_KIT) && MUD_MudSheet.LocalOn();
++		int ngRev = 0;
++		bool ngOpen = false;
++		float ngX0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
++		float ngZ0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
++		int ngT = 0;
++		if (ngCheck)
++		{
++			m_aNgV.Clear();
++			if (m_aNgMark.Count() != PVERTS * PVERTS)
++				m_aNgMark.Resize(PVERTS * PVERTS);
++			m_iNgGen++;
++		}
+ 		for (int i = 0; i < nAll; i++)
+ 		{
+ 			vector q = m_Band.m_Vb.m_aV[i];
+@@ -7879,6 +7943,23 @@ class MUD_WorldGroundEntity : GenericEntity
+ 					if (t > 1)
+ 						t = 1;
+ 					m_Band.m_Vb.m_aV[i] = Vector(q[0], q[1] - t * t * (3 - 2 * t) * sink, q[2]);
++					if (ngCheck)
++					{
++						// stage 3 B9: one cover check per revealed vert while all so far are covered; keep its grid vert
++						ngRev++;
++						int ngC = System.GetTickCount();
++						if (!ngOpen && !MUD_MudSheet.FullCoverAt(ngX0 + q[0], ngZ0 + q[2]))
++							ngOpen = true;
++						ngT += System.GetTickCount(ngC);
++						int ngVx = Math.Clamp(Math.Round(qx), 0, PCELLS);
++						int ngVz = Math.Clamp(Math.Round(qz), 0, PCELLS);
++						int ngV = ngVz * PVERTS + ngVx;
++						if (m_aNgMark[ngV] != m_iNgGen)
++						{
++							m_aNgMark[ngV] = m_iNgGen;
++							m_aNgV.Insert(ngV);
++						}
++					}
+ 				}
+ 			}
+ 			m_Band.m_Uv.m_aTop[i2] = (ux + qx) * invDiv;
+@@ -7886,11 +7967,28 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		}
+ 
+ 		m_iCsMeshUv += System.GetTickCount(csUv);
++		// stage 3 B9: no groove (dirt) section when every revealed vert is under the sheet's full cover
++		bool groove = m_bGroove;
++		if (ngCheck)
++		{
++			m_iNgBuilds++;
++			m_iNgCoverMs += ngT;
++			if (ngRev == 0)
++				m_iNgNone++;
++			else if (!ngOpen)
++				m_iNgCovered++;
++			if (GROOVE_UNDER_OFF && ngRev > 0 && !ngOpen)
++			{
++				groove = false;
++				m_iNgDropped++;
++			}
++		}
++		NgNote(p, m_bGroove && !groove);
+ 		int csRes = System.GetTickCount();
+ 		int ni = m_Band.m_iI;
+ 		int niAll = ni + m_Band.m_iSkirtI;
+ 		Resource res;
+-		if (m_bGroove)
++		if (groove)
+ 		{
+ 			int numVerts2[] = {nAll, nv};
+ 			int numIndices2[] = {niAll, ni};
+@@ -7923,10 +8021,13 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
+ 		mesh.UpdateIndices(0, m_Band.m_Ib.m_aI);
+ 		mesh.UpdateVerts(0, m_Band.m_Vb.m_aV, m_Band.m_Uv.m_aTop);
+-		if (m_bGroove)
++		if (groove)
+ 		{
++			int ngG = System.GetTickCount();     // stage 3 B meter: the groove section's share
+ 			mesh.UpdateIndices(1, m_Band.m_Ib.m_aI);       // its first ni: the surface without skirts
+ 			mesh.UpdateVerts(1, m_Band.m_Aux.m_aV, m_Band.m_Uv.m_aUnder);
++			m_iNgGrooveN++;
++			m_iNgGrooveMs += System.GetTickCount(ngG);
+ 		}
+ 		p.m_Ent.SetObject(mesh, "");
+ 		p.m_Ent.Update();       // fresh bounds, else culling keeps the spawn-time ones
+@@ -7952,6 +8053,202 @@ class MUD_WorldGroundEntity : GenericEntity
+ 		return true;
+ 	}
+ 
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B10 (queued band builds, sheet local): true = MESH_UNDER_HOLD may keep p's shown mesh - its kept input is
++	//! the shown mesh's, the skin classes are the same, nothing hidden is owed, and every vertex of the read box that
++	//! changed (3 mm / its reveal input) is under the sheet's full cover with its shown height (kept input less its groove
++	//! sink) at most new ground + LIFT - UH_MARGIN. Counts 'would hold' with the switch off too (TEST_KIT); m_aUhV = the
++	//! changed verts.
++	protected bool UnderHold(MUD_FinePatch p, bool hideOwed, bool bLift, int x0, int x1, int z0, int z1, int rfX0, int rfZ0)
++	{
++		if (!m_bMeshGate || !m_bRender || hideOwed || bLift || (!MESH_UNDER_HOLD && !MUD_TestKit.TEST_KIT) || !MUD_MudSheet.LocalOn())
++			return false;
++		if (!p.m_aMeshY || !p.m_aMeshD || !p.m_aMeshSkin || !p.m_MeshRes || p.m_iBuild != 0 || p.m_fMeshBuiltAt < -50 || p.m_bLastHideOwed)
++			return false;
++		for (int c = 0; c < SKIN * SKIN; c++)
++		{
++			if (m_Band.m_aSkin[c] != p.m_aMeshSkin[c])
++				return false;     // voxel / look cells changed: build
++		}
++		int t0 = System.GetTickCount();
++		m_iUhTried++;
++		m_aUhV.Clear();
++		float sink = m_fRevealGap * 3;
++		float lift = MUD_MudSheet.LIFT;
++		float px0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
++		float pz0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
++		bool ok = true;
++		for (int vz = z0; vz <= z1 && ok; vz++)
++		{
++			for (int vx = x0; vx <= x1; vx++)
++			{
++				int v = vz * PVERTS + vx;
++				float ny = m_Band.m_aY[v];
++				float oy = p.m_aMeshY[v];
++				if (Math.AbsFloat(ny - oy) < 0.003 && m_Band.m_aD[v] == p.m_aMeshD[v])
++					continue;
++				m_aUhV.Insert(v);
++				if (m_bGroove)
++				{
++					float ot = RevealT(-p.m_aMeshD[v], rfX0 + vx, rfZ0 + vz);
++					oy -= ot * ot * (3 - 2 * ot) * sink;     // the shown vertex is drawn this much lower (groove reveal)
++				}
++				if (oy > ny + lift - UH_MARGIN || !MUD_MudSheet.FullCoverAt(px0 + vx * m_fFine, pz0 + vz * m_fFine))
++				{
++					ok = false;
++					break;
++				}
++			}
++		}
++		m_iUhVerts += m_aUhV.Count();
++		m_iUhMs += System.GetTickCount(t0);
++		if (!ok || m_aUhV.IsEmpty())
++			return false;
++		m_iUhWould++;
++		return MESH_UNDER_HOLD;
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B10: p's shown mesh is stale at verts vs (hidden now) - add them to its NgStep watch list
++	protected void NgAdd(MUD_FinePatch p, array<int> vs)
++	{
++		array<int> have = m_mNg.Get(p.m_iKey);
++		if (!have)
++		{
++			have = {};
++			m_mNg.Set(p.m_iKey, have);
++			m_aNgKeys.Insert(p.m_iKey);
++		}
++		foreach (int v : vs)
++		{
++			if (have.Find(v) < 0)
++				have.Insert(v);
++		}
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B9: patch p was just built without (dropped true) or with its groove section - list it for NgStep or not
++	protected void NgNote(MUD_FinePatch p, bool dropped)
++	{
++		if (!dropped)
++		{
++			if (m_mNg.Contains(p.m_iKey))
++				m_mNg.Remove(p.m_iKey);     // its key leaves m_aNgKeys at its next NgStep turn
++			return;
++		}
++		array<int> vs = {};
++		vs.Copy(m_aNgV);
++		if (!m_mNg.Contains(p.m_iKey))
++			m_aNgKeys.Insert(p.m_iKey);
++		m_mNg.Set(p.m_iKey, vs);
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B9, every frame while patches are listed: switch or sheet local off -> every listed patch rebuilds with its
++	//! groove section; else one listed patch's revealed verts are checked against the sheet's cover again, and a patch
++	//! with one no longer covered (tile dropped / hidden, hole, band edge) rebuilds with the section
++	protected void NgStep()
++	{
++		if ((!GROOVE_UNDER_OFF && !MESH_UNDER_HOLD) || !MUD_MudSheet.LocalOn() || !m_bRender)
++		{
++			foreach (int k : m_aNgKeys)
++			{
++				if (m_mNg.Contains(k))
++					NgRebuild(k);
++			}
++			m_aNgKeys.Clear();
++			m_mNg.Clear();
++			return;
++		}
++		if (m_iNgAt >= m_aNgKeys.Count())
++			m_iNgAt = 0;
++		int key = m_aNgKeys[m_iNgAt];
++		array<int> vs = m_mNg.Get(key);
++		MUD_FinePatch p = m_mPatches.Get(key);
++		if (!vs || !p)
++		{
++			m_aNgKeys.Remove(m_iNgAt);     // rebuilt with its section meanwhile, or freed (unordered Remove: fine here)
++			m_mNg.Remove(key);
++			return;
++		}
++		int t0 = System.GetTickCount();
++		m_iNgChecks++;
++		float x0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
++		float z0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
++		bool lost = false;
++		foreach (int v : vs)
++		{
++			int vz = v / PVERTS;
++			int vx = v - vz * PVERTS;
++			if (!MUD_MudSheet.FullCoverAt(x0 + vx * m_fFine, z0 + vz * m_fFine))
++			{
++				lost = true;
++				break;
++			}
++		}
++		m_iNgCheckMs += System.GetTickCount(t0);
++		if (!lost)
++		{
++			m_iNgAt++;
++			return;
++		}
++		m_iNgLost++;
++		NgRebuild(key);
++		m_mNg.Remove(key);
++		m_aNgKeys.Remove(m_iNgAt);
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 B9: patch key's mesh rebuilds in full (as DoVoxCells' queued branch; no same / small skip: the kept input
++	//! is marked not this mesh)
++	protected void NgRebuild(int key)
++	{
++		MUD_FinePatch p = m_mPatches.Get(key);
++		if (!p || !m_bRender)
++			return;
++		p.m_bMeshDirty = true;
++		p.m_bMBoxAll = true;
++		p.m_bRutMesh = false;
++		p.m_bHMesh = true;
++		p.m_fMeshBuiltAt = -100;
++		if (LOOK_PACE)
++			p.m_fMeshHoldTo = -100;
++		if (!p.m_bQueued)
++		{
++			p.m_bQueued = true;
++			p.m_fQueuedAt = m_fTime;
++			m_aDirty.Insert(p.m_iKey);
++		}
++	}
++
++	//------------------------------------------------------------------------------------------------
++	//! Stage 3 part 0 / B9: 10 s line (sheet local builds only), then reset
++	protected void NgLog()
++	{
++		if (m_iNgBuilds > 0 || m_iNgChecks > 0 || m_iNgGrooveN > 0 || m_iUhTried > 0)
++		{
++			Print(string.Format("MUD world B under sheet 10 s: band mesh builds checked %1 - none revealed %2, revealed all under full cover %3 (B9 %4: groove dropped %5) | cover checks %6 ms | listed %7, re-checks %8 (%9 ms)",
++				m_iNgBuilds, m_iNgNone, m_iNgCovered, GROOVE_UNDER_OFF, m_iNgDropped, m_iNgCoverMs, m_mNg.Count(), m_iNgChecks, m_iNgCheckMs)
++				+ string.Format(", rebuilt (cover lost) %1 | groove section uploads %2 in %3 ms (all band builds)", m_iNgLost, m_iNgGrooveN, m_iNgGrooveMs)
++				+ string.Format(" | B10 %1: queued builds tested %2, would hold %3, held %4, changed verts %5, test %6 ms", MESH_UNDER_HOLD, m_iUhTried, m_iUhWould, m_iUhHeld, m_iUhVerts, m_iUhMs), LogLevel.NORMAL);
++		}
++		m_iUhTried = 0;
++		m_iUhWould = 0;
++		m_iUhHeld = 0;
++		m_iUhVerts = 0;
++		m_iUhMs = 0;
++		m_iNgBuilds = 0;
++		m_iNgNone = 0;
++		m_iNgCovered = 0;
++		m_iNgDropped = 0;
++		m_iNgChecks = 0;
++		m_iNgLost = 0;
++		m_iNgCheckMs = 0;
++		m_iNgGrooveN = 0;
++		m_iNgGrooveMs = 0;
++		m_iNgCoverMs = 0;
++	}
++
+ 	//------------------------------------------------------------------------------------------------
+ 	//! BuildMeshBand's input pass over patch-local vertex rows z0..z1, columns x0..x1 (full = 0..PCELLS, the same order
+ 	//! as before REBUILD 5): m_Band.m_aY / m_aD there, after BandFill. True = a hidden change is owed (ahead ruts).
+@@ -8565,6 +8862,7 @@ class MUD_WorldGroundEntity : GenericEntity
+ 				+ string.Format(", new %1 ms, differ %2 (must be 0), bench %3 ms in the rebuild ms", m_iBenchNew, m_iBenchDiff, m_iBenchMs));
+ 		}
+ 		RebuildSixLog();     // REBUILD 6: prints when it has counts, always resets
++		NgLog();     // stage 3: B under-sheet line (prints when it has counts, always resets)
+ 		m_iPaceHeldPF = 0;
+ 		m_iPaceBuilds = 0;
+ 		m_iSameSkip = 0;
