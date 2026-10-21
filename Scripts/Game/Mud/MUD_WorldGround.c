@@ -89,7 +89,9 @@ class MUD_WorldGroundEntity : GenericEntity
 	// RUT FIELD: a field rut vertex shows the groove (soil) only this deep under the undug ground - v097's brick rule
 	// (MUD_VoxelProbe.DISP_SOIL_CUT under the seeded top, which is LIFT over the ground). The reveal's own 0.01 m
 	// (tuned for one-pass heightfield ruts) made the whole 1 m wide trough soil: ruts looked ~2x wider (user 2026-10-15)
-	static const float FIELD_SOIL_D = 0.06;     // WEAR COUNT 2026-10-19 (v233 = before): pass 1 only wears (MUD_VoxelProbe.WEAR_PASSES 1), passes 2-3 cut 0.03 each = dirt on pass 3 as with 0.08 before (+ ragged noise up to RAG_D); was 0.08, 0.03
+	// DIRT HIGHER (user 2026-10-21 'move dirt very close to the grass, like 0.5 cm'; was 0.06): the first cut (pass 2)
+	// shows broken dirt (ragged noise + blend), full dirt by pass 3. Pass 1 still only wears (no cut, nothing drawn).
+	static const float FIELD_SOIL_D = 0.005;    // WEAR COUNT 2026-10-19 (v233 = before): pass 1 only wears (MUD_VoxelProbe.WEAR_PASSES 1), passes 2-3 cut 0.03 each = dirt on pass 3 as with 0.08 before (+ ragged noise up to RAG_D); was 0.08, 0.03
 	// RAGGED EDGE (2026-10-18, user: dirt pops in with no transition grass -> dirt): the groove reveal threshold gets
 	// world-fixed noise (same value every rebuild and on both sides of a patch seam), so a rut rim turns to dirt in
 	// broken patches instead of one clean line. Each vertex needs RevealDepth + n * RAG_D deeper (n 0..1) and the
@@ -153,7 +155,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	static const int IDX_SETS = 16;     // cached index layouts, MUD_IdxSet (~120-200 KB each)
 	static const int SLOT = 15;
 	static const bool RUT_MUD = true;   // Build 3 Stage 4: rut cells get m_RutMudMaterial on the grid collider (false = as before)
-	static const float RUT_MAT_D = 0.06;    // WEAR COUNT 2026-10-19: = FIELD_SOIL_D, mud grip where the dirt shows (was 0.08, 0.05). a 2 m skin cell is rut mud where a vertex's rut floor is this far under its base
+	static const float RUT_MAT_D = 0.06;    // 2026-10-21: kept at 0.06 when FIELD_SOIL_D went to 0.005 (dirt look earlier, grip unchanged = pass 3). WEAR COUNT 2026-10-19: = FIELD_SOIL_D, mud grip where the dirt shows (was 0.08, 0.05). a 2 m skin cell is rut mud where a vertex's rut floor is this far under its base
 	// MUD_FinePatch.m_iBuild: steps a patch made ahead still needs, one per frame (Fix B, 2026-10-09)
 	static const int BUILD_INDEX = 3;       // index lists (a cache miss is ~2.5 ms)
 	static const int BUILD_COLLIDER = 2;    // collider; the skin stays until it exists
@@ -432,13 +434,13 @@ class MUD_WorldGroundEntity : GenericEntity
 	[Attribute("1", UIWidgets.EditBox, "Ground more than this (m) above the underside is not dug (a real wall or hill stays)", category: "Ditch escape")]
 	protected float m_fEscapeReach;
 
-	[Attribute("1.5", UIWidgets.EditBox, "Crater depth (m) for 1 kg TNT (old big preset, user 2026-10-17: kept for server stress tests; tried middle 0.8, mix 1.1). Depth = this x (charge weight x TNT equivalent in kg) ^ TNT Power up to Max Depth, read from the exploding thing (ammo -> warhead, mine, charge, vehicle blast).", category: "Craters")]
+	[Attribute("1.5", UIWidgets.EditBox, "Crater depth (m) for 1 kg TNT (user 2026-10-21 late, sheet parked: back to the big preset 1.5 - 81 mm mortar ~1.43 m deep, ~6 m bowl; half size 0.75 was for the sheet; tried middle 0.8, mix 1.1). Depth = this x (charge weight x TNT equivalent in kg) ^ TNT Power up to Max Depth, read from the exploding thing (ammo -> warhead, mine, charge, vehicle blast).", category: "Craters")]
 	protected float m_fCraterDepthPerKg;
 
 	[Attribute("0.6", UIWidgets.EditBox, "TNT Power: how fast depth grows with charge (old big preset; tried middle 0.45, mix 0.5). 0.33 = textbook cube root.", category: "Craters")]
 	protected float m_fCraterTntPower;
 
-	[Attribute("1.35", UIWidgets.EditBox, "Knee of the size curve (m): bigger charges grow only with the cube root past it (old big preset: 81 mm mortar 0.99 kg -> 1.43 m, Hydra M229 2.9 kg -> 2.04 m, TM-62M 7.5 kg -> 2.80 m).", category: "Craters")]
+	[Attribute("1.35", UIWidgets.EditBox, "Knee of the size curve (m): bigger charges grow only with the cube root past it (user 2026-10-21 late: big preset again; half size 0.7 = 81 mm mortar 0.99 kg -> 0.74 m; old big preset: 81 mm mortar 0.99 kg -> 1.43 m, Hydra M229 2.9 kg -> 2.04 m, TM-62M 7.5 kg -> 2.80 m).", category: "Craters")]
 	protected float m_fCraterMaxDepth;
 
 	[Attribute("0.5", UIWidgets.EditBox, "TNT (kg) for exploding ammo whose warhead has no readable charge (modded ammo)", category: "Craters")]
@@ -459,7 +461,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	[Attribute("0", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17 'more variation'; 0.3 until user 2026-10-21 'the largest crater causes the issues, same size as v010'): depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
 	protected float m_fCraterDepthJitter;
 
-	[Attribute("0.15", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17, 0.35 until 2026-10-21 = back to v010; voxel craters roll 20-100 % of it each): outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
+	[Attribute("0", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17, 0.35 until 2026-10-21, then 0: user saw several sizes; voxel craters roll 20-100 % of it each): outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
 	protected float m_fCraterShapeJitter;
 
 	[Attribute("0.17", UIWidgets.EditBox, "Rim height as a share of the crater depth", category: "Craters")]
@@ -467,6 +469,9 @@ class MUD_WorldGroundEntity : GenericEntity
 
 	[Attribute("0.4", UIWidgets.EditBox, "Rim width outside the crest as a share of the crater depth (at least 2 fine steps)", category: "Craters")]
 	protected float m_fCraterRimWidthShare;
+
+	[Attribute("0.5", UIWidgets.EditBox, "Share of craters with NO rim (user 2026-10-21: some with a dirt lip, some just dropping straight from the grass). Rolled per crater on the server (clients get the heights). 0 = all rimmed, 1 = none.", category: "Craters")]
+	protected float m_fCraterNoRimChance;
 
 	[Attribute("1.67", UIWidgets.EditBox, "Repeated hits dig at most this many times the crater's own depth", category: "Craters")]
 	protected float m_fCraterStackFactor;
@@ -566,6 +571,25 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iPrLifted;          // vertices drawn at least 1 cm up
 	protected int m_iPrSoil;            // vertices whose drawn press shows soil
 	protected float m_fPressSoil;       // groove reveal input of the vertex PressAt did last (1000 = no soil)
+	// FAR PRESS (MUD_MudSheet.FAR_PRESS, plan plans/2026-10-21-far-press-plan.md): patch meshes pressed by the sync layer
+	protected bool m_bFarOn;                                    // the mesh being built is pressed (FarSetup said yes)
+	protected ref array<float> m_aFarD = {};                    // sync mud depth round the patch (MUD_MudSync.FarBox)
+	protected int m_iFarGi0;                                    // ... its first world cell
+	protected int m_iFarGk0;
+	protected int m_iFarW;                                      // ... cells a row
+	protected int m_iFarH;
+	protected int m_aFarNb[9];                                  // 1 = neighbour patch drawn ((dz + 1) * 3 + dx + 1)
+	protected ref map<int, float> m_mFarDue = new map<int, float>();   // patch key -> m_fTime its look rebuild may go
+	protected ref set<int> m_sFarKeys = new set<int>();         // every patch key far press marked (toggle rebuild)
+	protected int m_iFarMarks;                                  // 10 s meters
+	protected int m_iFarSent;
+	protected int m_iFarBuilt;
+	protected int m_iFarEmpty;
+	protected int m_iFarVerts;
+	protected int m_iFarSoil;
+	protected int m_iFarFaded;
+	protected int m_iFarHole;
+	protected int m_iFarHeal;
 	protected int m_iNPX;
 	protected int m_iNPZ;
 	protected float m_fTime;
@@ -770,10 +794,7 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iMeshSkipSmall;     // log: skips per 10 s ('MUD world: budget' line)
 	// PERF IDEA 3 (user 2026-10-19, v235 = before): the band mesh / collider input reads the rut floor, ridge and look floor
 	// of a patch in one fill call each (MUD_VoxelProbe.FieldPatchFill, MUD_LookRuts.PatchFill) and the press holder once,
-	// not 3-4 calls per vertex. BAND_FILL_CHECK (TEMP): every BAND_FILL_CHECK_EVERY-th fill also reads the old per-vertex
-	// way and counts differences ('MUD band fill check' in the band 10 s lines; must stay 0).
-	static const bool BAND_FILL_CHECK = false;
-	static const int BAND_FILL_CHECK_EVERY = 10;
+	// not 3-4 calls per vertex. (Its TEMP self-check BAND_FILL_CHECK: archived 2026-10-21.)
 	// PERF B7 (user 2026-10-19, v237 = before; plans/2026-10-18-perf-plan.md B7): with voxel ruts on (MUD_VoxelProbe
 	// ENABLED + RUTS) no heightfield press happens (run 9: 'presses 0' on server and client), and the ahead hide only
 	// holds m_aH back (BuildMeshBand) - the voxel rut floor goes in after it, never hidden. So AheadView skips the
@@ -786,14 +807,10 @@ class MUD_WorldGroundEntity : GenericEntity
 	static const float RUT_MESH_EVERY = 0.25;        //    most every RUT_MESH_EVERY s (was m_fMeshInterval)
 	static const bool SAME_SKIP = false;              // 2: a queued band mesh whose input equals the shown mesh's is not rebuilt
 	static const bool PARTIAL_IN = false;             // 3: the queued band mesh input pass reads only the changed box
-	static const bool PARTIAL_CHECK = false;          //    TEMP: every PARTIAL_CHECK_EVERY-th partial pass also runs the full one, compares
-	static const int PARTIAL_CHECK_EVERY = 10;
 	static const bool COL_MERGE = true;              // 4: the collider draws flat untouched 2 x 2 quad blocks as one quad
 	static const float COL_MERGE_TOL = 0.01;         //    max off-plane (m) of a merged block's inner vertices
 	static const bool MESHER_FAST = true;            // 5: MUD_BandMesher.Build (false = BuildRef = the v240 mesher)
-	static const bool MESHER_BENCH = false;          //    TEMP (off REBUILD 6 2026-10-19: run 11 measured it, ~0.07 ms/frame client): every MESHER_BENCH_EVERY-th band build runs both meshers, compares
-	static const int MESHER_BENCH_EVERY = 25;
-	static const int MESHER_BENCH_REPS = 3;
+	// (option 5's TEMP bench MESHER_BENCH and option 3's PARTIAL_CHECK: archived 2026-10-21)
 	// REBUILD 6 (2026-10-19, v243 = before; research/2026-10-19-rebuild-and-bugs-research.md, prompts/2026-10-19-local-
 	// rebuild-followup.md): client A/B switches, NOT const - MUD_StutterRobot sets them at each robot run start (odd ON,
 	// even OFF; 'MUD AB' line). COARSE_PLATE is const (on all session).
@@ -833,26 +850,12 @@ class MUD_WorldGroundEntity : GenericEntity
 	protected int m_iPartMs;         // 3: input ms of those builds (fills included)
 	protected int m_iFullN;          // 3: full input passes (band mesh)
 	protected int m_iFullMs;
-	protected int m_iPartChecks;
-	protected int m_iPartBad;        // 3: vertices the partial pass got wrong (must be 0)
 	protected int m_iColMerged;      // 4: merged blocks over all band collider builds
 	protected int m_iColTrisN;       // 4: their collider tris
 	protected int m_iColMergeN;      // 4: band collider builds counted
-	protected int m_iBenchCnt;
-	protected int m_iBenchN;
-	protected int m_iBenchOld;       // 5: ms of BuildRef x reps
-	protected int m_iBenchNew;       // 5: ms of Build x reps
-	protected int m_iBenchDiff;      // 5: benches whose outputs differ (must be 0)
-	protected int m_iBenchMs;        // 5: whole bench ms (inside the rebuild ms - subtract)
-	protected float m_aChkY[1089];
-	protected float m_aChkD[1089];
 	protected int m_iProfAheadScan;     // TEMP prof split: Ahead's candidate scan ms this frame (MUD_Prof.A_SCAN)
 	protected ref array<float> m_aInFl = {};     // fill: floor (+ look) per patch vertex
 	protected ref array<float> m_aInRg = {};     // fill: ridge per patch vertex
-	protected int m_iFillN;
-	protected int m_iFillChecks;
-	protected int m_iFillBad;
-	protected int m_iFillCheckMs;
 	protected bool m_bColGate;          // true only around the rebuild queue's BuildCollider call
 	protected bool m_bQueueMesh;        // TEMP split delay meter: true only around the rebuild queue's BuildMesh call
 	// stage 3 Part 0 B meter (TEST_KIT, sheet local, print only): band mesh builds under the sheet (10 s)
@@ -1127,6 +1130,11 @@ class MUD_WorldGroundEntity : GenericEntity
 		tP = System.GetTickCount();
 		MUD_KeepScan.Tick(m_fTime);    // TEMP tool 2026-10-17 run 2: keep mask incl. asphalt / concrete terrain (pin cut-out)
 		MUD_Prof.Add(MUD_Prof.KEEPSCAN, System.GetTickCount(tP));
+		if (m_bSheetBox)
+		{
+			m_bSheetBox = false;
+			MUD_MudSheet.FloorChanged(m_vSheetLo, m_vSheetHi, null, null);     // heightfield craters / digs since last frame
+		}
 		MUD_MudSheet.Tick(m_fTime);    // TEST 2026-10-14: visual mud sheet (adds its own MUD_Prof parts)
 		if (!m_aBWatchK.IsEmpty())
 			BWatchTick();     // stage 3 B9 / B10
@@ -4015,6 +4023,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		int tm = System.GetTickCount();
 		InitPatch(p);
 		RutFieldOn(p);      // m_bFloor before the lazy stop: a patch over an old rut builds in full and draws it
+		if (m_bRender && m_sFarKeys.Contains(key) && MUD_MudSheet.FarPressOn())
+			p.m_bFloor = true;     // FAR PRESS: far press marked it (a worn-only track) - build in full, not lazy
 		int copied = CopyNeighbourEdges(p);
 		m_mPatches.Insert(key, p);
 		if (copied > 0)
@@ -4083,6 +4093,8 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! false clears its sleep flag too), then delete the patch
 	protected void FreePatch(MUD_FinePatch p)
 	{
+		if (m_bRender)
+			FarNbGone(p);     // FAR PRESS: pressed neighbours close their border toward it
 		if (p.m_bAsleep)
 			m_iAsleep--;
 		if (p.m_iBuild == 0 || p.m_bAsleep)
@@ -4235,6 +4247,8 @@ class MUD_WorldGroundEntity : GenericEntity
 		NearPlayers(candKey, candDist);
 		FarDue(candKey, candDist);
 		FieldDue(candKey, candDist);
+		if (m_bRender)
+			FarPressTick();     // FAR PRESS: one paced look rebuild a frame
 		m_iProfAheadScan = System.GetTickCount(tScan);
 
 		if (m_iBuildKey < 0 && candKey.IsEmpty())
@@ -4753,12 +4767,37 @@ class MUD_WorldGroundEntity : GenericEntity
 		return true;
 	}
 
+	// HEIGHTFIELD CRATERS (SURFACE_OPS false, user 2026-10-21): heightfield height changes reach the mud sheet as one
+	// re-ground box a frame (as the v010 test copy: voxel ops already call MUD_MudSheet.FloorChanged themselves)
+	protected bool m_bSheetBox;
+	protected vector m_vSheetLo;
+	protected vector m_vSheetHi;
+
+	//------------------------------------------------------------------------------------------------
+	//! Grow this frame's sheet re-ground box by fine vertices gx0..gx1, gz0..gz1 (flushed next EOnFrame)
+	protected void SheetBox(int gx0, int gx1, int gz0, int gz1)
+	{
+		vector lo = Vector(m_fX0 + gx0 * m_fFine, 0, m_fZ0 + gz0 * m_fFine);
+		vector hi = Vector(m_fX0 + gx1 * m_fFine, 0, m_fZ0 + gz1 * m_fFine);
+		if (!m_bSheetBox)
+		{
+			m_bSheetBox = true;
+			m_vSheetLo = lo;
+			m_vSheetHi = hi;
+			return;
+		}
+		m_vSheetLo = Vector(Math.Min(m_vSheetLo[0], lo[0]), 0, Math.Min(m_vSheetLo[2], lo[2]));
+		m_vSheetHi = Vector(Math.Max(m_vSheetHi[0], hi[0]), 0, Math.Max(m_vSheetHi[2], hi[2]));
+	}
+
 	//------------------------------------------------------------------------------------------------
 	//! Flag every patch holding a changed vertex (mesh + collider) and every patch the blur reaches
 	//! from it (collider) - as MUD_GroundEntity.c:1892 MarkDirty, global fine vertex coords.
 	//! Task 9 adds the net rect here.
 	protected void MarkDirty(int gx0, int gx1, int gz0, int gz1)
 	{
+		if (m_bRender && MUD_MudSheet.ENABLED)
+			SheetBox(gx0 - 1, gx1 + 1, gz0 - 1, gz1 + 1);
 		int r = m_aSmoothW.Count() / 2;
 		bool net = IsNet();
 		for (int pz = PatchLo(gz0 - r, m_iNPZ); pz <= PatchHi(gz1 + r, m_iNPZ); pz++)
@@ -6599,6 +6638,13 @@ class MUD_WorldGroundEntity : GenericEntity
 		float depth = full * scale * (1 + m_fCraterDepthJitter * Math.RandomFloat(-1, 1));
 		float rim = depth * m_fCraterRimShare;
 		float rimWidth = Math.Max(2 * m_fFine, depth * m_fCraterRimWidthShare);
+		// NO RIM (user 2026-10-21): the bowl meets the grass at the crest (outer = crest, the rim branch below never runs)
+		bool noRim = Math.RandomFloat01() < m_fCraterNoRimChance;
+		if (noRim)
+		{
+			rim = 0;
+			rimWidth = 0;
+		}
 		if (hc < 0)
 		{
 			float cap = Math.Min(m_fCraterStackDepth, full * m_fCraterStackFactor);
@@ -6684,8 +6730,10 @@ class MUD_WorldGroundEntity : GenericEntity
 				float y;
 				if (d < crest)
 					y = -depth + (depth + rim) * (1 - Math.Cos(Math.PI * d / crest)) * 0.5;
-				else
+				else if (outer > crest)    // no rim: outer = crest, guard the 0 / 0
 					y = rim * (1 + Math.Cos(Math.PI * (d - crest) / (outer - crest))) * 0.5;
+				else
+					continue;
 				y *= lock;
 				float h = p.m_aH[v];
 				if (y < 0)
@@ -6706,7 +6754,7 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_iCraters++;
 		if (m_bDebug)
 			Print(string.Format("MUD world: crater at %1, TNT %2 kg, HEAT %9, scale %3, depth %4 m, crest %5 m, outer %6 m (+ stretch), floor at centre %7 m, centre now %8 m",
-				wp, tnt, scale, depth, crest, outer, cp.m_aFloor[cv], cp.m_aH[cv], heat));
+				wp, tnt, scale, depth, crest, outer, cp.m_aFloor[cv], cp.m_aH[cv], heat) + string.Format(", rim %1 m (no rim %2)", rim, noRim));
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -6971,10 +7019,17 @@ class MUD_WorldGroundEntity : GenericEntity
 	//! (DS, sheet off, zones only).
 	protected bool LiftSetup(MUD_FinePatch p, bool rfOn)
 	{
+		m_bFarOn = false;
 		if (PRESS_LIFT)
 			return PressSetup(p, rfOn);     // pressed lift look test (2026-10-19)
-		if (!m_bRender || (!MUD_MudSheet.PatchLiftOn() && !MUD_MudSheet.LOOK_LIFT_TEST))
+		if (!m_bRender)
 			return false;
+		if (!MUD_MudSheet.PatchLiftOn() && !MUD_MudSheet.LOOK_LIFT_TEST)
+		{
+			if (!MUD_MudSheet.FarPressOn())
+				return false;
+			return FarSetup(p);     // FAR PRESS: pressed by the sync layer where it has mud data
+		}
 		m_fLiftX0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
 		m_fLiftZ0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
 		m_iLiftTx0 = Math.Floor(m_fLiftX0 / MUD_MudSheet.TILE_M);
@@ -7008,6 +7063,8 @@ class MUD_WorldGroundEntity : GenericEntity
 	{
 		if (PRESS_LIFT)
 			return PressAt(p, v, d);     // pressed lift look test (2026-10-19): d = the vertex's final deformation
+		if (m_bFarOn)
+			return -FarAt(p, v, d);      // FAR PRESS: drawn down, never up
 		if (MUD_MudSheet.LOOK_LIFT_TEST)
 			return MUD_MudSheet.LOOK_LIFT_M * p.m_aLock[v];     // TEMP look lift test: every patch, sheet or not
 		int lvz = v / PVERTS;     // int maths on its own line: '%' in a float expression does not compile
@@ -7155,6 +7212,14 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_fLiftX0 = m_fX0 + p.m_iPx * PCELLS * m_fFine;
 		m_fLiftZ0 = m_fZ0 + p.m_iPz * PCELLS * m_fFine;
 		m_bPressRf = rfOn;
+		PressVoxSetup(p);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Pressed lift / FAR PRESS: m_aPressVox = the voxel skin cells of p and one ring round it (PressNearHole reads it)
+	protected void PressVoxSetup(MUD_FinePatch p)
+	{
 		for (int k = 0; k < 36; k++)
 		{
 			m_aPressVox[k] = 0;
@@ -7175,7 +7240,287 @@ class MUD_WorldGroundEntity : GenericEntity
 			if (cell >= 0 && (cell & VOX) != 0)
 				m_aPressVox[k] = 1;
 		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: set up patch p's mesh press - the sync mud round it (one cell past half a patch cell each way), which
+	//! neighbour patches draw (border vertices next to an undrawn one stay unpressed: no hole into the skin), the voxel
+	//! cells. False = no sync mud pressed there (the mesh is built as without far press).
+	protected bool FarSetup(MUD_FinePatch p)
+	{
+		int gxa = p.m_iPx * PCELLS;     // global fine vertex of the patch corner (FarAt uses the same ints: shared border
+		int gza = p.m_iPz * PCELLS;     // vertices give the same press in both patches)
+		float half = m_fFine * 0.5;
+		float cell = MUD_MudSheet.CELL;
+		m_iFarGi0 = Math.Ceil((m_fX0 + gxa * m_fFine - half) / cell) - 1;     // -1 / +1: float rounding at the edge
+		m_iFarGk0 = Math.Ceil((m_fZ0 + gza * m_fFine - half) / cell) - 1;
+		int gi1 = Math.Floor((m_fX0 + (gxa + PCELLS) * m_fFine + half) / cell) + 1;
+		int gk1 = Math.Floor((m_fZ0 + (gza + PCELLS) * m_fFine + half) / cell) + 1;
+		m_iFarW = gi1 - m_iFarGi0 + 1;
+		m_iFarH = gk1 - m_iFarGk0 + 1;
+		int n = m_iFarW * m_iFarH;
+		if (m_aFarD.Count() < n)
+			m_aFarD.Resize(n);
+		if (MUD_MudSync.FarBox(m_iFarGi0, m_iFarGk0, m_iFarW, m_iFarH, m_aFarD) == 0)
+		{
+			m_iFarEmpty++;
+			p.m_iFarSides = -1;
+			return false;
+		}
+		m_fLiftX0 = m_fX0 + gxa * m_fFine;
+		m_fLiftZ0 = m_fZ0 + gza * m_fFine;
+		int mask = 0;
+		for (int k = 0; k < 9; k++)
+		{
+			m_aFarNb[k] = 0;
+			if (k == 4)
+				continue;
+			int kz = k / 3;
+			int kx = k - kz * 3;
+			MUD_FinePatch q = FarNbDrawn(p.m_iPx + kx - 1, p.m_iPz + kz - 1);
+			if (!q)
+				continue;
+			m_aFarNb[k] = 1;
+			mask = mask | (1 << k);
+			// a drawn pressed neighbour built while p was not drawn left the shared border unpressed: build it again.
+			// p sits at the mirrored offset from q: bit 8 - k ((1 - dz) * 3 + 1 - dx)
+			if (q.m_iFarSides >= 0 && (q.m_iFarSides & (1 << (8 - k))) == 0)
+			{
+				FarDueAdd(q, true);
+				m_iFarHeal++;
+			}
+		}
+		p.m_iFarSides = mask;
+		PressVoxSetup(p);
+		m_bFarOn = true;
+		m_iFarBuilt++;
 		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: patch px, pz if it draws a mesh (live, or asleep with its mesh kept), else null
+	protected MUD_FinePatch FarNbDrawn(int px, int pz)
+	{
+		if (px < 0 || pz < 0 || px >= m_iNPX || pz >= m_iNPZ)
+			return null;
+		MUD_FinePatch q = m_mPatches.Get(pz * m_iNPX + px);
+		if (!q || !q.m_Ent)
+			return null;
+		if (q.m_iBuild == 0 || q.m_bAsleep)
+			return q;
+		return null;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: m to draw vertex v of the patch FarSetup was last called for lower = (THICK - least sync depth within
+	//! half a patch cell) x FAR_PRESS_K x lock; sets m_fPressSoil (soil from FIELD_SOIL_D deep, as PressAt)
+	protected float FarAt(MUD_FinePatch p, int v, float d)
+	{
+		m_fPressSoil = 1000;
+		int lvz = v / PVERTS;     // int maths on its own line
+		int lvx = v - lvz * PVERTS;
+		float x = m_fX0 + (p.m_iPx * PCELLS + lvx) * m_fFine;
+		float z = m_fZ0 + (p.m_iPz * PCELLS + lvz) * m_fFine;
+		float half = m_fFine * 0.5;
+		float cell = MUD_MudSheet.CELL;
+		int ia = Math.Ceil((x - half) / cell) - m_iFarGi0;
+		int ib = Math.Floor((x + half) / cell) - m_iFarGi0;
+		int ka = Math.Ceil((z - half) / cell) - m_iFarGk0;
+		int kb = Math.Floor((z + half) / cell) - m_iFarGk0;
+		ia = Math.ClampInt(ia, 0, m_iFarW - 1);
+		ib = Math.ClampInt(ib, 0, m_iFarW - 1);
+		ka = Math.ClampInt(ka, 0, m_iFarH - 1);
+		kb = Math.ClampInt(kb, 0, m_iFarH - 1);
+		float thick = MUD_MudSheet.THICK;
+		float dmin = thick;
+		for (int k = ka; k <= kb; k++)
+		{
+			for (int i = ia; i <= ib; i++)
+			{
+				float dc = m_aFarD[k * m_iFarW + i];
+				if (dc < dmin)
+					dmin = dc;
+			}
+		}
+		float press = (thick - dmin) * MUD_MudSheet.FAR_PRESS_K * p.m_aLock[v];
+		if (press <= 0.001)
+			return 0;
+		// border vertex next to a patch that draws nothing: unpressed (the skin there has no skirt)
+		int ndx = 0;
+		if (lvx == 0)
+			ndx = -1;
+		else if (lvx == PVERTS - 1)
+			ndx = 1;
+		int ndz = 0;
+		if (lvz == 0)
+			ndz = -1;
+		else if (lvz == PVERTS - 1)
+			ndz = 1;
+		if (ndx != 0 || ndz != 0)
+		{
+			bool open = (ndx != 0 && m_aFarNb[4 + ndx] == 0) || (ndz != 0 && m_aFarNb[(1 + ndz) * 3 + 1] == 0);
+			if (ndx != 0 && ndz != 0 && m_aFarNb[(1 + ndz) * 3 + 1 + ndx] == 0)
+				open = true;
+			if (open)
+			{
+				m_iFarFaded++;
+				return 0;
+			}
+		}
+		if (PressNearHole(p, lvx, lvz))
+		{
+			m_iFarHole++;
+			return 0;
+		}
+		m_iFarVerts++;
+		float drawn = press + Math.Max(0, -d);
+		m_fPressSoil = -drawn + FIELD_SOIL_D - m_fRevealDepth;
+		if (drawn >= FIELD_SOIL_D)
+			m_iFarSoil++;
+		return press;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS (MUD_MudSync StepSheet / LoadSnap): the sync mud of world cells ci0..ci1 x ck0..ck1 changed - the patches
+	//! there get a paced look rebuild (missing ones: FieldDue makes them). Rendering machines, far press on.
+	static void FarPressMark(int ci0, int ci1, int ck0, int ck1)
+	{
+		if (!MUD_MudSheet.FAR_PRESS || !s_Inst || !s_Inst.m_bReady || !s_Inst.m_bRender)
+			return;
+		s_Inst.FarMark(ci0, ci1, ck0, ck1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: keys are kept while the numpad / switch has it off too (on again: FarPressToggle builds them)
+	protected void FarMark(int ci0, int ci1, int ck0, int ck1)
+	{
+		bool on = MUD_MudSheet.FarPressOn();
+		float cell = MUD_MudSheet.CELL;
+		int gx0 = Math.Floor((ci0 * cell - m_fX0) / m_fFine) - 1;
+		int gx1 = Math.Ceil((ci1 * cell - m_fX0) / m_fFine) + 1;
+		int gz0 = Math.Floor((ck0 * cell - m_fZ0) / m_fFine) - 1;
+		int gz1 = Math.Ceil((ck1 * cell - m_fZ0) / m_fFine) + 1;
+		if (on)
+			m_iFarMarks++;
+		for (int pz = PatchLo(gz0, m_iNPZ); pz <= PatchHi(gz1, m_iNPZ); pz++)
+		{
+			for (int px = PatchLo(gx0, m_iNPX); px <= PatchHi(gx1, m_iNPX); px++)
+			{
+				int key = pz * m_iNPX + px;
+				m_sFarKeys.Insert(key);
+				if (!on)
+					continue;
+				m_sFieldPatches.Insert(key);     // FieldDue makes a missing one near a camera / player / vehicle
+				MUD_FinePatch p = m_mPatches.Get(key);
+				if (!p)
+					continue;
+				p.m_bFloor = true;     // out of the lazy stop (IsLazyReady), as MarkFloorDirty
+				FarDueAdd(p, false);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: p's look rebuild goes FAR_PRESS_EVERY s after its last one (now: at once); a waiting one keeps its time
+	protected void FarDueAdd(MUD_FinePatch p, bool now)
+	{
+		if (m_mFarDue.Contains(p.m_iKey))
+			return;
+		float due = p.m_fFarAt + MUD_MudSheet.FAR_PRESS_EVERY;
+		if (now || due < m_fTime)
+			due = m_fTime;
+		m_mFarDue.Set(p.m_iKey, due);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS, every frame (rendering machines): one due patch a frame gets a look rebuild of its whole mesh
+	protected void FarPressTick()
+	{
+		if (m_mFarDue.IsEmpty())
+			return;
+		int pick = -1;
+		foreach (int key, float due : m_mFarDue)
+		{
+			if (due <= m_fTime)
+			{
+				pick = key;
+				break;
+			}
+		}
+		if (pick < 0)
+			return;
+		m_mFarDue.Remove(pick);
+		MUD_FinePatch p = m_mPatches.Get(pick);
+		if (!p)
+			return;
+		FarRebuild(p);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: mesh rebuild of p's whole mesh. As MarkLookDirty, but NOT a look rut rebuild (m_bLookDirty stays
+	//! off): no look rut delay meters, no look-rut priority over the rut pace (RUT_PACE). Colliders untouched.
+	protected void FarRebuild(MUD_FinePatch p)
+	{
+		// a lazy / building patch draws nothing - finish it (LOOK SPREAD, FloorSpreadTick: one build step per frame)
+		if (FLOOR_SPREAD && p.m_iBuild > 0 && !p.m_bAsleep && !m_aFloorSpread.Contains(p.m_iKey))
+			m_aFloorSpread.Insert(p.m_iKey);
+		p.m_bMeshDirty = true;
+		p.m_bWhySweep = true;     // REBUILD_WHY
+		MeshBoxL(p, 0, PCELLS, 0, PCELLS);
+		if (!p.m_bQueued)
+		{
+			p.m_bQueued = true;
+			p.m_fQueuedAt = m_fTime;
+			m_aDirty.Insert(p.m_iKey);
+		}
+		p.m_fFarAt = m_fTime;
+		m_iFarSent++;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: p goes (freed) - its drawn neighbours pressed toward it build again (their border would open into the skin)
+	protected void FarNbGone(MUD_FinePatch p)
+	{
+		if (p.m_iFarSides < 0 && !m_sFarKeys.Contains(p.m_iKey))
+			return;
+		for (int k = 0; k < 9; k++)
+		{
+			if (k == 4)
+				continue;
+			int kz = k / 3;
+			int kx = k - kz * 3;
+			MUD_FinePatch q = FarNbDrawn(p.m_iPx + kx - 1, p.m_iPz + kz - 1);
+			if (q && q.m_iFarSides >= 0 && (q.m_iFarSides & (1 << (8 - k))) != 0)
+			{
+				q.m_iFarSides = q.m_iFarSides - (1 << (8 - k));     // the bit is set (checked above)
+				FarDueAdd(q, true);
+				m_iFarHeal++;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS, TEST_KIT numpad /: flip it; every marked patch builds its mesh again (paced, one a frame)
+	static void FarPressToggle()
+	{
+		MUD_MudSheet.s_bFarPress = !MUD_MudSheet.s_bFarPress;
+		if (!s_Inst || !s_Inst.m_bReady || !s_Inst.m_bRender)
+			return;
+		bool on = MUD_MudSheet.FarPressOn();
+		int n = 0;
+		foreach (int key : s_Inst.m_sFarKeys)
+		{
+			if (on)
+				s_Inst.m_sFieldPatches.Insert(key);     // tracks driven while it was off: FieldDue makes their patches
+			MUD_FinePatch p = s_Inst.m_mPatches.Get(key);
+			if (!p)
+				continue;
+			if (on)
+				p.m_bFloor = true;
+			s_Inst.FarDueAdd(p, true);
+			n++;
+		}
+		Print(string.Format("MUD far press: on %1 (key) - %2 patches build again", MUD_MudSheet.s_bFarPress, n), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -7369,8 +7714,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (lift)
 				{
 					h += LiftAt(p, v, d);
-					if (PRESS_LIFT && m_fPressSoil < rfD)
-						rfD = m_fPressSoil;     // pressed lift: soil shows where the drawn press is FIELD_SOIL_D deep
+					if ((PRESS_LIFT || m_bFarOn) && m_fPressSoil < rfD)
+						rfD = m_fPressSoil;     // pressed lift / far press: soil shows where the drawn press is FIELD_SOIL_D deep
 				}
 				// groove reveal (MUD_GroundEntity.c:1440-1448)
 				if (m_bGroove)
@@ -8060,7 +8405,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		{
 			m_iPartN++;
 			m_iPartVerts += (bx1 - bx0 + 1) * (bz1 - bz0 + 1);
-			PartCheck(p, rfOn, bLift);
 		}
 		else
 		{
@@ -8115,7 +8459,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		// neighbour opens a crack at the seam as deep as the rut (up to Rut Max Depth 0.35) + the groove sink
 		// (Reveal Gap x 3); the 0.3 m skirt was too short for a heavy truck. Same tri count, so no extra cost.
 		float skirt = Math.Max(m_fBandSkirt, m_fRutMaxDepth + m_fRevealGap * 3 + 0.1);
-		t0 += BandBench(skirt);     // REBUILD 5 option 5 TEMP bench: not in this build's ms
 		int tc = System.GetTickCount();
 		bool ok = BandCore(skirt);
 		m_iBandCoreMs += System.GetTickCount(tc);
@@ -8309,8 +8652,8 @@ class MUD_WorldGroundEntity : GenericEntity
 				if (bLift)
 				{
 					m_Band.m_aY[v] = m_Band.m_aY[v] + LiftAt(p, v, d);
-					if (PRESS_LIFT && m_fPressSoil < rfD)
-						m_Band.m_aD[v] = m_fPressSoil;     // pressed lift: soil where the drawn press is FIELD_SOIL_D deep
+					if ((PRESS_LIFT || m_bFarOn) && m_fPressSoil < rfD)
+						m_Band.m_aD[v] = m_fPressSoil;     // pressed lift / far press: soil where the drawn press is FIELD_SOIL_D deep
 				}
 			}
 		}
@@ -8329,31 +8672,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		if (rfOn != p.m_bLastRfOn || m_fTime < p.m_fHideUntil)
 			return false;
 		return true;
-	}
-
-	//------------------------------------------------------------------------------------------------
-	//! REBUILD 5 option 3 TEMP: every PARTIAL_CHECK_EVERY-th partial pass runs the full pass on top (its result is used)
-	//! and counts the vertices the partial one got wrong ('MUD rebuild 5' bad, must be 0)
-	protected void PartCheck(MUD_FinePatch p, bool rfOn, bool bLift)
-	{
-		if (!PARTIAL_CHECK)
-			return;
-		int nth = m_iPartN % PARTIAL_CHECK_EVERY;
-		if (nth != 0)
-			return;
-		int nn = PVERTS * PVERTS;
-		for (int c = 0; c < nn; c++)
-		{
-			m_aChkY[c] = m_Band.m_aY[c];
-			m_aChkD[c] = m_Band.m_aD[c];
-		}
-		BandMeshIn(p, rfOn, bLift, 0, PCELLS, 0, PCELLS);
-		m_iPartChecks++;
-		for (int k = 0; k < nn; k++)
-		{
-			if (m_aChkY[k] != m_Band.m_aY[k] || m_aChkD[k] != m_Band.m_aD[k])
-				m_iPartBad++;
-		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -8427,34 +8745,8 @@ class MUD_WorldGroundEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! REBUILD 5 option 5 TEMP: every MESHER_BENCH_EVERY-th band build, BuildRef x reps vs Build x reps on this input
-	//! (MUD_BandMesher.Bench; the real build runs after it). Returns the bench ms (the caller keeps it out of its build ms).
-	protected int BandBench(float skirt)
-	{
-		if (!MESHER_BENCH || !MESHER_FAST)
-			return 0;
-		m_iBenchCnt++;
-		int nth = m_iBenchCnt % MESHER_BENCH_EVERY;
-		if (nth != 0)
-			return 0;
-		int tb = System.GetTickCount();
-		int oldMs;
-		int newMs;
-		bool same = m_Band.Bench(m_fFine, skirt, MESHER_BENCH_REPS, oldMs, newMs);
-		m_iBenchN++;
-		m_iBenchOld += oldMs;
-		m_iBenchNew += newMs;
-		if (!same)
-			m_iBenchDiff++;
-		int ms = System.GetTickCount(tb);
-		m_iBenchMs += ms;
-		return ms;
-	}
-
-	//------------------------------------------------------------------------------------------------
 	//! PERF IDEA 3: m_aInFl / m_aInRg for the patch at global vertex gx0, gz0 (after FieldPatchBegin, and PatchBegin when
-	//! look): the floor (look = + the client look floor, MeshFloorP) and ridge of every vertex. BAND_FILL_CHECK: every
-	//! BAND_FILL_CHECK_EVERY-th fill compares with the per-vertex readers it replaces.
+	//! look): the floor (look = + the client look floor, MeshFloorP) and ridge of every vertex.
 	protected void BandFill(int gx0, int gz0, bool look)
 	{
 		if (m_aInFl.Count() != PVERTS * PVERTS)
@@ -8465,24 +8757,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		MUD_VoxelProbe.FieldPatchFill(gx0, gz0, PVERTS, m_aInFl, m_aInRg);
 		if (look)
 			MUD_LookRuts.PatchFill(gx0, gz0, PVERTS, m_aInFl);
-		m_iFillN++;
-		if (!BAND_FILL_CHECK || m_iFillN % BAND_FILL_CHECK_EVERY != 0)
-			return;
-		int tk = System.GetTickCount();
-		m_iFillChecks++;
-		for (int vz = 0; vz < PVERTS; vz++)
-		{
-			for (int vx = 0; vx < PVERTS; vx++)
-			{
-				int v = vz * PVERTS + vx;
-				float fl = MUD_VoxelProbe.FieldFloorP(gx0 + vx, gz0 + vz);
-				if (look)
-					fl = MUD_LookRuts.MeshFloorP(gx0 + vx, gz0 + vz);
-				if (fl != m_aInFl[v] || MUD_VoxelProbe.FieldRidgeP(gx0 + vx, gz0 + vz) != m_aInRg[v])
-					m_iFillBad++;
-			}
-		}
-		m_iFillCheckMs += System.GetTickCount(tk);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -8625,7 +8899,6 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_iCsColIn += System.GetTickCount(csIn);
 		m_Band.m_bMerge = COL_MERGE;     // REBUILD 5 option 4 (needs MESHER_FAST)
 		m_Band.m_fMergeTol = COL_MERGE_TOL;
-		t0 += BandBench(0);     // REBUILD 5 option 5 TEMP bench: not in this build's ms
 		int tc = System.GetTickCount();
 		bool ok = BandCore(0);
 		m_iBandCoreMs += System.GetTickCount(tc);
@@ -8853,17 +9126,12 @@ class MUD_WorldGroundEntity : GenericEntity
 			Print(string.Format("MUD band: grid path - mesh %1 builds, mean %2 ms, worst %3 | collider %4, mean %5 ms, worst %6 | band fast verts mean %7, fast quads mean %8",
 				m_iGridMeshN, gMeshMean, m_iGridMeshWorst, m_iGridColN, gColMean, m_iGridColWorst, m_iBandFastV / b, m_iBandFastQ / b));
 			BUnderLog();     // stage 3 Part 0 B meter
-			if (BAND_FILL_CHECK)
-				Print(string.Format("MUD band fill check (PERF IDEA 3, TEMP): %1 fills, %2 checked, %3 vertices differ (must be 0), check %4 ms (in the input split)",
-					m_iFillN, m_iFillChecks, m_iFillBad, m_iFillCheckMs));
 			float mergeN = Math.Max(m_iColMergeN, 1.0);
 			Print(string.Format("MUD rebuild 5: 1 rut pace %1 - held patch-frames %2, held builds %3 | 2 same skip %4 - skips %5 | 3 partial %6 - passes %7, verts mean %8, input ms %9",
 				RUT_PACE, m_iPaceHeldPF, m_iPaceBuilds, SAME_SKIP, m_iSameSkip, PARTIAL_IN, m_iPartN, m_iPartVerts / Math.Max(m_iPartN, 1.0), m_iPartMs)
-				+ string.Format(" | full passes %1, input ms %2 | check %3 - %4 checked, %5 verts bad (must be 0)",
-				m_iFullN, m_iFullMs, PARTIAL_CHECK, m_iPartChecks, m_iPartBad)
-				+ string.Format(" | 4 merge %1 - col builds %2, merged blocks mean %3, col tris mean %4 (%5 saved) | 5 fast %6 - bench %7 x %8: old %9 ms",
-				COL_MERGE, m_iColMergeN, m_iColMerged / mergeN, m_iColTrisN / mergeN, m_iColMerged * 6 / mergeN, MESHER_FAST, m_iBenchN, MESHER_BENCH_REPS, m_iBenchOld)
-				+ string.Format(", new %1 ms, differ %2 (must be 0), bench %3 ms in the rebuild ms", m_iBenchNew, m_iBenchDiff, m_iBenchMs));
+				+ string.Format(" | full passes %1, input ms %2", m_iFullN, m_iFullMs)
+				+ string.Format(" | 4 merge %1 - col builds %2, merged blocks mean %3, col tris mean %4 (%5 saved) | 5 fast %6",
+				COL_MERGE, m_iColMergeN, m_iColMerged / mergeN, m_iColTrisN / mergeN, m_iColMerged * 6 / mergeN, MESHER_FAST));
 		}
 		RebuildSixLog();     // REBUILD 6: prints when it has counts, always resets
 		m_iPaceHeldPF = 0;
@@ -8874,20 +9142,9 @@ class MUD_WorldGroundEntity : GenericEntity
 		m_iPartMs = 0;
 		m_iFullN = 0;
 		m_iFullMs = 0;
-		m_iPartChecks = 0;
-		m_iPartBad = 0;
 		m_iColMerged = 0;
 		m_iColTrisN = 0;
 		m_iColMergeN = 0;
-		m_iBenchN = 0;
-		m_iBenchOld = 0;
-		m_iBenchNew = 0;
-		m_iBenchDiff = 0;
-		m_iBenchMs = 0;
-		m_iFillN = 0;
-		m_iFillChecks = 0;
-		m_iFillBad = 0;
-		m_iFillCheckMs = 0;
 		m_iBandMeshN = 0;
 		m_iBandMeshMs = 0;
 		m_iBandMeshWorst = 0;
@@ -9942,6 +10199,22 @@ class MUD_WorldGroundEntity : GenericEntity
 			+ string.Format(" | floor free %1: rut patch keys %2, in range %3, made near %4, floor-only freed %5", FLOOR_FREE, m_sFieldPatches.Count(), m_aFieldDue.Count(), m_iFieldMade, m_iFloorFreed)
 			+ string.Format(" | queue %1 (waiting %2), oldest dirty %3 s, ops %4", m_aDirty.Count(), nWaiting, oldestDirty, MUD_VoxelProbe.OpCount())
 			+ string.Format(" | lazy rut mesh %1: hidden under the sheet %2, held patch-frames %3, shown again %4", MUD_MudSheet.LazyOn(), m_aSheetHid.Count(), m_iSheetHeld, m_iSheetShown) + " - cover " + MUD_MudSheet.CoverWhy());
+		if (m_bRender && MUD_MudSheet.FAR_PRESS)
+		{
+			Print(string.Format("MUD far press 10 s: on %1, mesh cap %2, stored sheet meshes %3 | marks %4, rebuilds sent %5, waiting %6, marked patches %7",
+				MUD_MudSheet.s_bFarPress, MUD_MudSheet.s_iMeshCap, MUD_MudSheet.MeshesStored(), m_iFarMarks, m_iFarSent, m_mFarDue.Count(), m_sFarKeys.Count())
+				+ string.Format(" | meshes pressed %1, no mud %2, verts pressed %3, soil verts %4, border unpressed %5, hole guard %6, neighbour heals %7",
+				m_iFarBuilt, m_iFarEmpty, m_iFarVerts, m_iFarSoil, m_iFarFaded, m_iFarHole, m_iFarHeal), LogLevel.NORMAL);
+			m_iFarMarks = 0;
+			m_iFarSent = 0;
+			m_iFarBuilt = 0;
+			m_iFarEmpty = 0;
+			m_iFarVerts = 0;
+			m_iFarSoil = 0;
+			m_iFarFaded = 0;
+			m_iFarHole = 0;
+			m_iFarHeal = 0;
+		}
 		m_iSheetHeld = 0;
 		m_iSheetShown = 0;
 		m_iFieldMade = 0;

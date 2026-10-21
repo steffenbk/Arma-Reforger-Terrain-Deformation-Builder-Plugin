@@ -30,7 +30,9 @@ class MUD_MudSheet
 	// SHEET LOCAL (SYNC false): client-only, no sync layer, the deposit band (tiles only where wheels went). Off = parked.
 	// SYNCED SHEET DS TEST (user 2026-10-21, v271 = before): on from the start with SYNC true = the synced sheet
 	// on every machine (server sync layer too). numpad 3 still switches to sheet local; its step 0 = off.
-	static bool ENABLED = true;
+	// PARKED THIRD TIME 2026-10-21 (user: 'park the sheet again, focus on ruts, tunnels, trenches'; v275 = last sheet
+	// state with FAR PRESS built, not compiled). Code kept; true = the synced sheet DS test setup again.
+	static bool ENABLED = false;
 	// SYNCED SHEET Stage 2 (2026-10-18, v179 = before): the drawn mud = the sync layer (MUD_MudSync: pressed from the
 	// replicated rut ops, the same on every machine) + this machine's own stamps at the tyres it sees (prediction),
 	// each dropped when the op holding it comes (SyncChanged) or it expires (ExpirePreds). No local slump (the sync
@@ -219,6 +221,21 @@ class MUD_MudSheet
 	// meshes exist; then the farthest past RADIUS + RADIUS_HYST go first. 0 = drop every mesh past the radius, as before.
 	// The test zone has 462 tiles, so nothing drops there.
 	static const int MESH_CAP = 600;
+	// FAR PRESS knob (plan plans/2026-10-21-far-press-plan.md, v274 = before): TEST_KIT numpad - flips the cap between
+	// MESH_CAP and MESH_CAP_ALT (own loops keep their meshes longer: fewer revisit pops). A new play goes back to MESH_CAP.
+	static const int MESH_CAP_ALT = 1500;
+	static int s_iMeshCap = MESH_CAP;
+	// FAR PRESS (research/2026-10-21-synced-sheet-server-research.md option A, plan plans/2026-10-21-far-press-plan.md,
+	// v274 = before): outside the drawn ring a track lives only in the sync layer, so it popped in at 20-40 m. Ground
+	// patch MESHES (client only, colliders untouched) are drawn pressed down by the sync layer's pressed depth
+	// (THICK - D) x FAR_PRESS_K x lock: a grass-free groove, soil from FIELD_SOIL_D deep. Under a drawn sheet tile the
+	// pressed patch stays below the sheet (or LAZY_RUT_MESH hides it). Off with SPARSE (its A2 lift owns the patch
+	// height). TEST_KIT numpad / flips s_bFarPress. false = nothing of it runs.
+	static const bool FAR_PRESS = false;     // parked with the sheet 2026-10-21 (never compiled / tested)
+	static bool s_bFarPress = FAR_PRESS;
+	static const float FAR_PRESS_K = 1.0;       // look knob: share of the pressed depth drawn
+	static const float FAR_PRESS_EVERY = 2;     // s between look rebuilds of one patch for far press
+	protected static int s_iMeshesStored;       // FAR PRESS meter: stored meshes at the last DropFar
 	// sheet perf fix 3 (2026-10-18; v188 = before, was 4): 2 ms a frame - fewer approach builds per frame while driving
 	static const int RAD_BUILD_MS = 2;          // ms of tile builds per frame on approach (at least one; ~2.9 ms a tile, DS 14:31)
 	// BUILD AHEAD (2026-10-18, research/2026-10-18-all-offroad-sheet-deep-dive.md fix 2): QueueNear orders by distance to
@@ -5292,6 +5309,20 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: are ground patch meshes drawn pressed by the sync layer (MUD_WorldGroundEntity asks)?
+	static bool FarPressOn()
+	{
+		return ENABLED && SYNC && s_bFarPress && !PatchLiftOn();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS meter: stored sheet meshes at the last DropFar
+	static int MeshesStored()
+	{
+		return s_iMeshesStored;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! SPARSE SHEET A2: m a ground patch mesh is drawn higher on untouched covered ground (times its edge lock)
 	static float PatchLift()
 	{
@@ -5832,10 +5863,11 @@ class MUD_MudSheet
 			farKey.Insert(key);
 			farD2.Insert(d2);
 		}
+		s_iMeshesStored = meshes;
 		int drop = farKey.Count();
-		bool cap = MESH_CAP > 0 && !m_bLocal;     // MUD LAB part D: SHEET LOCAL drops every mesh past MESH_R + MESH_DROP
+		bool cap = s_iMeshCap > 0 && !m_bLocal;     // MUD LAB part D: SHEET LOCAL drops every mesh past MESH_R + MESH_DROP
 		if (cap)
-			drop = Math.Min(drop, meshes - MESH_CAP);
+			drop = Math.Min(drop, meshes - s_iMeshCap);
 		for (int c = 0; c < drop; c++)
 		{
 			int pick = 0;

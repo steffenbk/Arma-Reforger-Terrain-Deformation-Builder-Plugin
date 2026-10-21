@@ -42,6 +42,28 @@ class MUD_MudLab
 		{
 			SetMode(-1, 0, "new play");
 			s_iStep = 0;
+			MUD_MudSheet.s_bFarPress = MUD_MudSheet.FAR_PRESS;     // FAR PRESS keys back to the build's defaults
+			MUD_MudSheet.s_iMeshCap = MUD_MudSheet.MESH_CAP;
+		}
+		// FAR PRESS (plans/2026-10-21-far-press-plan.md): numpad / far press on / off, numpad - sheet mesh cap 600 / 1500
+		if (MUD_TestKit.TEST_KIT && MUD_MudSheet.FAR_PRESS && Debug.KeyState(KeyCode.KC_DIVIDE))
+		{
+			Debug.ClearKey(KeyCode.KC_DIVIDE);
+			MUD_WorldGroundEntity.FarPressToggle();
+			string fpTxt = "FAR PRESS OFF";
+			if (MUD_MudSheet.s_bFarPress)
+				fpTxt = "FAR PRESS ON";
+			SCR_HintManagerComponent.ShowCustomHint(fpTxt + " (numpad /)", "Mud far press", 4, true);
+		}
+		if (MUD_TestKit.TEST_KIT && Debug.KeyState(KeyCode.KC_SUBTRACT))
+		{
+			Debug.ClearKey(KeyCode.KC_SUBTRACT);
+			if (MUD_MudSheet.s_iMeshCap == MUD_MudSheet.MESH_CAP)
+				MUD_MudSheet.s_iMeshCap = MUD_MudSheet.MESH_CAP_ALT;
+			else
+				MUD_MudSheet.s_iMeshCap = MUD_MudSheet.MESH_CAP;
+			Print(string.Format("MUD far press: mesh cap %1 (key)", MUD_MudSheet.s_iMeshCap), LogLevel.NORMAL);
+			SCR_HintManagerComponent.ShowCustomHint("SHEET MESH CAP " + MUD_MudSheet.s_iMeshCap.ToString() + " (numpad -)", "Mud far press", 4, true);
 		}
 		float dt = time - s_fTickLast;
 		s_fTickLast = time;

@@ -297,3 +297,6 @@ write, no FloorDirty / QueueBox = no patch rebuild. Pass 2 cuts 0.03, pass 3 0.0
 hash adds it (WEAR_SALT). Trail rule: rear wheels ride any worn track (wear > 0; a full-pass test let them add wear in the
 front wheel's ramp fade). Look ruts skip worn-only samples (WearOnly; 'worn only' count in the look ruts 10 s line).
 Log: 'MUD rut wear 10 s: N samples only worn (no cut), M samples cut'. WEAR_PASSES 0 = off.
+- DIRT HIGHER (user 2026-10-21 'move dirt very close to the grass, like 0.5 cm'; v276 = before, NOT COMPILED):
+  MUD_WorldGround.FIELD_SOIL_D 0.06 -> 0.005. Pass 1 still only wears (nothing drawn); the first cut (pass 2, 3 cm)
+  now shows broken dirt (ragged noise up to RAG_D 0.035), full dirt by pass 3. RUT_MAT_D stays 0.06 = mud grip unchanged.

@@ -156,12 +156,9 @@ class MUD_LookRuts
 	//! MUD_WorldGroundEntity frame, rendering machines only. step / cap rule as its Wheels (same prefab values).
 	static void Tick(float now, float step, float baseDepth, float perTon, float maxDepth)
 	{
-		MUD_DecalProbe.Tick(now);     // TEMP decal probe 2026-10-18 (own switch)
-		MUD_RoadHideProbe.Tick(now);  // TEMP road hide probe 2026-10-18 (own switch, numpad 7 / 9 / 8)
-		MUD_RoadLookProbe.Tick(now);  // TEMP road look probe 2026-10-18, plan 7A.3 (own switch, numpad 4 / 6 / 5)
-		MUD_GrassCutProbe.Tick(now);  // TEMP grass-cut probe 2026-10-18 (own switch)
+		// decal / road hide / road look / grass-cut probes and track stamps: archived 2026-10-21 (Github/Terrain
+		// deformation/Archived code/2026-10-21-cleanup)
 		MUD_RutDebug.Tick();          // diag menu Mud > Ruts and wheels
-		MUD_TrackStamps.Tick(now);    // wheel track decals 2026-10-18 (own switch)
 		if (!ENABLED || !MUD_VoxelProbe.RUTS || !MUD_TestKit.LookRuts())     // no client look ruts over heightfield ruts (feel test 2026-10-19)
 			return;
 		int t0 = System.GetTickCount();
@@ -859,9 +856,6 @@ class MUD_LookRuts
 		s_aTracks.Clear();
 		s_fSweepAt = 0;
 		s_fLogAt = 0;
-		MUD_DecalProbe.Reset();
-		MUD_GrassCutProbe.Reset();
-		MUD_TrackStamps.Reset();
 	}
 
 	//------------------------------------------------------------------------------------------------

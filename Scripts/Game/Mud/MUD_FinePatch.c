@@ -61,6 +61,8 @@ class MUD_FinePatch
 	float m_fSheetAt = -100;    // ... m_fTime of that answer
 	int m_iSheetGen = -1;       // ... MUD_MudSheet.CoverGen at that answer
 	float m_fFieldSeenAt;       // RUT FIELD: m_fTime it was last in MUD_WorldGroundEntity.FieldDue's range (keeps a floor-only patch)
+	int m_iFarSides = -1;       // FAR PRESS: drawn neighbours (3 x 3 bits, (dz + 1) * 3 + dx + 1) at its last pressed mesh, -1 = none
+	float m_fFarAt = -100;      // FAR PRESS: m_fTime its last far press rebuild was sent
 	bool m_bTraceHidden;       // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
 	int m_iBuildFails;          // collider steps that made no body

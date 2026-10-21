@@ -228,25 +228,19 @@ class MUD_VoxelProbe
 	static const bool ENABLED = true;       // back on 2026-10-13 after the band mesher test (user: digging back); was false for the band mesher test. Tunnels (T) need it.
 	// false (user test 4, 2026-10-13 20:42): craters, trenches and shovel digs on ground no tunnel has converted stay on
 	// the heightfield (ruts keep working round and in them); only tunnels convert. true = every op makes voxels.
-	static const bool SURFACE_OPS = true;   // true for the all-voxel test (user 2026-10-13 22:30); was false (test 6)
+	static const bool SURFACE_OPS = false;  // user 2026-10-21: craters / trenches / shovel back on the heightfield (v010 feel), voxels only for tunnels
+	                                        // (and ops inside columns a tunnel converted). git 3ab5bb8 = before, v273 = after (true since the all-voxel test 2026-10-13 22:30)
 	// All-voxel test (user 2026-10-13 22:30, checkpoint v031 = before): wheels cut ruts into the voxels (op 4), the
 	// heightfield takes no rut. 0.5 m samples: a rut shows as a soft dip ~1 m wide, no berm (user picked 0.5 m).
 	static const bool RUTS = true;      // back on 2026-10-19 after the mesh-rut feel test (results/2026-10-19-mesh-vs-voxel-ruts-ds.md). user 2026-10-15: back to the v035 voxel ruts (ground heightfield ruts cost ~13 fps, docs/superpowers/results/2026-10-15-freeze-test.md); was false for the MUD DRAG TEST
 	static const float RUT_STEP = 0.5;          // a track point every this many m a wheel travels
 	static const float RUT_JUMP = 2;            // farther than this since the last point (air, teleport): track restarts
 	static const int RUT_EVERY_MS = 250;        // one rut op per vehicle at most this often
-	// SHEET-ONLY TEST (TEMP 2026-10-18, user 'only mud zone ruts, no physical ruts there'): a rut op whose segments
-	// are ALL under the mud sheet cuts no floor on any machine (same zones everywhere = same result; the op still
-	// presses the sheet's sync layer). Off-sheet / mixed ops carve as before. false = normal.
-	static const bool RUT_SHEET_ONLY_TEST = false;   // H1 2026-10-18 (plans/2026-10-18-hybrid-sheet-feel-plan.md): feel rut back under the sheet
-	protected static int s_iSheetOnlySkips;     // log: rut ops not carved (SHEET-ONLY TEST), per 'rut field' line
 	// CRUDE UNDER SHEET (2026-10-18, user 'the hidden rut physics can be cruder for perf'; results/2026-10-18-h1-snap-probe.md:
 	// CarveFloor = the op hitch): a rut op whose segments are all under the mud sheet skips RelaxFloor + GrowRidges (the
-	// sheet draws its own ridges). Same zones + same seq on every machine = same floor everywhere.
-	// TEMP A/B: CRUDE_AB_OPS > 0 = crude only in even blocks of that many op seqs (seq / CRUDE_AB_OPS even), full in
-	// odd ones - one run measures both ('MUD op time' ... crude 1/0). 0 = always crude under the sheet.
+	// sheet draws its own ridges). Same zones + same seq on every machine = same floor everywhere. (SHEET-ONLY TEST and
+	// the CRUDE_AB_OPS A/B: archived 2026-10-21, Github/Terrain deformation/Archived code/2026-10-21-cleanup.)
 	static const bool RUT_SHEET_CRUDE = true;
-	static const int CRUDE_AB_OPS = 0;     // A/B DS 13:38 done (results/2026-10-18-h1-snap-probe.md run 3): crude always
 	protected bool m_bOpCrude;                  // this op (log)
 	protected int m_iCSeg;                      // this op's CarveFloor parts (ms, 'MUD op time')
 	protected int m_iCWrite;
@@ -484,9 +478,6 @@ class MUD_VoxelProbe
 	static const string TUNNEL_STEEP_ACTION = "MUD_TunnelSteep";
 	static const float TUNNEL_LAG = 0.5;        // server down check: feet may lag the client's by this much
 	static const bool TUNNEL_DEBUG_T = true;    // debug key, user 2026-10-16: OFF before release (false = T does nothing, the server refuses it)
-	// Sun-spot hunt (2026-10-17): first T press selects the engine diag menu 'Clustering' (Probes shapes, Disable local
-	// probes, Probes volumes log; 'System textures' > Show shadowmap showed no sun on the blob). The id is a startup counter that differs per exe, so select by name.
-	static const bool TUNNEL_DIAG_SMASK = false;   // off 2026-10-17: blob found (probe coverage)
 	static const int TUNNEL_EVERY_MS = 300;
 	// Tunnel darkness (user 2026-10-17, probe): client / host spawns one MudTunnelProbe.et (vanilla ProbeEnvCave_base values
 	// + a 5 m ProbeVolume box; script cannot size a ProbeVolume, no methods) per TUNNEL_DARK_STEP grid cell a tunnel dig
@@ -559,7 +550,6 @@ class MUD_VoxelProbe
 	static const int SMOOTH_PASSES = 1;
 	static const float SMOOTH_W = 0.5;
 	static const int BAND_NONE = 100000;        // MUD_VoxelGather m_aLa / m_aHs of a column that is not converted
-	static const int SCAN_CHECK_EVERY = 0;      // 0 after the A/B run (6335 + 141 checks, 0 bad). TEMP 2026-10-14: every Nth Polygonize also runs the full scan first
 	                                            // (timed apart: same-brick A/B), compares (0 = off); a mismatch prints
 	                                            // 'MUD scan check: MISMATCH'. The band result is kept.
 	static const int VKEY = 16384;              // cell vertex cache: (stamp * 4 + parity) * VKEY + vertex (VKEY > MAX_V)
@@ -591,7 +581,6 @@ class MUD_VoxelProbe
 	protected static ref MUD_VoxelProbe s_Inst;
 	protected static bool s_bTraceHidden;  // MUD_GroundEntity.HideFromTraces: bricks off traces (get in / out)
 	protected static bool s_bDigHeld;
-	protected static bool s_bDiagSelected;
 	protected static int s_iTunnelSteep = 1;   // = TUNNEL_STEEP_START; local player's slope choice (T and the shovel)
 	protected static int s_iDigAt;
 	// MP client: ops by seq until they can go in order (held before s_Inst exists too)
@@ -744,11 +733,6 @@ class MUD_VoxelProbe
 	protected int m_iBatchGatherMs;     // TEMP 2026-10-14 band scan probe: Gather / Polygonize ms, samples scanned
 	protected int m_iBatchPolyMs;
 	protected int m_iBatchScanned;
-	protected int m_iBatchFullMs;       // TEMP: the full-scan passes of the checks (not part of the kept build)
-	protected int m_iBatchBandMs;       // TEMP: the band passes of the same checked builds
-	protected int m_iScanChecks;        // TEMP: Polygonize calls (SCAN_CHECK_EVERY), checks run, mismatches
-	protected int m_iScanChecked;
-	protected int m_iScanBad;
 	protected int m_iBatchSplit;        // DISPLACE_RUTS: bricks split, verts they added, wall tris dropped as folded,
 	protected int m_iBatchSplitV;       // bricks too big to split (coarse pull only)
 	protected int m_iBatchFold;
@@ -1006,12 +990,6 @@ class MUD_VoxelProbe
 		if (!input || !cameras || !cameras.CurrentCamera())
 			return;
 		input.ActivateContext(TUNNEL_CONTEXT);
-		if (TUNNEL_DIAG_SMASK && !s_bDiagSelected && input.GetActionValue(TUNNEL_ACTION) >= 0.5)
-		{
-			s_bDiagSelected = true;
-			DiagMenu.SelectMenuByName("Clustering");
-			Print("MUD tunnel: diag menu 'Clustering' selected - Probes shapes / Disable local probes / Probes volumes log");
-		}
 		if (input.GetActionValue(TUNNEL_ACTION) < 0.5)
 		{
 			s_bDigHeld = false;
@@ -3941,11 +3919,6 @@ class MUD_VoxelProbe
 	{
 		if (op.m_iKind == 4)
 		{
-			if (RUT_SHEET_ONLY_TEST && OpUnderSheet(op))
-			{
-				s_iSheetOnlySkips++;
-				return;
-			}
 			if (DISPLACE_RUTS)
 				CarveFloor(op);
 			else
@@ -4005,8 +3978,6 @@ class MUD_VoxelProbe
 		m_iBatchGatherMs = 0;
 		m_iBatchPolyMs = 0;
 		m_iBatchScanned = 0;
-		m_iBatchFullMs = 0;
-		m_iBatchBandMs = 0;
 		m_iBatchFirstSeq = firstSeq;
 		m_iBatchSplit = 0;
 		m_iBatchSplitV = 0;
@@ -4341,8 +4312,8 @@ class MUD_VoxelProbe
 			+ string.Format(", %1 ms | %2 columns, %3 bricks in all", System.GetTickCount(t0), m_mCols.Count(), m_iBricks)
 			+ string.Format(" | smooth %1 samples %2 ms", m_iSmoothN, m_iSmoothMs), LogLevel.NORMAL);
 		if (RUT_FIELD && op.m_iKind == 4)
-			Print(string.Format("MUD rut field: %1 samples, %2 patches dirty, %3 new columns | %4 floor tiles, %5 columns in all | sheet-only test %6: %7 rut ops not carved",
-				fieldW, m_iFieldDirty, m_mCols.Count() - fieldCols0, m_mRutTiles.Count(), m_mCols.Count(), RUT_SHEET_ONLY_TEST, s_iSheetOnlySkips), LogLevel.NORMAL);
+			Print(string.Format("MUD rut field: %1 samples, %2 patches dirty, %3 new columns | %4 floor tiles, %5 columns in all",
+				fieldW, m_iFieldDirty, m_mCols.Count() - fieldCols0, m_mRutTiles.Count(), m_mCols.Count()), LogLevel.NORMAL);
 		return true;
 	}
 
@@ -4870,7 +4841,7 @@ class MUD_VoxelProbe
 	{
 		int t0 = System.GetTickCount();
 		int tC = t0;     // MUD_Prof carve parts (TEMP 2026-10-18)
-		m_bOpCrude = RUT_SHEET_CRUDE && (CRUDE_AB_OPS <= 0 || (op.m_iSeq / CRUDE_AB_OPS) % 2 == 0) && OpUnderSheet(op);
+		m_bOpCrude = RUT_SHEET_CRUDE && OpUnderSheet(op);
 		float r = RUT_R;
 		map<int, float> best = new map<int, float>();      // floor sample key -> strongest profile (fall)
 		map<int, float> atY = new map<int, float>();       // wheel height there
@@ -6780,8 +6751,8 @@ class MUD_VoxelProbe
 			m_iBatchBuilt, m_iBatchVerts, m_iBatchMs, m_iBatchFrames, m_iBatchWorst, m_iBatchWorstSub, System.GetTickCount(t0))
 			+ string.Format(" | %1 columns, %2 bricks, mem %3 KB, %4 look meshes", m_mCols.Count(), m_iBricks, System.MemoryAllocationKB(), m_iBatchLook)
 			+ string.Format(" (%1 kept their body, %2 look-only builds skipped)", m_iBatchMeshOnly, m_iBatchSkipped)
-			+ string.Format(" | scan: gather %1 ms, poly %2 ms, %3 samples scanned, checks %4 (%5 bad), checked full %6 ms vs band %7 ms", m_iBatchGatherMs, m_iBatchPolyMs,
-			m_iBatchScanned, m_iScanChecked, m_iScanBad, m_iBatchFullMs, m_iBatchBandMs) + DispBatch(), LogLevel.NORMAL);
+			+ string.Format(" | scan: gather %1 ms, poly %2 ms, %3 samples scanned", m_iBatchGatherMs, m_iBatchPolyMs,
+			m_iBatchScanned) + DispBatch(), LogLevel.NORMAL);
 		if (MUD_TestKit.TEST_KIT) MUD_CraterTrace.GoLive(m_iBatchFrames, m_iBatchWorst, System.GetTickCount(t0), voxMs);     // stage 2 B1 crater log
 	}
 
@@ -7637,46 +7608,12 @@ class MUD_VoxelProbe
 	//------------------------------------------------------------------------------------------------
 	//! Surface nets over the gathered samples (m_Gb) into the buffers (m_Vb, m_IbTop, m_IbDirt). emitAny = 0
 	//! (nothing carved round the brick): no quads at all (empty mesh, no body). Scans only the sign band of each
-	//! sample column (Gather m_aLa / m_aHs); TEMP: every SCAN_CHECK_EVERY-th call first runs the full scan (timed
-	//! apart), then the band scan, compares, and keeps the band result.
+	//! sample column (Gather m_aLa / m_aHs). (The TEMP full-scan self-check, SCAN_CHECK_EVERY: archived 2026-10-21.)
 	protected void Polygonize(int emitAny)
 	{
-		m_iScanChecks++;
-		if (SCAN_CHECK_EVERY <= 0 || m_iScanChecks % SCAN_CHECK_EVERY != 0)
-		{
-			int tp = System.GetTickCount();
-			PolyPass(emitAny, false);
-			m_iBatchPolyMs += System.GetTickCount(tp);
-			Displace();
-			return;
-		}
-		// full scan first (timed apart), then the band scan on the same samples, which is kept
-		int tf = System.GetTickCount();
-		PolyPass(emitAny, true);
-		m_iBatchFullMs += System.GetTickCount(tf);
-		int nv = m_iV;
-		int nt = m_iTop;
-		int nd = m_iDirt;
-		int ng = m_iDegen;
-		bool novf = m_bOverflow;
-		vector fsum = vector.Zero;
-		for (int f = 0; f < m_iV; f++)
-			fsum = fsum + m_Vb.m_aV[f];
-		int tb = System.GetTickCount();
+		int tp = System.GetTickCount();
 		PolyPass(emitAny, false);
-		int bms = System.GetTickCount(tb);
-		m_iBatchBandMs += bms;
-		m_iBatchPolyMs += bms;
-		vector sum = vector.Zero;
-		for (int i = 0; i < m_iV; i++)
-			sum = sum + m_Vb.m_aV[i];
-		m_iScanChecked++;
-		if (nv != m_iV || nt != m_iTop || nd != m_iDirt || ng != m_iDegen || novf != m_bOverflow || vector.Distance(sum, fsum) > 0.01)
-		{
-			m_iScanBad++;
-			Print(string.Format("MUD scan check: MISMATCH brick %1 %2 %3: full %4 verts %5 top %6 dirt, band %7 %8 %9",
-				m_B.m_iBi, m_B.m_iBj, m_B.m_iBk, nv, nt, nd, m_iV, m_iTop, m_iDirt), LogLevel.ERROR);
-		}
+		m_iBatchPolyMs += System.GetTickCount(tp);
 		Displace();
 	}
 

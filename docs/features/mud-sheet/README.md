@@ -1,4 +1,13 @@
-# Mud sheet + ONE GRID (mud zones) - PARKED AGAIN 2026-10-18
+# Mud sheet + ONE GRID (mud zones) - PARKED THIRD TIME 2026-10-21
+
+**PARKED AGAIN 2026-10-21 (user: 'park the sheet again, focus on ruts, tunnels, trenches; sheets later'): MUD_MudSheet.ENABLED false, FAR_PRESS false. v275 = last state (synced sheet whole-map DS test setup + FAR PRESS). Bring back: ENABLED true (SYNC true, SPARSE false = the 2026-10-21 DS setup), FAR_PRESS true, then compile + the far press WB look session.**
+
+**2026-10-21: far track pop-in (research/2026-10-21-synced-sheet-server-research.md) - build plan for FAR_PRESS
+(patch mesh pressed by the sync depth outside the ring) + MESH_CAP 1500 key: plans/2026-10-21-far-press-plan.md.
+BUILT v275 (MUD_MudSheet FAR_PRESS / s_iMeshCap, MUD_MudSync.FarBox + FarPressMark hooks, MUD_WorldGround FarSetup /
+FarAt / FarMark / FarRebuild, lab keys numpad / and -), adversarial review done, NOT COMPILED, WB look session next
+(plan section "Workbench look session"). Open risks: asleep neighbour can show a short crack; m_sFarKeys and
+m_sFieldPatches only grow (FieldDue scan cost - DS check).**
 
 **Status: PARKED 2026-10-18 (user: 'park the mud zone, focus on the voxel ruts'; we may come back).** Switched off: `MUD_MudSheet.ENABLED = false` (gates the sync layer, the A2 patch lift, the under-sheet rut paths and the look-rut sheet hooks). Checkpoint v206 = last sheet state (SPARSE + A2 + D + paper tests 1-3 + LIFT_BY_DRAWN). Open when it comes back: the driven / undriven height step and the tile pop survived LIFT_BY_DRAWN (DS 16:26, user) - cause unproven; sync tiles are never freed (must-do cap).
 

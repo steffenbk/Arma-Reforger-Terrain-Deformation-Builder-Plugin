@@ -374,6 +374,52 @@ class MUD_MudSync
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS (MUD_WorldGroundEntity.FarSetup): mud depth of the w x h world cells from gi0, gk0 into outD (row k * w
+	//! + i; outD at least w * h long). THICK where there is no sync tile and on bare cells (a crater / dig draws its own
+	//! ground). Walks the overlapped 3 m tiles, one map lookup each. Returns the cells pressed below THICK.
+	static int FarBox(int gi0, int gk0, int w, int h, notnull array<float> outD)
+	{
+		float thick = MUD_MudSheet.THICK;
+		int n = w * h;
+		for (int c = 0; c < n; c++)
+			outD[c] = thick;
+		if (!s_Inst || s_Inst.m_mTiles.IsEmpty() || gi0 < 0 || gk0 < 0)
+			return 0;
+		int tq = MUD_MudSheet.TQ;
+		int gi1 = gi0 + w - 1;
+		int gk1 = gk0 + h - 1;
+		int pressed = 0;
+		for (int tz = gk0 / tq; tz <= gk1 / tq; tz++)
+		{
+			for (int tx = gi0 / tq; tx <= gi1 / tq; tx++)
+			{
+				MUD_MudSyncTile t = s_Inst.m_mTiles.Get(MUD_MudSheet.TrailKey(tx, tz));
+				if (!t)
+					continue;
+				int k0 = Math.Max(gk0, tz * tq);
+				int k1 = Math.Min(gk1, tz * tq + tq - 1);
+				int i0 = Math.Max(gi0, tx * tq);
+				int i1 = Math.Min(gi1, tx * tq + tq - 1);
+				for (int k = k0; k <= k1; k++)
+				{
+					for (int i = i0; i <= i1; i++)
+					{
+						int l = (k - tz * tq) * tq + i - tx * tq;
+						if (t.m_aB[l] != 0)
+							continue;
+						float d = t.m_aD[l];
+						if (d >= thick - 0.002)
+							continue;
+						outD[(k - gk0) * w + i - gi0] = d;
+						pressed++;
+					}
+				}
+			}
+		}
+		return pressed;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Any sync tile under sheet tile tx, tz? Its cells 0..TQ reach into the next tile (cell TQ = the next tile's
 	//! cell 0), so tx..tx+1 x tz..tz+1. False = every Get there returns plain THICK mud (BuildZoneTile skips them).
 	static bool AnyTileNear(int tx, int tz)
@@ -781,6 +827,7 @@ class MUD_MudSync
 	//! JOB_SHEET: the drawn sheet drops the own stamps the op holds and restores the box; own stamps left -> JOB_REPLAY
 	protected void StepSheet()
 	{
+		MUD_WorldGroundEntity.FarPressMark(m_iJi0, m_iJi1, m_iJk0, m_iJk1);     // FAR PRESS: patch meshes over the box (look only)
 		if (MUD_MudSheet.SyncBegin(m_iJi0, m_iJi1, m_iJk0, m_iJk1, m_Job.m_aSegA, m_Job.m_aSegB))
 			m_iJobStep = JOB_REPLAY;
 		else
@@ -2053,6 +2100,7 @@ class MUD_MudSync
 			MUD_MudSheet.SyncReload(tx * tq, tx * tq + tq - 1, tz * tq, tz * tq + tq - 1);
 			if (!MUD_MudSheet.LIFT_BY_DRAWN)
 				MUD_WorldGroundEntity.SheetLiftDirty(tx * MUD_MudSheet.TILE_M, tz * MUD_MudSheet.TILE_M);     // A2: lift on / off
+			MUD_WorldGroundEntity.FarPressMark(tx * tq, tx * tq + tq - 1, tz * tq, tz * tq + tq - 1);     // FAR PRESS: joiner
 		}
 		Print(string.Format("MUD sheet sync: snapshot loaded at seq %1: %2 tiles, %3 bad parts, %4 tiles redrawn, %5 ms - layer hash %6",
 			s, got.Count(), bad, keys.Count(), System.GetTickCount(t0), LayerHash(got)), LogLevel.NORMAL);

@@ -51,3 +51,7 @@ MUD_WarheadComponent.c, MUD_VoxelProbe.c (Carve), MUD_BlastCover.c
   (168 armor roads, 51.6 km). U2 (user): no tunnel under an unbroken road.
   7A.3 look probe WRITTEN, NOT COMPILED: MUD_RoadLookProbe.c (numpad 4 copy / 6 A/B / 5 undo).
 - More variation (user 2026-10-17, v171 = before, NOT TESTED): Depth Jitter 0.15 -> 0.3 (size 70-130 %, width follows depth), Shape Jitter 0.15 -> 0.35 and each voxel crater rolls 20-100 % of it (MUD_WorldGround.VoxelCrater). Rolled on the server, carried in the op (MP-safe). Softer grass edge: see voxel-ground README.
+- BIG + NO RIM (user 2026-10-21, screenshot from v010; v276 = before, NOT COMPILED): heightfield craters back to the big
+  preset (m_fCraterDepthPerKg 1.5, m_fCraterMaxDepth 1.35 = 81 mm mortar ~1.4 m deep, ~6 m bowl). New attribute
+  m_fCraterNoRimChance 0.5: half the craters get no dirt lip (rim 0, bowl drops straight from the grass at the crest).
+  Rolled on the server, clients get heights. Log: crater debug line ends 'rim X m (no rim true/false)'.

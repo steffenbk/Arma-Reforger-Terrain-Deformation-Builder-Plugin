@@ -5,8 +5,8 @@
 - Feature detail (voxel bricks, papers plan, ruts, MP ahead system, mud sheet + ONE GRID, AI navmesh) lives in
   docs/features/<name>/README.md (moved out of this file 2026-10-15). Current state: all ground ops are voxel
   (MUD_VoxelProbe, v035 voxel ruts); the heightfield (MUD_WorldGround + MUD_FinePatch) is the base ground.
-  MUD SHEET PARKED AGAIN 2026-10-18 (MUD_MudSheet.ENABLED false, v206 = last state) - docs/features/mud-sheet/README.md
-  (lessons for the voxel ruts at its top). Focus now: voxel ruts.
+  MUD SHEET PARKED THIRD TIME 2026-10-21 (MUD_MudSheet.ENABLED false + FAR_PRESS false, v275 = last state) -
+  docs/features/mud-sheet/README.md. Focus now: ruts, craters, trenches, shovel, tunnels.
 - TERRAIN RULE (user 2026-10-17): real terrain stays ONLY under asphalt / concrete (terrain gamemat), buildings,
   power poles and real roads; everything else (trees, bushes, rocks, decals, props, trails) is holed. Holed RELATIVE_Y
   roots are lifted at load by MUD_PinLift. Tool chain: docs/features/heightfield-ground/README.md.
@@ -24,7 +24,7 @@
   queue lengths, snaps-as-perf) in Workbench - it does not run like the game (also seen: WB-only fps swings, a WB host
   stalls unfocused). Performance = dedicated server and/or the standalone game with the mod uploaded. Workbench is for
   function / look checks only. Session layout: docs/superpowers/plans/2026-10-16-next-steps.md.
-- FEATURE FREEZE (user 2026-10-15): finish ground + voxel + mud sheet solid in MP first. Work list: docs/superpowers/backlog/2026-10-15-master-list.md (lanes + "Parked ideas"). New ideas go to Parked ideas, not into work. Throwaway probes/test code: archive (never delete) to mud_backups/archive/<name>-<date>/ with a README of call sites; checkpoint v066 = before the 2026-10-15 archive.
+- FEATURE FREEZE (user 2026-10-15): finish ground + voxel + mud sheet solid in MP first. Work list: docs/superpowers/backlog/2026-10-15-master-list.md (lanes + "Parked ideas"). New ideas go to Parked ideas, not into work. Throwaway probes/test code: archive (never delete) to C:/Users/Steffen/Documents/A_documents/Github/Terrain deformation/Archived code/<date>-<name>/ with a README of call sites (moved there 2026-10-21; older archive = Archived code/older-mud_backups; v001-v200 checkpoints in Versions backup/_old v001-v200).
 - RUTS STAY VOXEL (user 2026-10-19): old heightfield (mesh) ruts were A/B tested in one session on the DS - they cost more
   (server 6.31 vs 4.48 ms/frame, results/2026-10-19-mesh-vs-voxel-ruts-ds.md). Do not revive them; copy their feel instead.
 - RUT WEAR (user-ok DS 2026-10-19, v234): pass 1 on grass only counts wear (MUD_VoxelProbe.WEAR_PASSES 1, J2 state), each
