@@ -83,3 +83,28 @@ look cuts here (no driving over old ruts in this run). B rows below need a run t
 - **C** `MUD prof parts` for driving on ruts, crater on ruts, crater off ruts, tunnel dig, trench (DS, >= 6 runs per
   row + an off row), top 5 costs.
 - **D** join with 30+ craters: PART D notes (joining, most in one frame, cap drops), prebuild worst frame.
+
+## 5. Combined test session (sets 16-21 built, compiled clean WB 18:30, commit 05de5f9)
+
+Switches, all default off; numpad * steps one set, the on-screen FIX SET line names them:
+16 = 15 + drape_fit (A10) | 17 = 16 + co_side + corner (A11, A12) | 18 = 17 + pre_live_only (D1) |
+19 = 18 + look_under_skip (B8) | 20 = 19 + groove_under_off (B9) | 21 = 20 + mesh_under_hold (B10).
+Log lines to read after: `MUD sheet builds:` (edges + TURN METER), `MUD lab 10s:` (PART D), `MUD sheet prebuild:`,
+`MUD world B under sheet 10 s:` (B9 groove off / watch list / rebuilt from it, B10 held), LookRuts 10 s (B8 count).
+
+WB - look / function only (no ms):
+1. Play, spawn a fresh truck. Numpad 3 to sheet local. Numpad * to set 15, then step 16 ... 21: each name on screen.
+2. Sets 15, 16, 17 each: drive straight 20 s, tight circle 20 s, stop 12 s. Striped wedges / tile edges on the turn?
+3. Set 19: drive over fresh grass and old ruts in the band - any rut missing under the sheet or popping late at its edge?
+4. Set 20, then 21: drive over old ruts. Look at the band edge, a crater on the ruts, a tunnel mouth, drive 80 m away
+   and back. Any grass-coloured rut, rut poking through the mud, or hole in the ground?
+5. Set 21: numpad 3 off sheet local while standing on ruts - ruts must come back with dirt inside within ~1 s.
+6. Set 18: craters on the ruts - hole there at once, as with set 17?
+
+DS - ms only (>= 6 runs per row, robot: driver seat, stopped, hold Space 3 s):
+7. Rows off / 15 / 17 / 19 / 20 / 21: robot drive on ruts (6 runs each).
+8. Same rows: crater on the ruts, crater off the ruts, tunnel dig, trench (one of each per run).
+9. Part D join (a): 30+ craters on the sheet ruts, second client joins, THEN sheet local + set 15. Holes all there?
+10. Part D join (b): rejoin, turn sheet local + set 15 as fast as possible during the join, then set 18. Holes all there?
+11. Two clients side by side, both sheet local + set 21: same crater - same hole, same rut look, no truck floating or
+    sinking on either.
