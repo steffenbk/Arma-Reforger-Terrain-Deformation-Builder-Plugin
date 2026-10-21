@@ -456,10 +456,10 @@ class MUD_WorldGroundEntity : GenericEntity
 	[Attribute("0.6", UIWidgets.EditBox, "HEAT / HEDP (shaped charge, the warhead fires a penetrator) digs this share of the depth: the jet goes into the target, not the ground. A 1.0 m crater -> 0.6 m.", category: "Craters")]
 	protected float m_fCraterHeatFactor;
 
-	[Attribute("0.3", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17 'more variation'): depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
+	[Attribute("0", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17 'more variation'; 0.3 until user 2026-10-21 'the largest crater causes the issues, same size as v010'): depth x 1 +- this, random per crater (never over Max Depth). 0 = all the same.", category: "Craters")]
 	protected float m_fCraterDepthJitter;
 
-	[Attribute("0.35", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17; voxel craters roll 20-100 % of it each): outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
+	[Attribute("0.15", UIWidgets.EditBox, "Crater variation (0.15 until user 2026-10-17, 0.35 until 2026-10-21 = back to v010; voxel craters roll 20-100 % of it each): outline stretched up to this share by angle (random oval / three lobes, random turn). Only widens, so walls get no steeper. Shrinks where the outer edge would pass 3.95 m. 0 = round.", category: "Craters")]
 	protected float m_fCraterShapeJitter;
 
 	[Attribute("0.17", UIWidgets.EditBox, "Rim height as a share of the crater depth", category: "Craters")]

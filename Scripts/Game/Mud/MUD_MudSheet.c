@@ -30,7 +30,7 @@ class MUD_MudSheet
 	// SHEET LOCAL (SYNC false): client-only, no sync layer, the deposit band (tiles only where wheels went). Off = parked.
 	// SYNCED SHEET DS TEST (user 2026-10-21, v271 = before): on from the start with SYNC true = the synced sheet
 	// on every machine (server sync layer too). numpad 3 still switches to sheet local; its step 0 = off.
-	static bool ENABLED = false;
+	static bool ENABLED = true;
 	// SYNCED SHEET Stage 2 (2026-10-18, v179 = before): the drawn mud = the sync layer (MUD_MudSync: pressed from the
 	// replicated rut ops, the same on every machine) + this machine's own stamps at the tyres it sees (prediction),
 	// each dropped when the op holding it comes (SyncChanged) or it expires (ExpirePreds). No local slump (the sync
