@@ -175,3 +175,64 @@ Backup: Versions backup/v010_2026-10-12_2258_pre-voxel-test. Same project GUID 6
   v010: client 3.35 vs voxel 2.53, server 5.61 vs 3.27 ms/frame, 6 vs 0 corrections.
 - 'No performance issues in WB' is a WB impression; testing rules: WB is never a perf measure. Today's numbers say the
   difference is mostly the sheet (3.4-5.7 ms/frame) - v010 has no sheet at all.
+
+## 8. v010 test copy + 3-row DS session (built 2026-10-21, NOT compiled yet)
+
+Copy: addons/Mud v010 test (outside this repo, no git). The v010 backup as it was, plus this project's Assets and
+worlds/MudArland (missing from the backup; 0 refs left unresolved after the copy). addon.gproj: ID MudV010Test, GUID
+9022FE7FD05E72D3, title "Mud v010 test", same dependency. Same resource GUIDs as this project: open ONE of the two at a time.
+Changes in the copy, nothing else:
+- MUD_Prof.c copied from this build (SwitchTag -> " v010"). Same 5 s / parts / spikes / worst lines + per-frame CSV.
+- WorldGround EOnFrame: WHEELS (Wheels), AHEAD (AheadView + Ahead), REBUILD (Rebuild + nav; RB_NAV inside), FREE_NET
+  (FreeIdle + net), EndFrame. Rebuild: RB_INDEX (IdxSet), RB_MESH (BuildMesh), RB_SMOOTH (BeforeCollider + SmoothPatch),
+  RB_COLLIDER (BuildCollider). VOX / SHEET / LOOK / HOUSE / KEEPSCAN stay 0 (v010 has none of them).
+- Robot RUN_SEC 20 -> 120. MUD_AllowanceTest.ON and MUD_PredictionTest.OFF are both false (stock netcode).
+- Inference: worlds/MudArland is today's copy, not the 10-12 one (that one was never backed up).
+
+Session (DS, one client, robot 2 runs per row = 4 min; the current robot flips VIEW_TRIM / LOOK_PACE / LAYOUT_SPLIT
+between odd and even runs, so one of each):
+- Row A: current build, sheet OFF (no numpad 3 = parked default), fresh truck on grass, 2 robot runs.
+- Row B: current build, sheet local ON (numpad 3) + numpad * to set 19, same spot, 2 robot runs.
+- Row C: Mud v010 test project, fresh truck, same spot, 2 robot runs.
+Compare per row: 'MUD prof 5 s' MUD share + frame avg, 'MUD prof parts' (wheels / ahead / rebuild / rb mesh / rb collider),
+spikes, and the robot STOP corrections.
+
+## 9. DS session 2026-10-21 20:25-20:34: rows A / B / C, ONE robot run each (user: enough, 2 min each)
+
+Logs: current build client PeerPlugin1/logs/logs_2026-10-21_20-25-16, server server/logs/logs_2026-10-21_20-25-14
+(-addons Testingplanvechmsh); v010 client + server logs_2026-10-21_20-30-51 (-addons MudV010Test, CLI line checked).
+Windows = robot START -> STOP (client clock): A 20:25:58.9-20:27:58.9 (run 1, odd: VIEW_TRIM / LOOK_PACE / LAYOUT_SPLIT 1),
+B 20:28:12.8-20:30:12.8 (run 2, even: those 0; sheet local preset 1 20:28:05, 'set 19' line 20:28:09), C 20:31:45.3-20:33:45.3.
+Only 'MUD prof 5 s' blocks fully inside a window count, frame-weighted (parser scratchpad ds4.py).
+
+Client (the driving player):
+
+| Row | blocks | frame avg ms (fps) | frame max | engine render / GPU / sim ms | MUD avg ms | MUD worst ms | frames > 33 ms (MUD half+) | robot corrections |
+|---|---|---|---|---|---|---|---|---|
+| A current, sheet off | 24 | 11.17 (90) | 44 | 4.01 / 2.91 / 3.47 | 1.49 | 34 | 5 (0) | 0 |
+| B current, sheet local set 19 | 23 | 12.82 (78) | 61 | 3.65 / 1.01 / 7.42 | 5.36 | 53 | 258 (8) | 10 ('mine 1' lines in the whole 20:25 log: 12; v010 log: 0) |
+| C v010 | 23 | 10.40 (96) | 36 | 3.75 / 2.26 / 3.65 | 1.69 | 6 | 1 (0) | 0 |
+
+Client parts (avg ms per frame / worst ms in one frame):
+- A: rebuild 0.72/10 (rb mesh 0.50/7, rb collider 0.21/7), ahead 0.24/7, vox 0.10/3, op all 0.08/3, look ruts 0.08/1.
+- B: sheet 3.87/52 (sh upload 1.77/21, sh wheels 0.60/5, t quads 0.48/17, t engine 0.45/13, t setup 0.39/13, sh follow
+  0.17/9), rebuild 0.60/9, ahead 0.25/8, vox 0.19/6, op all 0.17/5, look ruts 0.06/1.
+- C: ahead 0.81/5, rebuild 0.60/5 (rb mesh 0.29/2, rb collider 0.21/2, rb smooth 0.07/2, rb index 0.03/3).
+
+Server (DS runs at a 30 fps cap: frame 33.33 ms in every row, so its 'over 33 ms' count means nothing):
+
+| Row | MUD avg ms | MUD worst ms | top parts (avg / worst) |
+|---|---|---|---|
+| A | 1.98 | 12 | wheels 0.81/7, rebuild 0.74/10 (rb collider 0.73/10), op all 0.30/6, ahead 0.14/7 |
+| B | 2.01 | 12 | wheels 0.85/8, rebuild 0.76/9 (rb collider 0.75/9), op all 0.32/7, ahead 0.10/8 |
+| C | 2.30 | 26 | rebuild 1.11/25 (rb collider 0.80/25, rb smooth 0.21/4, rb index 0.10/5), wheels 0.86/9, ahead 0.10/5 |
+
+Read:
+- The current ground with the sheet off costs about what v010 costs. Client MUD script 1.49 vs 1.69 ms, server 1.98 vs 2.30;
+  v010 has the worse single frames on the server (rebuild 25 ms worst). Client whole frame 11.17 vs 10.40 ms: the 0.8 ms
+  gap is not MUD script (MUD is 0.2 ms LOWER in A); it sits in render / GPU (4.01 / 2.91 vs 3.75 / 2.26) - inference: the
+  voxel brick / look-rut meshes drawn, unmeasured.
+- The sheet is the cost: B adds +3.9 ms MUD on the client (sheet 3.87), engine sim 3.47 -> 7.42, 258 frames over 33 ms, and
+  is the only row with robot corrections (10). The server does not run the sheet (B = A there).
+- Limits: one run per row. A and B differ in the robot's odd / even flip (VIEW_TRIM / LOOK_PACE / LAYOUT_SPLIT) and B started
+  ~24 m from A (<1038.7, 2565.2> vs <1045.5, 2589.3>; C <1035.8, 2605.4>). The world in C is today's copy.
