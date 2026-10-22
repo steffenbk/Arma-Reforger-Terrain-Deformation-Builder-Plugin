@@ -21,7 +21,10 @@ Prove or kill this. What matters for us: anything that varies BY POSITION at run
 cheap far / near mud look for our patch and sheet meshes.
 
 ## Read first
+- Branch: check out `displaced-ruts-partial-split` (git fetch first). All [repo] paths below are on that branch.
 - CLAUDE.md (hard limits, TESTING RULES, PvP only).
+- docs/superpowers/research/2026-10-16-custom-shaders.md: the proof behind "no custom shaders" (IDA + paks). Q3's
+  displacement / tessellation search is about built-in engine paths only - do not reopen custom shaders.
 - docs/superpowers/research/mud-gotchas.md: grep for 'IDA', 'MeshObject', 'decal', 'emat', 'SetObject', 'NOSHADOW'.
 - docs/superpowers/research/2026-10-15-rut-options-round2.md sec E: the earlier exe sweep found no footprints, no
   deformable snow and no runtime heightmap edit. Re-check it on the build you have.
