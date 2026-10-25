@@ -247,7 +247,7 @@ class MUD_GroundBuilder
 
 	//------------------------------------------------------------------------------------------------
 	//! Loose tile folder of the world's terrain: <world dir>/<terrain entity name>/.Data (a world finds its terrain
-	//! by location, Tools/mud_world_copy.py). Empty + why when the tiles are not loose files next to this world.
+	//! by location). Empty + why when the tiles are not loose files next to this world.
 	protected static string TilesDir(WorldEditorAPI api, string worldAbs, out string why)
 	{
 		string terrainName;
@@ -269,7 +269,7 @@ class MUD_GroundBuilder
 		string dir = worldAbs.Substring(0, slash + 1) + terrainName + "/.Data";
 		if (!FileIO.FileExists(dir + "/Terrain_0.ttile"))
 		{
-			why = string.Format("no %1/Terrain_0.ttile - the terrain is not this world's own (a parent world or a pak). Make a world copy first (Tools/mud_world_copy.py).", dir);
+			why = string.Format("no %1/Terrain_0.ttile - the terrain is not this world's own (a parent world or a pak). Use a world with its own terrain folder.", dir);
 			return string.Empty;
 		}
 		return dir;
@@ -689,7 +689,7 @@ class MUD_GroundBuilder
 		}
 		else
 		{
-			report += "FAIL  Terrain files: " + why + "\n      A world that uses another world's terrain (e.g. vanilla Arland) cannot be cut - it would change that map for everyone. Make your own world copy with its own terrain folder.\n";
+			report += "FAIL  Terrain files: " + why + "\n      A world that uses another world's terrain (e.g. vanilla Arland) cannot be cut - it would change that map for everyone. Use a world with its own terrain folder.\n";
 			bad = true;
 		}
 		if (ToolPath().IsEmpty())

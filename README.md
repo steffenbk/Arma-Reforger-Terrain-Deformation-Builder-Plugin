@@ -9,7 +9,7 @@ Deformable ground for Arma Reforger: vehicle ruts, craters, trenches, shovel dig
     takes it out again (Unbuild).
   - `MUD_RoadExportPlugin.c` - exports the world's road list.
 - `Tools` - python tools the build plugin runs (`mud_build.py`, `mud_holes.py`, `ttile_holes.py`,
-  `mud_world_copy.py`, `mud_roads.py`) and their tests.
+  `mud_roads.py`) and their tests.
 - `Prefabs`, `Assets`, `Configs`, `Common`, `Data`, `UI`, `Terrains` - mod content.
 
 ## Install
@@ -18,8 +18,7 @@ Deformable ground for Arma Reforger: vehicle ruts, craters, trenches, shovel dig
 - Arma Reforger Tools (Workbench) from Steam.
 - Python 3 (python.org). Tick **Add python.exe to PATH** in the installer. The tools use only the standard
   library, so nothing else needs to be installed.
-- Only for making a world copy (see step 3): the blender-mcp-BK folder with `tools/pakread.py`, which reads the
-  game paks. It is not published yet.
+- Your own map, with its own terrain (see step 3).
 
 ### 1. Get the mod
 Clone or download this repo into your Workbench addons folder:
@@ -36,21 +35,10 @@ git clone https://github.com/steffenbk/Terrain-deformation.git "%USERPROFILE%\Do
 2. Add Existing Project > pick `addon.gproj` in the folder above, then open it.
 3. Wait for the scripts to compile. The World Editor's Plugins menu now has the 'MUD Ground' entries.
 
-### 3. Have a world with its own terrain
-The build plugin cuts holes into the terrain files, so it only works on a world that owns its terrain
-(the terrain files sit next to the world file, in the mod). It refuses vanilla worlds such as Arland:
-changing those would change the map for everyone.
-
-- If your map is your own terrain: nothing to do.
-- If you want a vanilla map (for example Arland): make your own copy first with `Tools/mud_world_copy.py`.
-  Open a command prompt in the mod folder and run:
-
-  ```
-  python -I Tools/mud_world_copy.py --world worlds/Arland/Arland.ent --gm worlds/GameMaster/GM_Arland.ent --name MyArland --addon . --bk <path to blender-mcp-BK>
-  ```
-
-  Then **restart Workbench** (it has to learn the new world before it can load it) and open
-  `worlds/MyArland/MyArland.ent`. Point your scenario's SubScene parent at the line the tool prints.
+### 3. Use a world with its own terrain
+The build plugin cuts holes into the terrain files, so it only works on a world that owns its terrain:
+the terrain files sit in your mod, next to the world file. It refuses worlds that use another map's
+terrain (for example vanilla Arland), because changing those would change that map for everyone.
 
 ### 4. Build the ground into your world
 1. Open your world in the World Editor and save it (File > Save As if it is new).
@@ -71,7 +59,7 @@ Build again any time, for example after you change the map: Build always re-bake
 
 ### Troubleshooting
 - 'Workbench could not start python': install Python 3 with Add to PATH ticked, then restart Workbench.
-- 'the terrain is not this world's own': make a world copy (step 3).
+- 'the terrain is not this world's own': the world uses another map's terrain (step 3).
 - No 'MUD Ground' entries in the Plugins menu: the scripts did not compile. Look in the Workbench log
   (`Documents/My Games/ArmaReforgerWorkbench/logs`) for errors and for lines starting with 'MUD build:'.
 - Run the tool tests with `python -m pytest -q Tools` (needs `pip install pytest`).
