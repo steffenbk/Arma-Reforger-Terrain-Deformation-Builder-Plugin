@@ -1,0 +1,17 @@
+MetaFileClass {
+ Name "{509E5129F4148757}Prefabs/Mud/Kits/House_Village_E_1I01/House_E_1I01_p_L0_X3_Y0.et"
+ Configurations {
+  EntityTemplateResourceClass PC {
+  }
+  EntityTemplateResourceClass XBOX_ONE : PC {
+  }
+  EntityTemplateResourceClass XBOX_SERIES : PC {
+  }
+  EntityTemplateResourceClass PS4 : PC {
+  }
+  EntityTemplateResourceClass PS5 : PC {
+  }
+  EntityTemplateResourceClass HEADLESS : PC {
+  }
+ }
+}

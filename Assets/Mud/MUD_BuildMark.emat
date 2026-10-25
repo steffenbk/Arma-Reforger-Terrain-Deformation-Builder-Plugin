@@ -1,0 +1,11 @@
+MatCommon {
+ Color 1 0.6 0.05 1
+ Cull none
+ CastShadow 0
+ ReceiveShadow 0
+ OccludeRain 0
+ OccludeWetness 0
+ SpecularMul 0
+ DisableVertexColor 1
+ DisablePrexposure 1
+}

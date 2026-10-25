@@ -1,0 +1,13 @@
+GenericEntity {
+ ID "4D55444250463009"
+ components {
+  MeshObject "{4D55444250461009}" {
+   Object "{4D5544424F4E4509}Assets/Mud/BoneTile9.xob"
+   ClutterOccluder 1
+   BoundingBox AABBBoundingVolume "{4D55444250462009}" {
+    Mins -2.05 -1.5 -2.05
+    Maxs 2.05 1.5 2.05
+   }
+  }
+ }
+}

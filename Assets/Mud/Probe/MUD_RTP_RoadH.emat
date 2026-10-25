@@ -1,0 +1,9 @@
+MatPBRBasic {
+ Color 0.533 0.533 0.533 1
+ BCRMap "{56BF033FB432F292}Assets/Structures/Infrastructure/Roads/Data/Road_Dirt_01_BCR.edds"
+ NMOMap "{6E67B8AD6D45A00C}Assets/Structures/Infrastructure/Roads/Data/Road_Dirt_01_NMO.edds"
+ HeightMap "{88CCB8FFEB071F00}Assets/Structures/Infrastructure/Roads/Data/Road_Dirt_01_H.edds"
+ ParallaxScale 0.03
+ ParallaxMidlePlane 0.5
+ ParallaxShadowScale 0.6
+}

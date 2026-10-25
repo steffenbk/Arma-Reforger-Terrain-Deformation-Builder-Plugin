@@ -1,0 +1,30 @@
+GameEnvironmentProbeEntity {
+ ID "FB4B691778742468"
+ Priority 5
+ NearPlane 0.1
+ VisibleDistance 150
+ Rendering 0x25 0
+ InteriorProbe 1
+ LVReflectionBrightness -7
+ ReflectionDesaturation 0.5
+ LVDiffuseBrightness -5
+ DiffuseColor 0.141 0.144 0.147 1
+ DiffuseDesaturation 0.5
+ EnableHDRModifications 1
+ VisiblePercentWhite 96
+ VisiblePercentBlack 70
+ TopColorEV 1
+ TopAngleMax 72.581
+ TopAngleMin 53.13
+ TopAngleLerp 1
+ {
+  ProbeVolume {
+   ID "23D776284302B002"
+   coords 0 0 0
+   Box BoundingVolume "{6BC5E7FC83B6DCFC}" {
+    Size 5 3 5
+   }
+   BoxLerp 0.15
+  }
+ }
+}

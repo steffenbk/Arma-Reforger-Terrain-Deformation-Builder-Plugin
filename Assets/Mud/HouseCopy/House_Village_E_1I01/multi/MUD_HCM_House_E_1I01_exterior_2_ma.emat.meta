@@ -1,0 +1,17 @@
+MetaFileClass {
+ Name "{4D5543505F00001B}Assets/Mud/HouseCopy/House_Village_E_1I01/multi/MUD_HCM_House_E_1I01_exterior_2_ma.emat"
+ Configurations {
+  EMATResourceClass PC {
+  }
+  EMATResourceClass XBOX_ONE : PC {
+  }
+  EMATResourceClass XBOX_SERIES : PC {
+  }
+  EMATResourceClass PS4 : PC {
+  }
+  EMATResourceClass PS5 : PC {
+  }
+  EMATResourceClass HEADLESS : PC {
+  }
+ }
+}

@@ -10,6 +10,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 {
 	static const ResourceName PREFAB = "{4D55445452454E30}Prefabs/Mud/MudTrenchSite.et";
 	static const int MAX_SITES = 20;                // server-wide
+	static const int SITE_IDLE_S = 900;             // audit A5 2026-10-22: a site with no dig this long is deleted (dug pieces stay)
 	static const int SKIPPED = 99;              // > any MUD_TrenchPlan.MAX_LAYERS: a skipped piece counts as done
 	static const string SKIP_CHAR = "x";
 	// one char per layer count: more than 9 layers since 2026-10-13 (2.5 m = 10)
@@ -17,6 +18,9 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	// TEMP debug (user 2026-10-10 01:02): F in plan mode digs the whole trench at once. false = real play.
 	// 2026-10-11: false - Ctrl+F digs it at once instead (MUD_TrenchInstant), F = dig with the shovel.
 	static const bool DEBUG_INSTANT = false;
+	// Review F6 (2026-10-16): server check for a client's instant dig (Ctrl+F sends instant = true). true for testing;
+	// FLIP TO false BEFORE RELEASE (master list Lane 2) - then a client can't dig a whole trench at once.
+	static const bool ALLOW_INSTANT_DIG = true;
 
 	[RplProp(onRplName: "OnPlanRpl")]
 	protected string m_sPlan;           // MUD_TrenchPlan.Pack text
@@ -29,6 +33,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	protected ref MUD_TrenchGhosts m_Ghosts = new MUD_TrenchGhosts();
 	protected bool m_bDeleting;
 	protected int m_iId;                // server: log name
+	protected int m_iDugAt;             // server: tick of the placing or the last dig (A5 idle expiry)
 
 	protected static ref array<MUD_TrenchSiteComponent> s_aAll = {};   // every site on this machine
 	protected static int s_iNextId;
@@ -60,7 +65,10 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	{
 		m_Ghosts.Clear();
 		if (GetGame() && GetGame().GetCallqueue())
+		{
 			GetGame().GetCallqueue().Remove(DeleteSite);
+			GetGame().GetCallqueue().Remove(IdleCheck);
+		}
 		s_aAll.RemoveItem(this);
 		super.OnDelete(owner);
 	}
@@ -72,7 +80,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 		s_aAll.RemoveItem(null);
 		if (s_aAll.Count() >= MAX_SITES)
 		{
-			why = string.Format("%1 trench sites already (max %2)", s_aAll.Count(), MAX_SITES);
+			why = string.Format("%1 trench sites already (max %2; one goes after %3 min without a dig)", s_aAll.Count(), MAX_SITES, SITE_IDLE_S / 60);
 			return null;
 		}
 		MUD_TrenchLayout lay = new MUD_TrenchLayout();
@@ -146,8 +154,22 @@ class MUD_TrenchSiteComponent : ScriptComponent
 		if (m_Layout)
 			count = m_Layout.Count();
 		Print(string.Format("MUD trench site: %1 placed %2, pieces %3, red %4, layers %5", m_iId, m_sPlan, count, red, m_iLayers));
+		m_iDugAt = System.GetTickCount();
+		GetGame().GetCallqueue().CallLater(IdleCheck, 60000, true);
 		UpdateGhosts();
 		CheckFinished();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Server (audit A5): no dig for SITE_IDLE_S -> the site goes, so idle sites can't fill MAX_SITES for everyone
+	protected void IdleCheck()
+	{
+		if (m_bDeleting || System.GetTickCount(m_iDugAt) < SITE_IDLE_S * 1000)
+			return;
+		m_bDeleting = true;
+		GetGame().GetCallqueue().Remove(IdleCheck);
+		Print(string.Format("MUD trench site: %1 idle %2 s without a dig, deleting", m_iId, System.GetTickCount(m_iDugAt) / 1000));
+		DeleteSite();
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -265,6 +287,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 			SetDigit(piece, dug + 1);
 			Print(string.Format("MUD trench dig: site %1 piece %2 layer %3 / %4", m_iId, piece, dug + 1, m_iLayers));
 		}
+		m_iDugAt = System.GetTickCount();
 		Replication.BumpMe();
 		UpdateGhosts();     // own RplProp changes do not call the onRpl handler here
 		CheckFinished();

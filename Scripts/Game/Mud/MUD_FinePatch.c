@@ -25,18 +25,14 @@ class MUD_FinePatch
 	float m_aSmooth[1089];      // m_aH blurred for the collider
 	float m_aFloor[1089];       // deepest m_aH allowed (negative): Max Depth or a depth box
 	float m_aLock[1089];        // 0 = never moves (kept terrain border, building), 1 = free
-	float m_aRutTouch[1089];    // last m_fTime a wheel was on it
-	float m_aBermTouch[1089];
+	float m_aEdgeLock[1089];    // m_aLock without buildings (kept terrain border only): the rut floor, same on every machine
 	float m_aColH[1089];        // world Y of each vertex in the live collider (P1a wheel hold)
-	float m_aShow[1089];        // ahead ruts (TEST 2026-10-11): deformation the mesh shows while the vertex is hidden
-	float m_aHideAt[1089];      // ahead ruts: last m_fTime the vertex was in a wheel's hide corridor
-	float m_aScrapeTouch[1089]; // body scrape: last m_fTime an underside point was over it (one cut step per pass)
-	float m_aRutFrom[1089];     // m_aH when the current rut pass began (a moving press digs the full profile in one pass)
-	float m_aBermFrom[1089];    // m_aH when the current berm pass began
-	float m_aPendOrig[1089];    // ahead undo: m_aH before the first not-yet-reached ahead press (canonical At() copy only)
-	float m_aPendAt[1089];      // ahead undo: m_fTime of the newest pending ahead press on it, -1 = none
-	bool m_bColValid;           // m_aColH is the live body (false: no body yet, asleep, or it failed)
+	// press / ahead / scrape arrays (patch memory Stage 1, 2026-10-16): made on the first write, null = all default
+	// (~39 KB per patch saved where no wheel press, ahead hide, scrape or shown deformation ever touched it)
+	ref MUD_PatchPress m_Press;
+	bool m_bColValid;          // m_aColH is the live body (false: no body yet, asleep, or it failed)
 	int m_aCell[16];            // per skin cell (4 x 4): -1 = kept terrain, else slot | TLBR
+	int m_iRutMud;              // Build 3 Stage 4: rut mud cell mask of the last grid collider (-1 = no slot free; debug line on change)
 	float m_aCellSoft[16];      // 0 = hard (no ruts, no shovel) .. 1 = soft
 	int m_aCellHard[16];        // 1 = hard game material (int: a fresh bool array reads true)
 	ref array<ResourceName> m_aMats = {};   // collider surfaces, at most MUD_WorldGroundEntity.MAT_SLOTS
@@ -50,14 +46,55 @@ class MUD_FinePatch
 	bool m_bMeshDirty;
 	bool m_bColDirty;
 	bool m_bQueued;             // key is in MUD_WorldGroundEntity.m_aDirty
+	float m_fQueuedAt;          // m_fTime it entered m_aDirty (test kit 10 s line: oldest dirty age)
 	bool m_bDeformed;           // some vertex moved: kept for the match, sent to joiners
-	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - kept (not freed), may sleep; NOT sent / hashed
-	bool m_bTraceHidden;        // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
+	bool m_bFloor;              // RUT FIELD: a rut floor tile reaches it - may sleep, freed out of range (FLOOR_FREE); NOT sent / hashed
+	bool m_bFloorWait;          // RUT FIELD settle (MUD_WorldGroundEntity.FLOOR_SETTLE): only floor dirt, held until quiet
+	float m_fFloorFirstAt;      // m_fTime of the first held floor dirt (max wait)
+	float m_fFloorDirtAt;       // m_fTime of the newest floor dirt (quiet)
+	bool m_bLookDirty;          // client look ruts (MUD_LookRuts): mesh-only dirt, may build while the floor settle holds
+	float m_fLookSince = -1;    // TEMP delay meter 2026-10-18: m_fTime the oldest undrawn look segment's wheel passed (-1 none)
+	float m_fLookSpeed;         // TEMP delay meter: vehicle speed (m/s) of that cut
+	float m_fLookCutAt = -1;    // TEMP split delay meter: m_fTime of the first look mark since the last mesh build (-1 none)
+	bool m_bSheetHid;           // LAZY RUT MESH (MUD_MudSheet.LAZY_RUT_MESH): mesh hidden under the mud sheet, rebuilds held
+	bool m_bSheetCov;           // ... last answer of MUD_MudSheet.Covers for this patch (MUD_WorldGroundEntity.SheetCovered)
+	float m_fSheetAt = -100;    // ... m_fTime of that answer
+	int m_iSheetGen = -1;       // ... MUD_MudSheet.CoverGen at that answer
+	float m_fFieldSeenAt;       // RUT FIELD: m_fTime it was last in MUD_WorldGroundEntity.FieldDue's range (keeps a floor-only patch)
+	int m_iFarSides = -1;       // FAR PRESS: drawn neighbours (3 x 3 bits, (dz + 1) * 3 + dx + 1) at its last pressed mesh, -1 = none
+	int m_iLookSides = -1;      // LOOK LIFT gap (b): drawn neighbours (bits as m_iFarSides) at its last look lift mesh, -1 = none
+	float m_fFarAt = -100;      // FAR PRESS: m_fTime its last far press rebuild was sent
+	bool m_bTraceHidden;       // TRACEABLE cleared by MUD_WorldGroundEntity.SetTraceHidden, to restore
 	int m_iBuild;               // build steps left (MUD_WorldGroundEntity.BUILD_*): 0 = live, skin covered
 	int m_iBuildFails;          // collider steps that made no body
 	bool m_bAsleep;             // deformed, no vehicle near: no collider (skin collider under it), mesh kept
 	float m_fMeshAt = -100;
 	float m_fColAt = -100;
+	float m_fColBuiltAt = -100; // PAPER TEST 3: m_fTime of the last collider body actually built (m_fColAt also moves on a skip)
+	float m_fMeshBuiltAt = -100; // PERF IDEA 2: m_fTime of the last band mesh actually built (m_fMeshAt also moves on a skip;
+	                             // -100 after a grid mesh = no skip against it)
+	ref array<float> m_aMeshY;   // PERF IDEA 2: band mesher input Y per vertex of that build (made at the first band mesh:
+	                             // a DS never has one)
+	float m_fMeshHoldTo = -100;  // PERF IDEA 2 fix: a skipped patch is not picked by the mesh queue before this m_fTime
+	// REBUILD 5 (2026-10-19, v240 = before; MUD_WorldGroundEntity RUT_PACE / SAME_SKIP / PARTIAL_IN)
+	bool m_bRutMesh;             // option 1: the mesh dirt came from the rut floor alone (MarkFloorDirty) - RUT_MESH_EVERY pace
+	bool m_bPaceHeld;            // option 1 debug: the old pace would have built it already
+	// REBUILD 6 (2026-10-19): dirt kinds since the last mesh (cleared where m_bLookDirty is cleared after a build)
+	bool m_bHMesh;               // height dirt (MarkDirty own patch, DoVoxCells): LOOK_PACE keeps today's pace; REBUILD_WHY kind 4
+	bool m_bWhyLook;             // REBUILD_WHY: look cut (MarkLookDirty, since >= 0)
+	bool m_bWhySweep;            // REBUILD_WHY: look Sweep (MarkLookDirty, since < 0)
+	bool m_bWhyFloor;            // REBUILD_WHY: server rut floor (MarkFloorDirty)
+	bool m_bFlatFloor;           // COARSE_PLATE: every m_aFloor value equal (ApplyFloor, no depth box)
+	ref array<float> m_aMeshD;   // option 2 / 3: band mesher input D of the last band mesh (with m_aMeshY)
+	ref array<int> m_aMeshSkin;  // option 2 / 3: band mesher m_aSkin of that build
+	int m_iMBx0 = -1;            // option 3: patch-local vertex box whose mesh input changed since that build (-1 = none)
+	int m_iMBx1;
+	int m_iMBz0;
+	int m_iMBz1;
+	bool m_bMBoxAll = true;      // option 3: a change with no box since that build - the next one reads every vertex
+	bool m_bLastHideOwed;        // option 3: that build left hidden changes owed
+	bool m_bLastRfOn;            // option 3: that build read the rut floor / look ruts
+	float m_fHideUntil = -100;   // option 3: m_fTime until which a vertex may still be hidden (ahead ruts, HIDE_HOLD)
 	float m_fColChangeAt = -100;  // TEMP probe 2026-10-11: m_fTime a collider rebuild last moved a vertex
 	float m_fNearAt;            // m_fTime a vehicle was last near
 	// patch-local vertex rect whose m_aSmooth is stale (-1 = clean)
@@ -71,8 +108,132 @@ class MUD_FinePatch
 	int m_iNz0;
 	int m_iNz1;
 	bool m_bNetQueued;
-	ref MUD_IdxSet m_Idx;        // its layout's index lists (TEMP probe 2026-10-13, bricks: VOX layouts vary, the IDX_SETS ring
+	bool m_bNetRush;            // CRATER RUSH: the next heights message for it carries MUD_WorldGroundEntity.RUSH_BIT
+	bool m_bRush;               // CRATER RUSH: its key is in MUD_WorldGroundEntity.m_aRush
+	int m_iRushDone;            // RUSH SPLIT: bits of the live rush done (1 collider, 2 mesh), 0 when out of m_aRush
+	ref Resource m_HoldRes;     // CRATER HOLD: a built mesh not shown yet (MUD_WorldGroundEntity.HoldRelease shows it)
+	bool m_bHoldCover;          // CRATER HOLD: its skin cells get covered when the held mesh shows
+	ref MUD_IdxSet m_Idx;        // its layout's index lists (probe 2026-10-13, bricks: VOX layouts vary, the IDX_SETS ring
 	                            // alone thrashed); cleared when it sleeps (MUD_WorldGroundEntity.SleepPatch) to bound memory
+
+	//------------------------------------------------------------------------------------------------
+	//! The press arrays, made now if missing (writers)
+	MUD_PatchPress EnsurePress()
+	{
+		if (!m_Press)
+			m_Press = new MUD_PatchPress();
+		return m_Press;
+	}
+
+	// readers: null = the defaults MUD_PatchPress starts with
+	float RutTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aRutTouch[v];
+	}
+
+	float BermTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aBermTouch[v];
+	}
+
+	float Show(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aShow[v];
+	}
+
+	//! Mesh builds write every vertex: a 0 into a missing holder changes nothing, so it is made only for a non-0
+	void SetShow(int v, float d)
+	{
+		if (!m_Press && d == 0)
+			return;
+		EnsurePress().m_aShow[v] = d;
+	}
+
+	float HideAt(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aHideAt[v];
+	}
+
+	float ScrapeTouch(int v)
+	{
+		if (!m_Press)
+			return -100;
+		return m_Press.m_aScrapeTouch[v];
+	}
+
+	float RutFrom(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aRutFrom[v];
+	}
+
+	float BermFrom(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aBermFrom[v];
+	}
+
+	float PendOrig(int v)
+	{
+		if (!m_Press)
+			return 0;
+		return m_Press.m_aPendOrig[v];
+	}
+
+	float PendAt(int v)
+	{
+		if (!m_Press)
+			return -1;
+		return m_Press.m_aPendAt[v];
+	}
+
+	void ClearPend(int v)
+	{
+		if (m_Press)
+			m_Press.m_aPendAt[v] = -1;
+	}
+}
+
+//! MUD_FinePatch.m_Press: per-vertex arrays only the heightfield wheel press, ahead ruts / undo and body scrape use.
+//! Defaults as MUD_WorldGroundEntity.InitPatch set them before 2026-10-16.
+class MUD_PatchPress
+{
+	float m_aRutTouch[1089];    // last m_fTime a wheel was on it
+	float m_aBermTouch[1089];
+	float m_aShow[1089];        // ahead ruts (TEST 2026-10-11): deformation the mesh shows while the vertex is hidden
+	float m_aHideAt[1089];      // ahead ruts: last m_fTime the vertex was in a wheel's hide corridor
+	float m_aScrapeTouch[1089]; // body scrape: last m_fTime an underside point was over it (one cut step per pass)
+	float m_aRutFrom[1089];     // m_aH when the current rut pass began (a moving press digs the full profile in one pass)
+	float m_aBermFrom[1089];    // m_aH when the current berm pass began
+	float m_aPendOrig[1089];    // ahead undo: m_aH before the first not-yet-reached ahead press (canonical At() copy only)
+	float m_aPendAt[1089];      // ahead undo: m_fTime of the newest pending ahead press on it, -1 = none
+
+	//------------------------------------------------------------------------------------------------
+	void MUD_PatchPress()
+	{
+		for (int v = 0; v < 1089; v++)
+		{
+			m_aRutTouch[v] = -100;
+			m_aBermTouch[v] = -100;
+			m_aHideAt[v] = -100;
+			m_aScrapeTouch[v] = -100;
+			m_aPendAt[v] = -1;
+			m_aShow[v] = 0;
+			m_aRutFrom[v] = 0;
+			m_aBermFrom[v] = 0;
+			m_aPendOrig[v] = 0;
+		}
+	}
 }
 
 //! One triangle list, first m_iN entries used
@@ -119,12 +280,18 @@ class MUD_FineBuffers
 	vector m_aUnder[1089];      // groove layer, m_fRevealGap under the surface
 	vector m_aShell[1089];      // bullet slab: collider verts lowered by m_fBulletSlab, facing down
 	vector m_aPlate[1089];      // safety plate: base + floor - m_fPlateGap
+	vector m_aPlateC[25];       // REBUILD 6 COARSE_PLATE: the plate at the 5 x 5 skin corners (flat floor only)
+	int m_aPlateCI[96];         // REBUILD 6 COARSE_PLATE: 2 tris per plate skin cell
 	float m_aUVs[2178];         // surface: same UVs as the skin chunk under it (0..1 per 64 m chunk)
 	float m_aGrooveUVs[2178];   // groove layer: 0..1 per patch
 	int m_aIndices[6144];       // this patch's triangles, diagonal per skin cell
 	int m_aMeshIdx[6144];       // m_aIndices with kept-terrain cells collapsed to a point
 	int m_aShellIdx[6144];      // m_aIndices with the winding reversed
 	int m_aCellSlot[1024];      // collider slot per fine cell, -1 = kept terrain
+	ref MUD_IdxList m_RutRest = new MUD_IdxList();  // Build 3 Stage 4: one slot list without its rut mud cells
+	ref MUD_IdxList m_RutMud = new MUD_IdxList();   // Build 3 Stage 4: rut mud cells of every slot (one collider piece)
 	float m_aBlur[1521];        // smoothing window, up to 39 x 39
 	float m_aBlurRows[1287];    // smoothing X pass, up to 33 x 39
+	int m_aSteep[1521];         // STEEP WALLS: 1 = a step over MUD_TrenchWalls.STEP to the next window vertex (x or z)
+	int m_aSteepRows[1287];     // STEEP WALLS: m_aSteep dilated along x by the blur radius
 }

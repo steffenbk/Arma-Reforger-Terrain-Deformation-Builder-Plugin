@@ -14,7 +14,7 @@
 //! TRAIL (2026-10-14 22:45, user: "the mud is only one tile so it quickly disappears"; v053 = before): the sheet
 //! shifts by whole TILE_M tiles on a world grid; a tile a wheel touched stays behind as a frozen trail tile (its data
 //! kept, mesh still drawn; since MUD ZONES: no limit, zones bound it) and comes back to life when the sheet covers it again.
-//! MUD ZONES (2026-10-14 23:10, user pick B; plan docs/superpowers/plans/2026-10-14-mud-zones-plan.md; v055 = before):
+//! MUD ZONES (2026-10-14 23:10, user pick B; plan docs/superpowers/plans/old/2026-10-14-mud-zones-plan.md; v055 = before):
 //! mud only where a placed MUD_MudZoneEntity says so. Every zone tile is built at load (one per frame) and stored;
 //! the live window takes them out while it covers them and puts them back after. Window tiles outside every zone
 //! are hidden and give no drag. A tile fades only on sides where the next tile is not a zone tile. No trail limit.
@@ -22,8 +22,32 @@ class MUD_MudSheet
 {
 	// PARKED 2026-10-15 17:05 (user: ruts tank fps, jitter on a DS; checkpoint v083 = last sheet state). See
 	// docs/features/mud-sheet/README.md. true = mud sheet + ONE GRID back on.
-	static const bool ENABLED = false;
-	static const bool FOLLOW = true;            // live window under the vehicle (wheel marks + drag); false = only the zone tiles built at load show. Off 23:35 -> back on 23:42 (user: mud not pressed)
+	// SYNCED SHEET Stage 1 (user go 2026-10-17, v177 = before): back as a LOOK-ONLY layer - ONE_GRID, COLLIDE and
+	// DRAG_TEST off; the wheels and feet stand on the felt ground (heightfield + rut field) under the mud.
+	// PARKED AGAIN 2026-10-18 (user: 'park the mud zone, focus on voxel ruts'; v206 = last sheet state, step fix
+	// LIFT_BY_DRAWN built but the user still saw the step / pop). Lessons: docs/features/mud-sheet/README.md top.
+	// MUD LAB (2026-10-20, prompts/old/2026-10-20-local-mud-lab-stage1.md): runtime switch, only MUD_MudLab turns it on, as
+	// SHEET LOCAL (SYNC false): client-only, no sync layer, the deposit band (tiles only where wheels went). Off = parked.
+	// SYNCED SHEET DS TEST (user 2026-10-21, v271 = before): on from the start with SYNC true = the synced sheet
+	// on every machine (server sync layer too). numpad 3 still switches to sheet local; its step 0 = off.
+	// PARKED THIRD TIME 2026-10-21 (user: 'park the sheet again, focus on ruts, tunnels, trenches'; v275 = last sheet
+	// state with FAR PRESS built, not compiled). Code kept; true = the synced sheet DS test setup again.
+	static bool ENABLED = false;
+	// SYNCED SHEET Stage 2 (2026-10-18, v179 = before): the drawn mud = the sync layer (MUD_MudSync: pressed from the
+	// replicated rut ops, the same on every machine) + this machine's own stamps at the tyres it sees (prediction),
+	// each dropped when the op holding it comes (SyncChanged) or it expires (ExpirePreds). No local slump (the sync
+	// layer slumps per op). false = Stage 1 (local stamps + slump only).
+	static bool SYNC = true;                    // MUD LAB: false while sheet local runs (LabSet), back to true when off
+	static const float COVER_R = 0.3;           // SYNC: an own stamp whose middle is this close (m, x z) to an op segment is that op's
+	static const float PRED_GONE_S = 5;         // SYNC: an own stamp no op took goes after this (s) once its vehicle is gone or PRED_FAR m away
+	static const float PRED_FAR = 10;           //   (RUT_BEHIND: a parked truck's last segments are never cut, so no op ever takes them)
+	static const float PRED_MAX_S = 60;         // SYNC: ... and after this in any case
+	static const float PRED_PAD = 1.25;         // SYNC: m a stamp reaches past its segment (HALF_MAX ridge band + NOSE + FRONT_LEN)
+	static const int PRED_CAP = 4000;           // SYNC: most own stamps held (oldest go first)
+	static const int EXPIRE_BOX = 160;          // SYNC: cells a side of one restore box when expired stamps go
+	static const int REPLAY_CHUNK = 16;         // SYNC op split (2026-10-18): own stamps replayed per MUD_MudSync step
+	static const int REPLAY_HOLD_MS = 500;      // SYNC: an unfinished replay stops holding the upload after this
+	static const bool FOLLOW = true;           // live window under the vehicle (wheel marks + drag); false = only the zone tiles built at load show. Off 23:35 -> back on 23:42 (user: mud not pressed)
 	// user 2026-10-14 22:55: MUD_SheetMud.emat (ST_Mud_01) showed white; DirtCover_01 is the proven voxel dirt
 	static const ResourceName MAT = "{6EBF7ADA9FD582F7}Assets/Structures/Military/Fortifications/DirtMounds/Data/DirtCover_01.emat";   // = MUD_VoxelProbe.MAT_DIRT
 	static const int N = 81;                    // vertices per side (= the holder class sizes)
@@ -98,12 +122,13 @@ class MUD_MudSheet
 	// the cells between are filled from those; re-traces 40 -> 4 per frame (ground changes are rare: digs, craters)
 	static const int NEW_TRACES = 150;          // first ground traces per frame (cells never traced)
 	static const int OLD_TRACES = 4;            // re-traces per frame (round robin over the traced cells)
-	static const float MOVED = 0.08;            // ground under a mud cell moved more than this (m, trench / fill / crater): mud gone
+	static const float REGROUND_MAX = 100;      // m: biggest rut op box FloorChanged re-reads (synced sheet Stage 1)
+	static const float MOVED = 0.08;           // ground under a mud cell moved more than this (m, trench / fill / crater): mud gone
 	// COLLIDE (user 2026-10-15 "we just walk inside of it"): each mud tile gets a static trimesh on CharCollide
 	// (0x80000) = solid for Character + CharacterAI only (gproj matrix, mud-gotchas 2026-10-13). NOT FireGeo: every
 	// ground read of ours is a Projectile trace (GroundDown, Trace, MUD_Surface.Y ...) and would read the mud top as
 	// ground. The wheel raycast (VehicleCast) does not hit CharCollide; the Wheel preset geoms MAY touch it (unproven).
-	static const bool COLLIDE = true;            // PERF A/B 2026-10-15: off gave the same fps (38-48 driving)
+	static const bool COLLIDE = false;           // PERF A/B 2026-10-15: off gave the same fps (38-48 driving). Synced sheet: off (look only)
 	// CharCollide + Foliage: Foliage (0x40000) is the ExcludePhysicsLayer of CompartmentAccess_base.conf - without it
 	// get in / out is "Obstructed" on the mud (user 2026-10-15; same fix as mud-gotchas 2026-10-08 10:50)
 	static const int COLL_LAYER = 0x80000 | 0x40000;
@@ -154,12 +179,12 @@ class MUD_MudSheet
 	// HOLE_SKIP: a quad touching a Bare cell whose corners differ more than this in height (m) is not drawn - the
 	// mesh no longer stretches from the mud down into a dug hole / crater; the voxel wall shows there (0 = off).
 	static const float HOLE_SKIP = 0.2;
-	// ONE GRID proof (user 2026-10-15, plan docs/superpowers/plans/2026-10-15-one-grid-proof.md, checkpoint v072 =
+	// ONE GRID proof (user 2026-10-15, plan docs/superpowers/plans/old/2026-10-15-one-grid-proof.md, checkpoint v072 =
 	// before): in mud zones the sheet IS the ground. Once all zone tiles are built, the skin cells they fully cover go
 	// VOX (our patch mesh + collider out); the sheet draws bare cells at ground height, its collider is the ground
 	// (no mud) on the ground layer, and crater (0) / rut (4) ops in a zone change the sheet's ground (TakeOp), no
 	// voxels. SP only (the sheet is client-only). false = voxel + sheet as before.
-	static const bool ONE_GRID = true;
+	static const bool ONE_GRID = false;         // synced sheet 2026-10-18: off - every op goes to voxels / rut field (one ground, the same on the DS)
 	static const float ONE_DIP = 0.03;          // m: the tile side toward ground that is not ours dips this far under
 	static const float ONE_FLOOR = 3;           // = MUD_VoxelProbe.FLOOR
 	static const float ONE_FUNNEL = 0.5;        // = MUD_VoxelProbe.FUNNEL
@@ -178,8 +203,373 @@ class MUD_MudSheet
 	// neighbour disagree on the edge height, nothing is under the sheet any more): every tile hangs a dirt curtain
 	// this deep under its border, facing out. Render only (the collider is the ground, the same on both tiles).
 	static const float ONE_SKIRT = 0.45;
+	// SKIRT_ALL (2026-10-18, lazy A/B DS 13:38: see-through gaps only with the patch meshes hidden): the ONE_SKIRT curtain
+	// also when ONE_GRID is off (it is off since the synced sheet) - in the zone the sheet is the only drawn ground again
+	static const bool SKIRT_ALL = true;
 	static const int BUILD_MS = 8;              // zone tiles built per frame at load: until this many ms are used (~0.8 ms a tile)
+	// CAMERA RADIUS (synced sheet Stage 3, user 2026-10-18: 40 m; v182 = before): a zone tile has a mesh only while its
+	// middle is within RADIUS m (x z) of the camera - built on approach, nearest first, RAD_BUILD_MS a frame; past
+	// RADIUS + RADIUS_HYST the mesh goes. The mud itself lives in the sync layer (touched tiles only); a dropped tile
+	// keeps its own data only when it has bare cells (craters, digs: Stage 4 clears those from ops). No pre-build of
+	// every zone tile at load. ONE_GRID needs every tile built: it keeps the old pre-build.
+	static const bool RADIUS_ON = true;
+	static const float RADIUS = 40;
+	static const float RADIUS_HYST = 6;         // m past RADIUS before a mesh goes (no build / drop flicker at the edge)
+	static const float RADIUS_EVERY = 0.25;     // s between radius checks
+	// sheet perf fix 5 MESH KEEP (2026-10-18, WB 11:00 circle drive: 190-300 meshes dropped per 10 s and the same tiles
+	// built again, ~750 builds per 10 s at ~2.5 ms; v189 = before): a built mesh stays until more than MESH_CAP stored
+	// meshes exist; then the farthest past RADIUS + RADIUS_HYST go first. 0 = drop every mesh past the radius, as before.
+	// The test zone has 462 tiles, so nothing drops there.
+	static const int MESH_CAP = 600;
+	// FAR PRESS knob (plan plans/old/2026-10-21-far-press-plan.md, v274 = before): TEST_KIT numpad - flips the cap between
+	// MESH_CAP and MESH_CAP_ALT (own loops keep their meshes longer: fewer revisit pops). A new play goes back to MESH_CAP.
+	static const int MESH_CAP_ALT = 1500;
+	static int s_iMeshCap = MESH_CAP;
+	// FAR PRESS (research/2026-10-21-synced-sheet-server-research.md option A, plan plans/old/2026-10-21-far-press-plan.md,
+	// v274 = before): outside the drawn ring a track lives only in the sync layer, so it popped in at 20-40 m. Ground
+	// patch MESHES (client only, colliders untouched) are drawn pressed down by the sync layer's pressed depth
+	// (THICK - D) x FAR_PRESS_K x lock: a grass-free groove, soil from FIELD_SOIL_D deep. Under a drawn sheet tile the
+	// pressed patch stays below the sheet (or LAZY_RUT_MESH hides it). Off with SPARSE (its A2 lift owns the patch
+	// height). TEST_KIT numpad / flips s_bFarPress. false = nothing of it runs.
+	static const bool FAR_PRESS = false;     // parked with the sheet 2026-10-21 (never compiled / tested)
+	static bool s_bFarPress = FAR_PRESS;
+	static const float FAR_PRESS_K = 1.0;       // look knob: share of the pressed depth drawn
+	static const float FAR_PRESS_EVERY = 2;     // s between look rebuilds of one patch for far press
+	protected static int s_iMeshesStored;       // FAR PRESS meter: stored meshes at the last DropFar
+	// sheet perf fix 3 (2026-10-18; v188 = before, was 4): 2 ms a frame - fewer approach builds per frame while driving
+	static const int RAD_BUILD_MS = 2;          // ms of tile builds per frame on approach (at least one; ~2.9 ms a tile, DS 14:31)
+	// BUILD AHEAD (2026-10-18, research/2026-10-18-all-offroad-sheet-deep-dive.md fix 2): QueueNear orders by distance to
+	// a point AHEAD_S s ahead of the camera (max AHEAD_MAX m) instead of square rings round the camera
+	static const float AHEAD_S = 1.5;
+	static const float AHEAD_MAX = 20;
+	// SPEED RADIUS (fix 4): build radius = SPEED_RADIUS_K / speed (m/s), clamped RADIUS_MIN..RADIUS. Demand measured
+	// ~5.65 x speed tiles/s at 40 m; one build a frame ~50 / s -> K 320 (8 m/s still 40 m, 16 m/s 20 m). Built meshes still
+	// stay to RADIUS + RADIUS_HYST (DropFar unchanged). false = RADIUS always.
+	// SPARSE SHEET (option A + A2, user 2026-10-18 'do A with A2', research/2026-10-18-fixes-2-4-and-brainstorm.md sec 5):
+	// radius tiles are built only where the sync layer has mud data (MUD_MudSync.AnyTileNear = touched ground); untouched
+	// covered ground shows the ground patches, their MESH drawn PatchLift() higher (MUD_WorldGroundEntity, A2; colliders
+	// unchanged) so it meets the untouched sheet top. Patches over a sync tile stay unlifted (the sheet draws there).
+	// Needs SYNC + ALL_OFFROAD. false = every covered tile gets a sheet tile (H3, v202 = before).
+	static const bool SPARSE = false;   // WHOLE-MAP TEST (every offroad tile in RADIUS) - set back to true before commit
+	static const float PATCH_GAP = 0.03;        // m a lifted patch stays under the untouched sheet top (no z-fight)
+	// LIFT BY DRAWN (step fix, user 2026-10-18 'tiles pop in, height difference driven / not driven'): a patch is drawn
+	// unlifted only under a tile whose sheet mesh is ON SCREEN (live slot or stored, flag m_iUnlift / m_aSlotUnlift),
+	// told after the mesh is up; a dropped stored mesh stays visible until it is deleted (1 s) so the patch re-lifts
+	// under it first. Lift = untouched sheet top - LIFT_UNDER (was THICK - PATCH_GAP = 4 cm under it). LiftAt: a vertex
+	// drops only when every tile within one patch cell of it is drawn (no slope outside the sheet edge).
+	// false = A2 as v204 (unlift over sync tiles + the whole live window)
+	static const bool LIFT_BY_DRAWN = true;
+	static const float LIFT_UNDER = 0.01;
+	// LOOK LIFT: moved out to MUD_LookLift.ENABLED / LIFT_M on 2026-10-23 (was LOOK_LIFT_TEST / LOOK_LIFT_M here, a TEMP
+	// test since 2026-10-19; the user picked it as what ships - plans/2026-10-23-bone-tile-mud.md 'Look lift for real')
+	static const bool SPEED_RADIUS = true;
+	static const float SPEED_RADIUS_K = 320;
+	static const float RADIUS_MIN = 20;
+	static const float LOG10_S = 10;            // TEST_KIT: s between 'MUD sheet:' Stage 3 lines
+	// LAZY RUT MESH (Stage 3, user 2026-10-18 'hide it under the sheet, colliders stay immediate'): where the sheet
+	// draws over a whole ground patch (Covers), MUD_WorldGroundEntity holds that patch's mesh rebuilds and hides its
+	// stale mesh (an old mesh is higher than the pressed sheet and would poke through); it shows + rebuilds it once
+	// the sheet no longer covers it. Colliders rebuild as before. false = patch meshes as before.
+	static const bool LAZY_RUT_MESH = true;
+	// TEMP LAZY A/B (2026-10-18, user: see-through gaps at the rut sides while driving): LAZY_AB_S > 0 = lazy rut mesh on
+	// and off in turns of this many s (a hint says which). Off = the patch meshes under the sheet show + rebuild again:
+	// gaps gone when off = the sheet itself leaves the holes. 0 = LAZY_RUT_MESH as set.
+	static const float LAZY_AB_S = 0;     // A/B DS 13:38 done: gaps only with lazy ON -> skirts + gap probe
+	// EASE DROP (2026-10-18, user: 'it loads and then sinks down', hide it): when a rut op's floor cut lowers the ground
+	// under a live window cell by more than EASE_MIN, the drawn ground slides down over EASE_S s (smoothstep) instead
+	// of jumping. Look only (COLLIDE false, the sync layer never reads m_aG). Stored tiles still jump. 0 = off.
+	static const float EASE_S = 1.0;
+	static const float EASE_MIN = 0.01;
+	// RE-GROUND EXACT (2026-10-18): FloorChanged re-reads only sheet cells within REGROUND_R m of a changed floor sample
+	// (the floor is read between samples 0.25 m apart). false = the whole op box as before.
+	static const bool REGROUND_EXACT = true;
+	static const float REGROUND_R = 0.26;
+	protected int m_iReCells10;                 // log: cells re-read / ops in the 10 s 'MUD sheet gaps' line
+	protected int m_iReOps10;
+	protected int m_iLookCuts10;                // H2: look rut cells re-read / LookChanged calls (same line)
+	protected int m_iLookCells10;
+	protected static bool s_bLazyOn = true;
+	protected static int s_iLazyPhase = -1;
+	// SHEET LOCAL + DEPOSIT BAND (MUD LAB stage 1 part B, deep dive research/2026-10-20-mud-sheet-deep-dive.md sec 3):
+	// mud thickness = band(distance to the nearest cell a stamp wrote); band 1 within BAND_IN, a smooth fall to 0 at
+	// BAND_IN + BAND_FADE; at band 0 the surface sits BAND_UNDER under the ground (no step at the band edge). Tiles are
+	// born on the first stamp that reaches them (with the band margin); untouched ground has no tile.
+	static float BAND_IN = 0.4;                 // m (MUD_MudLab presets set it)
+	static float BAND_FADE = 0.8;               // m
+	static const float BAND_UNDER = 0.01;       // m the surface sits under the ground at band 0
+	static const int BAND_W = 49;               // TV + 2 x the biggest margin (ceil(2.0 / CELL) = 14)
+	static bool TOP_UV64 = true;                // sheet local: the MAT_TOP section uses the 64 m skin chunk UV frame
+	static const float TOP_UV_M = 64;           // = MUD_VoxelProbe.TOP_TILE (grass top UV span)
+	static const int LAB_PRESETS = 4;           // BAND_IN 0.4 / 0.8 x BAND_FADE 0.8 / 1.2
+	// MUD LAB part C cost levers (deep dive research/2026-10-20-mud-sheet-deep-dive.md sec 2): each its own switch,
+	// default off. TEST_KIT numpad 0 while sheet local runs (MUD_LabSheetLocal.Tick) cycles the sets
+	// none -> all -> L1 -> L2 -> L3 -> L6 -> L8 -> none; sheet local off (or a new play) = none.
+	static bool LEV_L1_CARRY = false;           // L1: slot dirty flags move with their tiles in Follow (no blanket dirty)
+	static bool LEV_L2_DRAG = false;            // L2: LimitDrag once per upload over the stamped cells + 1
+	static bool LEV_L3_SLUMP = false;           // L3: slump only changed cells + 1 ring, one pass at L3_FACTOR
+	static bool LEV_L6_EASE = false;            // L6: EaseTick at upload rate, not every frame
+	static bool LEV_L8_VEH = false;             // L8: near vehicles only, cached sims, map by vehicle, pruned
+	static const int LEVER_SETS = 6;
+	static const float L3_FACTOR = 0.6;
+	static const float VEH_NEAR_M = 10;         // L8: a vehicle origin this far outside the window still stamps
+	static const float VEH_PRUNE_S = 5;         // L8: dead / far vehicle entries go this often ...
+	static const float VEH_PRUNE_M = 50;        // ... when this far outside the near box
+	protected static int s_iLeverSet;
+	protected bool m_bSlotsKeep;                // L1: UpdateSlots leaves the dirty flags (Follow carried them)
+	protected ref MUD_MudSheetCells m_Drag = new MUD_MudSheetCells();     // L2: cells stamps wrote since the last upload
+	protected ref MUD_MudSheetCells m_Chg = new MUD_MudSheetCells();      // L3: cells changed since the last slump
+	protected int m_iSlumpGen;                  // L3: work set mark (m_Chg.m_aGen)
+	protected float m_fNextEase;                // L6
+	protected ref map<Vehicle, ref MUD_MudSheetVeh> m_mVeh = new map<Vehicle, ref MUD_MudSheetVeh>();   // L8
+	protected ref array<Vehicle> m_aNearVeh = {};                        // L8: this frame's near vehicles ...
+	protected ref array<VehicleWheeledSimulation> m_aNearSim = {};       // ... and their sims
+	protected float m_fVehPrune;
+	// MUD LAB part D (SHEET LOCAL only): far data + mesh radius
+	static const int TILE_DATA_CAP = 20000;     // data tiles kept (full stores + compact); the oldest compact ones go first
+	static const float MESH_R = 70;             // meshes only for tiles whose middle is within this of the camera
+	static const float MESH_DROP = 10;          // a mesh past MESH_R + this is deleted at once, its data compacted
+	static const int MESH_MS = 2;               // ms of radius builds per frame (at least one tile)
+	static const float FAR_R = 40;              // a stored tile built past this is built at 11 x 11, never upgraded
+	static const float FAR_H = 0.3;             // compact mud height range 0..FAR_H m (1 byte)
+	protected ref map<int, ref MUD_MudSheetFar> m_mFar = new map<int, ref MUD_MudSheetFar>();
+	protected ref array<int> m_aFarOrder = {};  // compact keys, oldest first
+	protected MUD_MudSheetFar m_TchFar;         // TouchStore's cache: the compact tile of m_iTchKey
+	protected int m_iFarIn;                     // 10 s: tiles compacted / expanded / dropped by the cap / far-ring builds
+	protected int m_iFarOut;
+	protected int m_iFarCap;
+	protected int m_iFarLow;
+	// MUD LAB part E (SHEET LOCAL only): remote trucks from the rut ops ("sync-lite", MUD_MudSync.RutOp -> OpStamps)
+	static const float OP_SPEED = 5;            // m/s: an op has no speed with the op tag off
+	static const float OP_RADIUS = 0.5;         // m: wheel radius for TyreHalf (no tyre in the op)
+	static const int OP_VEH = -1;               // GRADUAL pass vehicle of op stamps (own vehicles are >= 1)
+	static const float OWN_S = 20;              // s an own stamp covers op segments (the op's round trip, generous)
+	static const float OWN_PRUNE_S = 5;
+	static const float OP_EDGE_M = 1.5;         // m: a segment this far inside the window goes through Stamp
+	protected ref map<int, float> m_mOwn = new map<int, float>();     // own stamp cells (OwnKey) -> time
+	protected float m_fOwnPrune;
+	protected int m_iOpKey = -1;                // OpTile's one-tile cache
+	protected bool m_bOpMake;
+	protected MUD_MudSheetTileData m_OpD;
+	protected ref array<int> m_aOpShown = {};   // shown stored tiles this op changed
+	protected int m_iOpStamps;                  // 10 s
+	protected int m_iOpSkipOwn;
+	protected int m_iOpMs;
+	protected int m_iOpClears;
+	// MUD LAB EDGE AUDIT (sheet local meter, user 2026-10-20 DS screenshot: a striped wall along straight tile borders
+	// = the ONE_SKIRT curtain of a raised tile with nothing drawn beside it): each build keeps its border verts, the 10 s
+	// line says what is beside every raised one (ok / lower neighbour / no neighbour and why)
+	static const bool EDGE_AUDIT = true;
+	static const float EDGE_RAISED = 0.03;      // m over the ground: a border vert this high shows its skirt if open
+	static const float EDGE_STEP = 0.03;        // m: drawn neighbour this much lower = a visible step
+	protected ref map<int, ref array<float>> m_mEdgeRec = new map<int, ref array<float>>();   // TrailKey -> 12 x TV
+	protected static int s_iLabPreset;
+	// MUD LAB STAGE 2 (prompt prompts/old/2026-10-20-local-mud-lab-stage2.md, research/2026-10-20-sheet-local-edges-craters.md;
+	// checkpoint v255 = before): sheet local fixes, each its own switch, all default off. TEST_KIT numpad * (KC_MULTIPLY)
+	// while sheet local runs cycles the fix sets (FixApply); sheet local off (or a new play) = none.
+	// part A: tile-edge wall
+	static bool EDGE_COBUILD_PICK = false;      // A2: dirty band / stamp slots beside a picked wheel slot build with it
+	static bool EDGE_COBUILD = false;           // A3: a build whose border differs from the tile beside builds that one too
+	static bool SKIRT_APRON = false;            // A4: skirt bottom verts go out ~45 deg down to under the ground, own UVs
+	static bool EDGE_MATCH = false;             // A9: borders copy the drawn neighbour's; a border that must move rebuilds both now
+	static bool EDGE_OPEN_FADE = false;         // A8: a side whose neighbour is not drawn (and not built this upload) fades over EDGE
+	static bool EDGE_DRAPE = false;             // A7 (user idea 2026-10-20): skirt curves over and down as a quarter round (wins over A4)
+	static bool EDGE_DRAPE_FIT = false;         // stage 3 A10: skirt quads a drape cut at the cap left get the A4 apron shape
+	static bool EDGE_CO_SIDE = false;           // stage 3 A11: a co-build copies only the side(s) facing the tile(s) that asked
+	static bool EDGE_CORNER = false;            // stage 3 A12: a copied side also takes the neighbour's two corner verts
+	static bool PRE_LIVE_ONLY = false;          // stage 3 D1: no crater pre-build while joining or past PRE_FRAME_MAX notes a frame
+	static const int PRE_FRAME_MAX = 3;         // D1: crater notes per sheet frame (the rest take the normal go-live dig)
+	static bool BAND_BORN_FRONT = false;        // A5: a tile born / re-banded outside the window builds before the radius list
+	static const float EDGE_CO_STEP = 0.03;     // A3: m between our border vert and the neighbour's = co-build (EDGE_STEP)
+	static const int CO_MAX = 4;                // A3: stored neighbours built at once per upload; the rest are queued
+	// part B: crater delay (O1a / O1b / O1c of the research)
+	static bool CRATER_TRACE_NOW = false;       // B2: a now-slot not traced yet is traced / filled and built in the go-live
+	static bool CRATER_PREBUILD = false;        // B5: a crater's tiles build while the voxels build it (ahead), shown at its go-live
+	static const int PRE_MS = 5;                // B5: ms per frame for held now-slot builds, and again for held taper builds
+	static const int PRE_MAX_MS = 1000;         // B5: no go-live by then -> the held meshes show anyway
+	static bool PRE_COL_CACHE = false;          // B6: B5's voxel top reads take each grid column's top once per frame
+	static const int PRE_KEY = 40000;           // B6: grid column key gk * PRE_KEY + gi
+	static const float PRE_TOP_NONE = -99999;   // B6: cached 'no top' (TopAt false at that column)
+	static bool CRATER_TAPER_NOW = false;       // B3: the hole's taper tiles build in the go-live frame (cap below)
+	static bool CRATER_EASE_DROP = false;       // B4: a dig drops the running ground ease of every vertex it writes
+	static const int TAPER_NOW_MAX = 12;        // B3: at most this many taper tiles ...
+	static const int TAPER_NOW_MS = 15;         // ... and this many ms in the go-live frame
+	// part C: cost
+	static bool BAND_INCR = false;              // C1: band from a kept distance field, updated only round new touched cells
+	static bool BAND_MICRO = false;             // C2: BandTile reads the field directly, no Math.Min / Math.Cos
+	static bool BUILD_SKIP_SAME = false;        // C3: a rebuild that moves no vert 3 mm (classes same) keeps the old mesh
+	static bool UV64_FAST = false;              // C4: TOP_UV64 UVs into their own array (no x1e6 round trip via cix)
+	static bool BAND_STORED_HOLD = false;       // C5: band-only stored rebuilds obey SLOT_MIN_S
+	static const int LUT_N = 514;               // C1 / C2: band by distance, 32 steps a cell over 16 cells (+2)
+	protected static float s_aBandLut[514];
+	protected static bool s_bLutOk;
+	protected static int s_iDistGen;            // C1: a new value = every kept distance is stale (fix set, preset)
+	protected int m_iDistGen = -1;
+	protected ref MUD_MudSheetDist m_DistF;     // C1: window distances (Follow swaps them with m_DistT)
+	protected ref MUD_MudSheetDist m_DistT;
+	protected int m_aSlotDist[16];              // C1: 1 = the slot's window distances are current
+	protected ref array<int> m_aNewGi = {};     // C1: world cells touched since the last BandIncr
+	protected ref array<int> m_aNewGk = {};
+	protected ref array<int> m_aNewV = {};      // C1: scratch, their window index
+	protected bool m_bIncrMark;                 // C1: BandMark from a window stamp - live slots only get born
+	protected bool m_bBenchDone;                // C1: the TEST_KIT bench ran (once per instance)
+	protected int m_iIncrRuns;                  // C1 meters (10 s): BandIncr passes, box cells, slots dirtied, BandTiles
+	protected int m_iIncrCells;
+	protected int m_iIncrDirty;
+	protected int m_iIncrFull;
+	protected int m_aSlotSig1[16];              // C3: class signature of the live slot's last mesh (0 = unknown)
+	protected int m_aSlotSig2[16];
+	protected bool m_bSkipSame;                 // C3: BuildTileMesh kept the old mesh (m_SkipRes)
+	protected ref Resource m_SkipRes;
+	protected int m_iLowWas;                    // C3: d.m_iLow before this build
+	protected int m_iSkipSame;                  // C3 meter (10 s): builds that kept the old mesh
+	protected ref map<int, float> m_mStoredAt = new map<int, float>();   // C5: stored tile key -> its last build time
+	protected int m_iBandHeld;                  // C5 meter (10 s): band-only stored builds put off
+	static const int FIX_SETS = 21;
+	protected static int s_iFixSet;
+	// part A meters (10 s, LocalLog) and state
+	protected int m_iCoPick;                    // A2: slots picked beside a wheel slot
+	protected int m_iCoLive;                    // A3: live neighbours built in the same upload / next upload
+	protected int m_iCoStored;                  // A3: stored neighbours built now
+	protected int m_iCoCapped;                  // A3: stored neighbours queued (over CO_MAX)
+	protected int m_iCoStoredUp;                // A3: stored co-builds since the last upload (CO_MAX)
+	protected int m_iBornFront;                 // A5: front builds
+	protected bool m_bCoBuilding;               // A3: a co-build runs (it triggers no co-builds: no ping-pong)
+	protected bool m_bInUpload;                 // A3: Upload's slot loop runs (live neighbours join it)
+	protected bool m_bCoAny;                    // A3: some slot got m_aCoLive in this upload
+	protected int m_aCoLive[16];                // A3: 1 = build in this upload (co-build)
+	protected int m_aCoNext[16];                // A3: 1 = build at the next upload (co-build)
+	protected int m_aCoSide[16];                // stage 3 A11: sides (1 << S N W E) a live co-build copies unconditionally
+	protected int m_aCoNextSide[16];            // A11: the same for m_aCoNext
+	protected int m_iCoSideMask;                // A11: side mask of the co-build running now
+	protected int m_iCoLater;                   // A11: co-build sides over 3 cm sent to a later build (10 s)
+	protected int m_iApFrom;                    // A4 / A10: skirt verts the apron shape runs over (m_iApTo -1 = none)
+	protected int m_iApTo;
+	protected int m_iMj0;                       // A12: border verts a matched side moves (1..TQ-1, copying: 0..TQ)
+	protected int m_iMj1;
+	protected int m_aWheelSlot[16];             // A2: 1 = a wheel contact lies in the slot (this upload)
+	protected ref array<int> m_aFrontTx = {};   // A5: tiles built before the radius list
+	protected ref array<int> m_aFrontTz = {};
+	protected int m_iSkirtFrom;                 // A4: first skirt vert of the mesh being built
+	protected int m_iSkirtTix;                  // A7: first skirt index (tix) of the mesh being built
+	protected int m_aMatchCo[4];                // A9: sides (S N W E) whose neighbour this build co-builds now
+	protected int m_iMatchOs;                   // A9: EdgeNb's facing side of the neighbour
+	protected int m_iMatchCopy;                 // A9 meters (10 s): sides copied, sides moved (+ co-build), sides faded
+	protected int m_iMatchMove;
+	protected int m_iMatchFade;
+	protected int m_iOpenFade;                  // A8 meter (10 s): tile sides faded toward a neighbour not drawn
+	protected int m_iDrapeCut;                  // A7 meter (10 s): builds whose drape stopped at the vert / index cap
+	// builds by reason (MUD LAB part B step 3, every 10 s in Log10): what a BuildTile call was for
+	static const int BW_WHEEL = 0;
+	static const int BW_OLDEST = 1;
+	static const int BW_NEAREST = 2;
+	static const int BW_MESHLESS = 3;
+	static const int BW_FREEZE = 4;
+	static const int BW_RESTORE = 5;
+	static const int BW_SLUMP = 6;
+	static const int BW_BAND = 7;
+	static const int BW_FIT = 8;                // picked because no more than UPLOAD_SLOTS slots were dirty
+	static const int BW_HOLE = 9;               // crater / dig: built in the blast frame (DoDigNow)
+	static const int BW_OP = 10;                // MUD LAB part E: a remote truck's rut op (OpStamps)
+	static const int BW_COBUILD = 11;           // MUD LAB stage 2 part A: built beside a tile (EDGE_COBUILD_PICK / EDGE_COBUILD)
+	static const int BW_N = 12;
+	// slot dirt sources (m_aSlotWhy bits): which marks made a live slot dirty since its last build
+	static const int WHY_STAMP = 1;
+	static const int WHY_SLUMP = 2;
+	static const int WHY_BAND = 4;
+	static const int WHY_OTHER = 8;
+	protected static int s_iSlumpMsAll;         // running totals (MUD_MudLab 10 s deltas)
+	protected static int s_iBandMsAll;
+	protected bool m_bLocal;                    // this instance runs sheet local (ENABLED and not SYNC at its start)
+	protected ref map<int, int> m_mBorn = new map<int, int>();       // TrailKey -> 1: tile born (a stamp reached it)
+	protected ref array<int> m_aBandQ = {};     // stored tiles whose band must be computed again
+	protected ref map<int, int> m_mQWhy = new map<int, int>();       // QueueBuild key -> BW_* (none = restore)
+	protected int m_aSlotBand[16];              // 1 = live slot's band must be computed again
+	protected int m_aSlotWhy[16];               // WHY_* bits since the slot's last build
+	protected int m_aPickWhy[16];               // BW_* of this upload's pick
+	protected int m_aSlotNow[16];               // 1 = hole in this slot: build it in the blast frame (DoDigNow)
+	protected int m_iMarkWhy = 8;               // WHY_* MarkRect adds (WHY_OTHER unless a caller sets it)
+	protected int m_iBuildWhy = 5;              // BW_* the next BuildTile counts (BW_RESTORE unless a caller sets it)
+	protected int m_aBuildsBy[12];              // builds by reason, this 10 s
+	protected bool m_bMarkNow;                  // MarkRect also flags m_aSlotNow (hole marks in a go-live)
+	protected bool m_bQueueFront;               // QueueBuild puts the key at the FRONT of m_aOneBuild (DigNow taper neighbours)
+	protected ref array<vector> m_aPreLo = {};  // B5 CRATER_PREBUILD: crater ops seen at Submit (TakeOp), not live yet
+	protected ref array<vector> m_aPreHi = {};
+	protected ref array<vector> m_aPreWp = {};
+	protected ref array<float> m_aPreR = {};    // its crest radius (CraterCrest, as the go-live passes)
+	protected ref array<int> m_aPreSt = {};     // 0 seen, 1 dug ahead (its GroundChanged at the go-live is skipped)
+	protected ref map<int, int> m_mPreTiles = new map<int, int>();   // TrailKeys whose builds are held (m_bPreWin)
+	protected ref array<IEntity> m_aHoldEnt = {};          // B5: held builds - entity, mesh (null = hide), TrailKey
+	protected ref array<ref Resource> m_aHoldRes = {};
+	protected ref array<int> m_aHoldKey = {};
+	protected ref array<ref Resource> m_aHoldOld = {};
+	protected ref array<ref Resource> m_aLostOld = {};     // B5: shown meshes of moved held tiles, kept one more window     // B5: the mesh te shows now - kept alive until the swap
+	protected bool m_bPreWin;                   // B5: builds of m_mPreTiles are held until the go-live (PreClose)
+	protected bool m_bPreDig;                   // B5: DigNow / HoleGround read the voxel data uncached (PreSurf)
+	protected int m_iPreT0;                     // B5: tick the hold window opened
+	protected int m_iNowBudget;                 // B5: BuildNowSlots ms cap (0 = none)
+	protected int m_iTaperCap;                  // B5: TaperNow ms cap, quiet (> 0), no cap, quiet (< 0), as before (0)
+	protected int m_iPreOps;                    // B5 meters, per window
+	protected int m_iPreHeld;
+	protected int m_iPreFrames;
+	protected int m_iPreDigMs;                  // B5 meters: ahead dig ms (all, worst frame) per window
+	protected int m_iPreDigWorst;
+	protected static ref map<int, float> s_mPreTop = new map<int, float>();   // B6: column top this frame (PreNode)
+	protected static int s_iPreReads;           // B5 / B6 meters per window: PreSurf reads, cache misses -> plain TopAt
+	protected static int s_iPreFall;
+	protected int m_iWouldSkip;                 // builds whose drawn heights changed less than WOULD_SKIP_M
+	static const float WOULD_SKIP_M = 0.003;
+	protected int m_iTouchCells;                // cells touched (all time)
+	protected bool m_bTouchNew;                 // the stamp running now touched a new cell
+	protected int m_iBornWait;                  // log: uploads a born slot waited for its traces (10 s)
+	// stage 3 Part 0 TURN METER (TEST_KIT, print only): edges per motion bucket (0 straight, 1 turning, 2 stopped)
+	static const int TURN_K = 10;               // counters per bucket: frames, checks, raised, step, open, corner,
+	                                            // drape cut, skirt quads left, co-copy over 3 cm, born waits
+	static const float TURN_DEG_S = 8;          // smoothed heading change at or over this = turning
+	protected ref array<int> m_aTurnN = new array<int>();
+	protected ref array<float> m_aTurnMax = new array<float>();     // per bucket: biggest step (m)
+	protected float m_fTurnYaw = -1000;         // last heading of the followed vehicle (deg)
+	protected float m_fTurnT;
+	protected float m_fTurnRate;                // smoothed turn rate (deg/s)
+	protected int m_iTurnB = 2;                 // bucket of this frame
+	protected bool m_bTurnBuilt;                // Upload built a live slot
+	protected bool m_bTurnCo;                   // BuildTileMesh: this co-built side copied over a > 3 cm step
+	protected int m_iTurnMs;
+	// stage 3 Part 0 D meter (TEST_KIT): crater notes (PreNote), 10 s
+	protected int m_iDNotes;
+	protected int m_iDJoin;
+	protected int m_iDFrameN;
+	protected int m_iDFrameMax;
+	protected int m_iDCapDrop;
+	protected int m_iPreFrameN;                 // stage 3 D1: crater notes this sheet frame
+	protected int m_iPreSkip;                   // D1: notes left to the normal go-live dig (10 s)
+	protected int m_iTchKey = -1;               // TouchAt cache
+	protected MUD_MudSheetStore m_TchSt;
 	static const float UPLOAD_EVERY = 0.1;      // s between mesh rebuilds (10 Hz, as the KB mud tile)
+	// S1 perf 2026-10-18 (research/2026-10-18-mud-zone-rut-perf.md; WB 10:24 run: ~67 live slot builds/s x 1.5 ms =
+	// most of the sheet's 'upload' 600 ms per 5 s): at most UPLOAD_SLOTS mud slots rebuild per upload - the ones
+	// nearest a vehicle, plus the longest-waiting one; the rest stay dirty for the next upload (look only). A slot
+	// without a mesh (just entered the window) always builds. 0 = every dirty slot, as before (v187).
+	static const int UPLOAD_SLOTS = 3;
+	// WHEEL TILES FIRST (DS 2026-10-18 12:15, research/2026-10-18-sheet-alternatives-and-perf.md sec 13: own stamp -> drawn
+	// tile max 0.9-9 s, user screenshot = no mud under the front wheel, then it pops in): every dirty zone slot with a wheel
+	// contact in it builds at each upload, on top of UPLOAD_SLOTS (at most this many; 0 = off = before, v193)
+	static const int WHEEL_SLOTS_MAX = 6;
+	// D1 2026-10-18 (A2 DS 15:26: upload 1.2-2.0 ms a frame, wheel slots rebuilt at every 0.1 s upload): a zone slot that
+	// already has a mesh rebuilds at most every SLOT_MIN_S (wheel slots too); new slots always build. 0 = off (v203)
+	static const float SLOT_MIN_S = 0.25;
+	// D1 fix (DS 15:37, user: 'a wave behind us'): with wheel slots held too, own wheel stamp -> drawn tile went 80 -> 250 ms
+	// avg (0.4 -> 1-2.5 m behind the wheel, ruts came in 0.25 s chunks). true = a slot with a wheel contact skips the hold
+	static const bool SLOT_MIN_WHEEL_FREE = true;
+	// sheet perf fix 2 (2026-10-18, MUD_Prof WB 10:48: 'sh stored' worst 13-32 ms in one frame): stored tile rebuilds
+	// (sync restore, trench / fill) stop once STORED_MS is used in a frame (at least one build); the rest wait for the
+	// next frame. 0 = all at once, as before (v188).
+	static const int STORED_MS = 3;
+	// sheet cost A5 (2026-10-19, prompts/old/2026-10-19-local-sheet-cost-followup-v2.md Part A; v239 = before): a stored tile
+	// rebuild (FlushOneBuild) waits while the tile was not drawn last frame (IEntity.IsRendered, SET_RENDERED set at
+	// spawn), as MUD_WorldGroundEntity.RenderWait does for patches. Only tiles with a mesh that are shown; always built
+	// within STORED_GATE_NEAR m of the camera. Live window slots never wait (they are not built here). false = off.
+	static const bool STORED_RENDERED_GATE = false;
+	static const float STORED_GATE_NEAR = 15;
 	// FREEZE TEST (TEMP 2026-10-15): mesh rebuilds (Upload, incl. colliders) paused every other FREEZE_CYCLE s; all
 	// script work still runs and the tiles stay drawn. PERF line splits fps live vs frozen: frozen much higher =
 	// rebuild cost, same = cost of drawing the mud tiles (DYNAMIC_VERTEXES is no way out, mud-gotchas 2026-10-15)
@@ -191,13 +581,36 @@ class MUD_MudSheet
 	// material); pressed / pushed / dragged / blasted quads with MAT (dirt). Two sections, two emats (same emat on two
 	// sections crashes - mud-gotchas 2026-10-14 G2).
 	static const bool TOP_LOOK = true;
+	// D2 2026-10-18: the TEMP GAP PROBE costs an array + a map entry per tile build; off unless gaps are hunted again
+	static const bool GAP_PROBE = false;
+	// PAPER TEST 1 (2026-10-18, research/2026-10-18-mud-mesh-cost-research-findings.md): BuildTileMesh fast paths, same
+	// mesh (untouched cells skip the dirt score maths, a tile with no open side skips the edge fade, bare flags read once
+	// per vertex). s_bFastBuild switches them at run time; the TEST KIT bench A/Bs old vs fast on one live tile
+	protected static bool s_bFastBuild = true;
+	static const float BENCH_EVERY_S = 30;      // TEST KIT bench: BENCH_N old + BENCH_N fast builds of one live tile; 0 = off
+	static const int BENCH_N = 16;
+	protected float m_fBenchAt = -1;
+	protected int m_iBenchOldMs;
+	protected int m_iBenchFastMs;
+	protected int m_iBenchRuns;
+	// PAPER TEST 2: a stored tile further than LOD_M from the camera builds at 2 x CELL (0.3 m, no cuts); Radius queues a
+	// full rebuild once the camera is within LOD_M - LOD_BACK. false = off (v204)
+	static const bool LOD_ON = true;
+	static const float LOD_M = 20;
+	static const float LOD_BACK = 3;
+	protected vector m_vLodCam;
+	protected bool m_bLodCam;
+	protected int m_iLodLow;                    // log: low builds per 10 s
+	protected int m_iLodUp;                     // log: low tiles queued for a full rebuild per 10 s
+	protected int m_iLiftTold;                  // log: LIFT BY DRAWN patch tells per 10 s
+	protected int m_iLowNow;                    // low tiles stored now (LodUpgrade skips its loop at 0; recounted every 10 s)
 	static const ResourceName MAT_TOP = "{D6FF1C7CCAA00596}Common/Materials/default_MatTerrainObj1.emat";   // = MUD_VoxelProbe.MAT_TOP
 	static const float TOUCH = 0.01;            // m off THICK (or any texture drag, or blasted) = a dirt quad
 	static const float THICK = 0.15;            // soft dirt layer on the hard ground (m)
 	// MUD DRAG TEST (2026-10-14, SP only; shape from MudRunner sub_140930110, research/2026-10-14-mudrunner-ida.md):
 	// the wheels stand on the hard ground, so they already look sunk THICK; the mud only adds drag by submerged area
 	// (front: tyre width x depth, side: pi x radius x depth), speed above 1 m/s counted as v^0.75, and less engine.
-	static const bool DRAG_TEST = true;          // PERF test 2026-10-15: off gave the same fps in mud (39-49)
+	static const bool DRAG_TEST = false;         // PERF test 2026-10-15: off gave the same fps in mud (39-49). Synced sheet: off (no forces)
 	static const float SLOW = 0.4;              // m/s2 slowing per (m/s)^0.75 with all wheels in fresh THICK mud
 	static const float SLOW_MAX = 4;            // most slowing the mud can give the whole vehicle (m/s2)
 	static const float DRAG_MIN_DEPTH = 0.025;  // MudRunner: no mud force below this depth
@@ -242,11 +655,48 @@ class MUD_MudSheet
 	// window at x 1044 "16 of 16 in a zone", zones end x 1029; int copy 8, bool copy 16) - mud-gotchas 2026-10-15
 	protected int m_aSlotZone[16];              // 1 = live window slot is a zone tile (TILES x TILES)
 	protected int m_aSlotDirty[16];             // 1 = live window slot needs a new mesh
+	protected int m_aSlotReady[16];             // LAZY RUT MESH: 1 = live slot's mesh is up with every cell traced (Covers)
+	protected int m_aSlotWait[16];              // S1: uploads this dirty slot was passed over (longest-waiting gets one build)
+	protected int m_iUpSkipped;                 // S1 log: slot builds put off to a later upload, per 5 s
+	protected int m_aPick[16];                  // S1: 1 = Upload builds this dirty slot now (UploadPick); 2 = D1 held
+	protected int m_aSlotUnlift[16];            // LIFT BY DRAWN: 1 = patches were told this slot's mesh is on screen
+	protected int m_aSlotBuiltMs[16];           // D1: m_fLast (ms) of the slot's last build (int: member float arrays untested)
+	protected int m_iUpThrottled;               // D1 log: dirty slot passes held by SLOT_MIN_S, per 10 s
+	protected static int s_iCoverGen;           // LAZY RUT MESH: +1 whenever sheet cover may have shrunk (CoverGen)
+	protected static ref array<int> s_aCoverNo = {0, 0, 0, 0, 0, 0}; // R5 log (CoverWhy): Covers answers - 0 yes, 1 too big, 2 zone edge, 3 bare near,
+	                                            // 4 live slot not ready, 5 stored tile without its mesh
 	protected bool m_bZonesQueued;
 	protected ref array<int> m_aBuildTx = {};   // zone tiles still to build at load
 	protected ref array<int> m_aBuildTz = {};
 	protected int m_iZoneTiles;
 	protected ref array<MUD_MudZoneEntity> m_aZones = {};
+	protected float m_fNextRad;                 // CAMERA RADIUS: time of the next check
+	protected vector m_vRadPrev;                // SPEED RADIUS: camera at the last check
+	protected float m_fRadPrevT;                // SPEED RADIUS: time of the last check (0 = none yet)
+	protected vector m_vRadVel;                 // SPEED RADIUS: smoothed camera velocity x z (m/s)
+	protected float m_fRadBuild;                // SPEED RADIUS: build radius now (0 = RADIUS)
+	protected int m_iRadQueued;                 // log: build list size at the last radius check
+	// TAPER trim (Stage 3): tiles a voxel change may have bared (TrailKey -> 1, never cleared); TaperField skips a tile
+	// with none of these round it. m_bBareAll: a change box too big to mark - every tile tapers (old way)
+	protected ref map<int, int> m_mBareTiles = new map<int, int>();
+	protected bool m_bBareAll;
+	// Stage 3 log (TEST_KIT, LOG10_S): tile builds, their ms, own stamps replayed, meshes dropped
+	protected float m_fSt10T = -1;
+	protected int m_iSt10Builds;
+	protected int m_iSt10BuildMs;
+	protected int m_iSt10BuildMax;
+	// TEMP GAP PROBE (2026-10-18): live builds that left quads undrawn for an untraced corner, those quads; max height
+	// gap (m) between a built tile's border and its neighbour's last-built border (-10000 = untraced vertex)
+	protected int m_iGapLiveBuilds;
+	protected int m_iGapBuildsUnt;
+	protected int m_iGapUntraced;
+	protected int m_iGapUntracedMax;
+	protected int m_iGapUntNow;     // untraced quads of the build running now (was a local: 64-locals limit)
+	protected float m_fGapEdgeMax;
+	protected int m_iGapEdgeOver;               // builds with an edge gap > 2 cm
+	protected ref map<int, ref array<float>> m_mGapEdge = new map<int, ref array<float>>();   // TrailKey -> S N W E border y (4 x TV)
+	protected int m_iSt10Replay;
+	protected int m_iSt10Drops;
 	// voxel ground changes (GroundChanged): per change its x, z box, blast middle and radius (0 = no blast)
 	protected ref array<vector> m_aChgLo = {};
 	protected ref array<vector> m_aChgHi = {};
@@ -303,6 +753,10 @@ class MUD_MudSheet
 	protected bool m_bIdxDirty;                 // traced set changed: rebuild the index buffer
 	protected int m_iUntraced = NN;             // cells with no ground yet (0: Grounds skips the scan)
 	protected float m_fLast = -1;
+	protected ref map<int, ref MUD_MudSheetEase> m_mEase = new map<int, ref MUD_MudSheetEase>();   // EASE DROP: PassKey -> slide
+	protected int m_iAbPhase = -1;              // TEST KIT render A/B: 0 = stored meshes shown, 1 = hidden
+	protected float m_fAbNext;                  // next re-apply of the hide (new builds show themselves)
+	protected ref array<IEntity> m_aAbHidden = {};   // meshes RenderAB hid (only these are shown again)
 	protected float m_fStatT;
 	protected int m_iStatFrames;
 	protected int m_iStatMs;
@@ -319,6 +773,45 @@ class MUD_MudSheet
 	protected int m_iStatSinkN;
 	protected float m_fStatSinkMin = 1000;
 	protected float m_fStatSinkMax = -1000;
+	// SYNC (Stage 2): own stamps waiting for their op, oldest first; the replay clip (window cells); log counts
+	protected ref array<ref MUD_MudSheetPred> m_aPred = {};
+	protected float m_fNextExpire;
+	protected bool m_bClip;
+	protected int m_iClipI0;
+	protected int m_iClipI1;
+	protected int m_iClipK0;
+	protected int m_iClipK1;
+	// SYNC op split: own stamps still to replay after an op's restore (SyncBegin -> SyncReplay chunks), its world cell
+	// box, and the upload hold while they run (no frame shows the box without them)
+	protected ref array<ref MUD_MudSheetPred> m_aReplay = {};
+	protected int m_iReplayAt;
+	protected int m_iRpGi0;
+	protected int m_iRpGi1;
+	protected int m_iRpGk0;
+	protected int m_iRpGk1;
+	protected bool m_bReplayHold;
+	protected int m_iReplayHoldAt;              // System.GetTickCount when the hold began
+	// TEMP delay meter (2026-10-18, user: ruts show a little after the wheel), per Log10 window
+	protected ref map<int, float> m_mDlStampT = new map<int, float>();   // world tile key (tx * 20000 + tz) -> time of its first undrawn own wheel stamp
+	protected ref map<int, float> m_mDlSpeed = new map<int, float>();    // ... that stamp's wheel speed (m/s)
+	protected float m_fDlSum;                   // own wheel stamp -> its live tile mesh drawn (s)
+	protected float m_fDlMax;
+	protected float m_fDlDist;                  // that delay x the wheel speed (m)
+	protected int m_iDlN;
+	protected int m_iDlDue;                     // frames an upload was due but held by an op's replay
+	protected int m_iDlHolds;                   // replay holds ended (done or stuck), their ms
+	protected int m_iDlHoldMs;
+	protected int m_iDlHoldMax;
+	protected int m_iDlStuck;                   // ... of them let go by REPLAY_HOLD_MS
+	protected int m_iDlWheelPicks;              // slots WHEEL TILES FIRST picked
+	protected int m_iStatCovered;
+	protected int m_iStatExpired;
+	protected int m_iStatReplayed;
+	protected int m_iStatResync;
+	protected int m_iStatResyncMs;
+	protected int m_iStatStoredRe;
+	protected int m_iSt10StoredHeld;            // A5: stored builds held (not rendered), tile-frames per 10 s
+	protected ref array<int> m_aHeldBuild = {};  // A5: keys held this FlushOneBuild (queued again at its end)
 
 	//------------------------------------------------------------------------------------------------
 	//! OFF_TEST: fps, worst frame and top vehicle speed per 5 s, nothing else
@@ -355,19 +848,157 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Synced sheet Stage 3 line (TEST_KIT, every LOG10_S s). PERF numbers: judge them only on a DS / uploaded mod
+	//! client, never in Workbench (project testing rule 2026-10-16).
+	protected void Log10(float time)
+	{
+		if (m_fSt10T < 0 || time < m_fSt10T)
+			m_fSt10T = time;
+		if (time - m_fSt10T < LOG10_S)
+			return;
+		m_fSt10T = time;
+		int meshes = 0;
+		int kept = 0;
+		foreach (int key : m_aTrailOrder)
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st)
+				continue;
+			if (st.m_Ent)
+				meshes++;
+			else
+				kept++;
+		}
+		int live = 0;
+		if (m_bPlaced)
+		{
+			for (int t = 0; t < TILES * TILES; t++)
+			{
+				if (m_aSlotZone[t] != 0)
+					live++;
+			}
+		}
+		float mean = m_iSt10BuildMs;
+		if (m_iSt10Builds > 0)
+			mean /= m_iSt10Builds;
+		int touched = MUD_MudSync.TileCount();
+		int syncStamps = MUD_MudSync.TakeStamps10();
+		// separate statements, at most 9 values each (string.Format)
+		string p1 = string.Format("MUD sheet: tiles touched %1, meshes %2, builds %3, mean %4 ms, worst %5 ms, sync stamps %6, replay stamps %7",
+			touched, meshes + live, m_iSt10Builds, mean, m_iSt10BuildMax, syncStamps, m_iSt10Replay);
+		string p2 = string.Format(" | (%1 stored + %2 live meshes, %3 kept data-only, %4 dropped, %5 to build, radius %6 m)",
+			meshes, live, kept, m_iSt10Drops, m_aBuildTx.Count(), RADIUS)
+			+ string.Format(" | build radius %1 m at %2 m/s, last queue %3, sparse %4", m_fRadBuild, m_vRadVel.Length(), m_iRadQueued, PatchLiftOn());
+		string p3 = string.Format(" | stored builds held (not rendered) %1 (tile-frames, A5 gate %2)", m_iSt10StoredHeld, STORED_RENDERED_GATE);
+		Print(p1 + p2 + p3, LogLevel.NORMAL);
+		m_iSt10StoredHeld = 0;
+		Print(string.Format("MUD sheet gaps: live builds %1, with untraced quads %2 (quads %3, max %4 in one build) | border gap max %5 m, builds over 2 cm %6",
+			m_iGapLiveBuilds, m_iGapBuildsUnt, m_iGapUntraced, m_iGapUntracedMax, m_fGapEdgeMax, m_iGapEdgeOver)
+			+ string.Format(" | re-ground exact: %1 cells in %2 ops | look ruts: %3 cells in %4 calls", m_iReCells10, m_iReOps10, m_iLookCells10, m_iLookCuts10) + " | " + MUD_MudZoneEntity.OffroadStats(), LogLevel.NORMAL);
+		m_iLookCells10 = 0;
+		m_iLookCuts10 = 0;
+		m_iReCells10 = 0;
+		m_iReOps10 = 0;
+		m_iGapLiveBuilds = 0;
+		m_iGapBuildsUnt = 0;
+		m_iGapUntraced = 0;
+		m_iGapUntracedMax = 0;
+		m_fGapEdgeMax = 0;
+		m_iGapEdgeOver = 0;
+		if (m_mGapEdge.Count() > 2000)
+			m_mGapEdge.Clear();
+		if (m_bLocal)
+			LocalLog();
+		DlLog(time);
+		m_iSt10Builds = 0;
+		m_iSt10BuildMs = 0;
+		m_iSt10BuildMax = 0;
+		m_iSt10Replay = 0;
+		m_iSt10Drops = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEMP delay meter line (Log10), then reset. Tiles stamped but not drawn for 5 s (left the window) are dropped.
+	protected void DlLog(float time)
+	{
+		if (m_iDlN > 0 || m_iDlHolds > 0 || m_iDlDue > 0)
+		{
+			float avg = 1000 * m_fDlSum / Math.Max(1, m_iDlN);
+			float dist = m_fDlDist / Math.Max(1, m_iDlN);
+			float holdAvg = m_iDlHoldMs / Math.Max(1, m_iDlHolds);
+			Print(string.Format("MUD delay sheet 10 s (TEMP): own wheel stamp -> drawn tile avg %1 max %2 ms, ~%3 m behind the wheel (%4 tiles) | upload held by replay: %5 holds, avg %6 max %7 ms, %8 stuck",
+				Math.Round(avg), Math.Round(1000 * m_fDlMax), dist.ToString(-1, 2), m_iDlN, m_iDlHolds, Math.Round(holdAvg), m_iDlHoldMax, m_iDlStuck)
+				+ string.Format(", %1 frames an upload was due but held | UPLOAD_EVERY %2 s | wheel tiles picked first %3 (WHEEL_SLOTS_MAX %4) | D1 slot passes held %5 (SLOT_MIN_S %6)", m_iDlDue, UPLOAD_EVERY, m_iDlWheelPicks, WHEEL_SLOTS_MAX, m_iUpThrottled, SLOT_MIN_S), LogLevel.NORMAL);
+		}
+		array<int> old = {};
+		foreach (int k, float st : m_mDlStampT)
+		{
+			if (time - st > 5 || time < st)
+				old.Insert(k);
+		}
+		foreach (int ok : old)
+		{
+			m_mDlStampT.Remove(ok);
+			m_mDlSpeed.Remove(ok);
+		}
+		m_fDlSum = 0;
+		m_fDlMax = 0;
+		m_fDlDist = 0;
+		m_iDlN = 0;
+		m_iDlDue = 0;
+		m_iDlHolds = 0;
+		m_iDlHoldMs = 0;
+		m_iDlHoldMax = 0;
+		m_iDlStuck = 0;
+		m_iDlWheelPicks = 0;
+		if (LOD_ON)
+		{
+			int lodNow = 0;
+			foreach (int lk, MUD_MudSheetStore lst : m_mTrail)
+			{
+				if (lst && lst.m_D.m_iLow != 0)
+					lodNow++;
+			}
+			m_iLowNow = lodNow;
+			Print(string.Format("MUD lod 10 s (PAPER TEST 2): low builds %1, queued back to full %2, stored tiles low now %3 of %4 (LOD_M %5 m) | LIFT BY DRAWN %6: patch tells %7", m_iLodLow, m_iLodUp, lodNow, m_mTrail.Count(), LOD_M, LIFT_BY_DRAWN, m_iLiftTold), LogLevel.NORMAL);
+			m_iLiftTold = 0;
+		}
+		m_iLodLow = 0;
+		m_iLodUp = 0;
+		m_iUpThrottled = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Called every frame from MUD_WorldGround (time = its m_fTime, back to 0 at each play)
 	static void Tick(float time)
 	{
-		if (!ENABLED || RplSession.Mode() == RplMode.Dedicated)
+		if (!ENABLED)
 			return;
+		if (RplSession.Mode() == RplMode.Dedicated)
+		{
+			if (SYNC)
+				MUD_MudSync.DsTick();      // synced sheet Stage 5: the server keeps the layer for late joiners (no sheet drawn)
+			return;
+		}
 		if (OFF_TEST)
 		{
 			OffLog(time);
 			return;
 		}
 		if (!s_Inst || time < s_Inst.m_fLast)
+		{
 			s_Inst = new MUD_MudSheet();    // first frame, or a new play (the old entity went with the old world)
+			s_iLazyPhase = -1;
+			s_Inst.m_bLocal = !SYNC;        // MUD LAB sheet local: client-only, deposit band, no sync layer
+		}
+		LazyAbTick(time);
+		int tP = System.GetTickCount();
+		if (SYNC)
+			MUD_MudSync.Drain();            // queued rut ops, a few ms a frame (they restore + replay this sheet)
+		MUD_Prof.Add(MUD_Prof.SHEET_SYNC, System.GetTickCount(tP));
+		tP = System.GetTickCount();
 		s_Inst.Frame(time);
+		MUD_Prof.Add(MUD_Prof.SHEET, System.GetTickCount(tP));
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -377,10 +1008,20 @@ class MUD_MudSheet
 		int t0 = System.GetTickCount();
 		int built = 0;
 		m_iTaperMs = 0;
+		vector gcam[4];
+		if (STORED_RENDERED_GATE)
+			GetGame().GetWorld().GetCurrentCamera(gcam);
 		while (!m_aOneBuild.IsEmpty())
 		{
+			if (STORED_MS > 0 && built > 0 && System.GetTickCount(t0) >= STORED_MS)
+				break;      // perf fix 2: the rest next frame (Frame calls this while m_aOneBuild has keys)
 			int key = m_aOneBuild[0];
 			m_aOneBuild.RemoveOrdered(0);
+			int qWhy;
+			if (m_mQWhy.Find(key, qWhy))
+				m_mQWhy.Remove(key);
+			else
+				qWhy = BW_RESTORE;
 			MUD_MudSheetStore st = m_mTrail.Get(key);
 			if (!st || !st.m_Ent)
 				continue;
@@ -388,18 +1029,62 @@ class MUD_MudSheet
 			int tz = key - tx * 20000;
 			if (IsLive(tx, tz))
 				continue;
+			if (STORED_RENDERED_GATE && StoredWait(st, tx, tz, gcam[3]))
+			{
+				m_aHeldBuild.Insert(key);
+				continue;
+			}
+			if (BAND_STORED_HOLD && qWhy == BW_BAND && st.m_Res && m_mStoredAt.Contains(key) && m_fLast < m_mStoredAt.Get(key) + SLOT_MIN_S)
+			{
+				m_aHeldBuild.Insert(key);     // stage 2 C5: band only, built < SLOT_MIN_S ago - end of the queue
+				if (!m_mQWhy.Contains(key))
+					m_mQWhy.Set(key, BW_BAND);     // still band only when it comes up again
+				m_iBandHeld++;
+				continue;
+			}
+			m_iBuildWhy = qWhy;
 			Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
 			if (res)
 				st.m_Res = res;
 			built++;
 		}
-		if (built > 0)
-			Print(string.Format("MUD one grid: stored tiles built %1 in %2 ms (taper %3 ms)", built, System.GetTickCount(t0), m_iTaperMs), LogLevel.NORMAL);
+		// A5: held tiles wait at the end of the queue (checked again next frame)
+		foreach (int hk : m_aHeldBuild)
+			m_aOneBuild.Insert(hk);
+		m_aHeldBuild.Clear();
+		MUD_Prof.Add(MUD_Prof.SH_STORED, System.GetTickCount(t0));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A5 STORED_RENDERED_GATE: true = stored tile st's rebuild waits (it has a mesh, is shown, was not drawn last
+	//! frame, and its middle is over STORED_GATE_NEAR m from the camera cp)
+	protected bool StoredWait(MUD_MudSheetStore st, int tx, int tz, vector cp)
+	{
+		if (!st.m_Res || (st.m_Ent.GetFlags() & EntityFlags.VISIBLE) == 0)
+			return false;
+		if (st.m_Ent.IsRendered())
+			return false;
+		float ux = (tx + 0.5) * TILE_M - cp[0];
+		float uz = (tz + 0.5) * TILE_M - cp[2];
+		if (ux * ux + uz * uz < STORED_GATE_NEAR * STORED_GATE_NEAR)
+			return false;
+		m_iSt10StoredHeld++;
+		return true;
 	}
 
 	//------------------------------------------------------------------------------------------------
 	protected void Frame(float time)
 	{
+		if (MUD_TestKit.TEST_KIT)
+		{
+			MUD_CraterTrace.Tick();     // stage 2 B1 crater log: prints finished craters
+			if (m_iDFrameN > m_iDFrameMax)
+				m_iDFrameMax = m_iDFrameN;     // stage 3 Part 0 D meter: most crater notes in one sheet frame
+			m_iDFrameN = 0;
+		}
+		m_iPreFrameN = 0;     // stage 3 D1
+		int tPre = System.GetTickCount();
+		int bPre = s_iBandMsAll;     // stage 2 A1: BuildNowSlots' BandTile
 		if (m_bNowDue)
 			StepNow();
 		else if (!m_aPend.IsEmpty() && System.GetTickCount(m_iPendT) > PEND_MAX_MS)
@@ -407,6 +1092,15 @@ class MUD_MudSheet
 			Print(string.Format("MUD one grid: %1 held ops, no voxel go-live in %2 ms -> sheet now", m_aPend.Count(), PEND_MAX_MS), LogLevel.WARNING);
 			ApplyPending();
 		}
+		MUD_Prof.Add(MUD_Prof.SH_PRE, System.GetTickCount(tPre) - (s_iBandMsAll - bPre));
+		if (!m_mEase.IsEmpty() && (!LEV_L6_EASE || time >= m_fNextEase))
+		{
+			if (LEV_L6_EASE)
+				m_fNextEase = time + UPLOAD_EVERY;     // L6: at upload rate
+			EaseTick(time);
+		}
+		if (CRATER_PREBUILD || m_bPreWin)
+			PreStep();     // stage 2 B5 (before FlushOneBuild: the taper fronts it builds are held too)
 		if (!m_aOneBuild.IsEmpty())
 			FlushOneBuild();
 		bool frozen = false;
@@ -432,6 +1126,7 @@ class MUD_MudSheet
 		}
 		m_fStatPrevT = time;
 		m_fLast = time;
+		BenchTick(time);
 		int t0 = System.GetTickCount();
 		for (int dI = m_aDying.Count() - 1; dI >= 0; dI--)
 		{
@@ -444,14 +1139,21 @@ class MUD_MudSheet
 			}
 			m_aDying.Remove(dI);
 		}
+		int tZ = System.GetTickCount();
+		int bZ = s_iBandMsAll;     // stage 2 A1: BandTile ms counts as 'band' only, not in the part that called it
 		BuildZones();
+		MUD_Prof.Add(MUD_Prof.SH_ZONES, System.GetTickCount(tZ) - (s_iBandMsAll - bZ));
+		tZ = System.GetTickCount();
 		GroundJobs();
+		MUD_Prof.Add(MUD_Prof.SH_JOBS, System.GetTickCount(tZ));
 		if (COLLIDE && time >= m_fCollCheck)
 		{
 			m_fCollCheck = time + COLL_S * 0.5;
 			CollPending();
 		}
 		Vehicle veh = NearVehicle();
+		if (MUD_TestKit.TEST_KIT)
+			TurnRate(veh, time);     // stage 3 Part 0 TURN METER: motion bucket of this frame
 		if (veh)
 		{
 			m_fVehY = veh.GetOrigin()[1];
@@ -464,41 +1166,74 @@ class MUD_MudSheet
 				m_fDebugY = veh.GetOrigin()[1] + 3;
 			}
 			// user 2026-10-14 23:20: the window made its own tiles under the car while the zone was still building
-			// (mud grew outward from the car) - it waits until every zone tile is built, then takes those over
-			if (FOLLOW && !m_bTeleported && m_aBuildTx.IsEmpty())
+			// (mud grew outward from the car) - it waits until every zone tile is built, then takes those over.
+			// CAMERA RADIUS: no such wait - a slot with no built tile takes the sync layer's mud (FillSlot)
+			if (FOLLOW && !m_bTeleported && (RadiusOn() || m_aBuildTx.IsEmpty()))
 			{
 				int tF = System.GetTickCount();
+				int bF = s_iBandMsAll;     // A1
 				Follow(veh.GetOrigin());
 				m_aStatSec[0] = m_aStatSec[0] + System.GetTickCount(tF);
+				MUD_Prof.Add(MUD_Prof.SH_FOLLOW, System.GetTickCount(tF) - (s_iBandMsAll - bF));
 			}
 		}
 		if (m_bPlaced)
 		{
 			int tS = System.GetTickCount();
-			foreach (Vehicle v : MUD_Wheels.GetAll())
+			if (LEV_L8_VEH)
 			{
-				if (v)
-					Wheels(v, time);
+				WheelsNear(time);
+			}
+			else
+			{
+				foreach (Vehicle v : MUD_Wheels.GetAll())
+				{
+					if (v)
+						Wheels(v, time);
+				}
 			}
 			m_aStatSec[1] = m_aStatSec[1] + System.GetTickCount(tS);
-			if (m_bAnyZone && time >= m_fNextSlump)
+			MUD_Prof.Add(MUD_Prof.SH_WHEELS, System.GetTickCount(tS));
+			if (SYNC && time >= m_fNextExpire)
+			{
+				int tE = System.GetTickCount();
+				ExpirePreds(time);
+				MUD_Prof.Add(MUD_Prof.SH_EXPIRE, System.GetTickCount(tE));
+			}
+			// SYNC: no local slump - the sync layer slumps per op (the same on every machine)
+			if (!SYNC && m_bAnyZone && time >= m_fNextSlump)
 			{
 				// 10 Hz, with the upload (COST 23:01: every frame was ~3 ms of the ~5)
 				m_fNextSlump = time + UPLOAD_EVERY;
 				tS = System.GetTickCount();
+				m_iMarkWhy = WHY_SLUMP;
 				Slump();
+				m_iMarkWhy = WHY_OTHER;
 				m_aStatSec[2] = m_aStatSec[2] + System.GetTickCount(tS);
+				s_iSlumpMsAll += System.GetTickCount(tS);
 			}
 			tS = System.GetTickCount();
 			if (m_bAnyZone)
 				Grounds();
 			m_aStatSec[3] = m_aStatSec[3] + System.GetTickCount(tS);
-			if (m_bDirty && time >= m_fNextUp && !frozen)
+			MUD_Prof.Add(MUD_Prof.SH_GROUNDS, System.GetTickCount(tS));
+			// SYNC op split: hold the upload while an op's own-stamp replay is unfinished (a stuck one lets go)
+			if (m_bReplayHold && System.GetTickCount(m_iReplayHoldAt) > REPLAY_HOLD_MS)
+			{
+				DlHoldEnd(true);     // TEMP delay meter
+				m_bReplayHold = false;
+				m_aReplay.Clear();
+			}
+			if (m_bDirty && time >= m_fNextUp && !frozen && m_bReplayHold)
+				m_iDlDue++;     // TEMP delay meter
+			if (m_bDirty && time >= m_fNextUp && !frozen && !m_bReplayHold)
 			{
 				m_fNextUp = time + UPLOAD_EVERY;
 				tS = System.GetTickCount();
+				int bU = s_iBandMsAll;     // A1
 				Upload();
 				m_aStatSec[4] = m_aStatSec[4] + System.GetTickCount(tS);
+				MUD_Prof.Add(MUD_Prof.SH_UPLOAD, System.GetTickCount(tS) - (s_iBandMsAll - bU));
 			}
 		}
 		int ms = System.GetTickCount(t0);
@@ -506,6 +1241,8 @@ class MUD_MudSheet
 		m_iStatMs += ms;
 		if (ms > m_iStatMax)
 			m_iStatMax = ms;
+		if (MUD_TestKit.TEST_KIT)
+			Log10(time);
 		if (time - m_fStatT >= 5)
 		{
 			if (m_bPlaced && m_iStatFrames > 0)
@@ -521,14 +1258,30 @@ class MUD_MudSheet
 					+ string.Format(" | box %1..%2 x %3..%4", m_iBoxI0, m_iBoxI1, m_iBoxK0, m_iBoxK1)
 					+ string.Format(" | side ground - wheel y: avg %1 min %2 max %3 (%4 stamps) | entity %5 at %6", m_fStatSink / Math.Max(1, m_iStatSinkN), m_fStatSinkMin, m_fStatSinkMax, m_iStatSinkN, m_Ent != null, m_iX0 * CELL)
 					+ string.Format(" | DRAG max %1 m/s2, mud share max %2, gearbox x%3 min | trail %4 tiles", m_fStatDragA, m_fStatMud, m_fStatEff, m_aTrailOrder.Count()) + string.Format(" (zone tiles %1, to build %2)", m_iZoneTiles, m_aBuildTx.Count())
-					+ string.Format(" | ms in 5 s: follow %1 wheels %2 slump %3 grounds %4 upload %5 | slump box %6 cells",
-						m_aStatSec[0], m_aStatSec[1], m_aStatSec[2], m_aStatSec[3], m_aStatSec[4], Math.Max(0, m_iBoxI1 - m_iBoxI0 + 1) * Math.Max(0, m_iBoxK1 - m_iBoxK0 + 1))
+					+ string.Format(" | ms in 5 s: follow %1 wheels %2 slump %3 grounds %4 upload %5 (slot builds put off %7) | slump box %6 cells",
+						m_aStatSec[0], m_aStatSec[1], m_aStatSec[2], m_aStatSec[3], m_aStatSec[4], Math.Max(0, m_iBoxI1 - m_iBoxI0 + 1) * Math.Max(0, m_iBoxK1 - m_iBoxK0 + 1), m_iUpSkipped)
 					+ string.Format(" | colliders: %1 built in %2 ms, %3 held back, %4 alive", m_iCollBuilt, m_iCollMs, m_iCollHeld, m_aCollEnt.Count()), LogLevel.NORMAL);
 				Print(string.Format("MUD mud sheet PERF: fps %1, worst frame %2 ms, COLLIDE %3, top speed %4 m/s, our ms/frame %5, drawn quads %6",
 					m_iStatFrames / (time - m_fStatT), m_fStatDtMax * 1000, COLLIDE, m_fStatSpeed, avg, m_iStatQuads)
 					+ string.Format(" | FREEZE %1: live fps %2 (%3 s), frozen fps %4 (%5 s)", FREEZE_TEST,
 						m_iLiveN / Math.Max(0.001, m_fLiveT), m_fLiveT, m_iFrzN / Math.Max(0.001, m_fFrzT), m_fFrzT), LogLevel.NORMAL);
+				if (SYNC)
+				{
+					// separate statements: Format + a call that Formats in one expression printed only the call's text,
+					// twice (WB log 2026-10-18 01:35)
+					string syncStat = MUD_MudSync.StatLine();
+					string sheetStat = string.Format("MUD mud sheet sync: own stamps %1 held, %2 taken by ops, %3 expired, %4 replayed | %5 restores in %6 ms, %7 stored tiles rebuilt | ",
+						m_aPred.Count(), m_iStatCovered, m_iStatExpired, m_iStatReplayed, m_iStatResync, m_iStatResyncMs, m_iStatStoredRe);
+					Print(sheetStat + syncStat, LogLevel.NORMAL);
+				}
 			}
+			m_iStatCovered = 0;
+			m_iUpSkipped = 0;
+			m_iStatExpired = 0;
+			m_iStatReplayed = 0;
+			m_iStatResync = 0;
+			m_iStatResyncMs = 0;
+			m_iStatStoredRe = 0;
 			m_fStatT = time;
 			m_iStatFrames = 0;
 			m_iStatMs = 0;
@@ -595,6 +1348,7 @@ class MUD_MudSheet
 			m_iZ0 = wantZ;
 			m_bPlaced = true;
 			MakeMesh();
+			LiftDirtyWindow(m_iX0 / TQ, m_iZ0 / TQ, -100000, -100000);
 			return;
 		}
 		float cx = (m_iX0 + half) * CELL;
@@ -607,14 +1361,26 @@ class MUD_MudSheet
 		int stk = (wantZ - m_iZ0) / TQ;
 		int oldTx = m_iX0 / TQ;
 		int oldTz = m_iZ0 / TQ;
+		if (m_bLocal && BAND_INCR)
+			BandIncr();     // stage 2 C1: pending touches into the distances before slots freeze / move
 		// 1. tiles that stay move to their new slot; leaving ones become trail (touched) or spare entities
 		array<IEntity> spare = {};
 		array<IEntity> newEnt = {};
 		array<ref Resource> newRes = {};
+		int newBuilt[16];       // D1: a kept tile's last build time moves with it (new slots 0 = build at once)
+		int newUnlift[16];      // LIFT BY DRAWN: the same for the on-screen flag
+		int newBand[16];        // SHEET LOCAL: the same for the band-due flag
+		int newDirty[16];       // L1: the same for the dirty flag and its reasons (entering slots: dirty)
+		int newWhy[16];
 		for (int t0 = 0; t0 < TILES * TILES; t0++)
 		{
 			newEnt.Insert(null);
 			newRes.Insert(null);
+			newBuilt[t0] = 0;
+			newUnlift[t0] = 0;
+			newBand[t0] = 0;
+			newDirty[t0] = 1;
+			newWhy[t0] = WHY_OTHER;
 		}
 		for (int tk = 0; tk < TILES; tk++)
 		{
@@ -628,6 +1394,11 @@ class MUD_MudSheet
 				{
 					newEnt[ntk * TILES + nti] = te;
 					newRes[ntk * TILES + nti] = m_aTileRes[t];
+					newBuilt[ntk * TILES + nti] = m_aSlotBuiltMs[t];
+					newUnlift[ntk * TILES + nti] = m_aSlotUnlift[t];
+					newBand[ntk * TILES + nti] = m_aSlotBand[t];
+					newDirty[ntk * TILES + nti] = m_aSlotDirty[t];
+					newWhy[ntk * TILES + nti] = m_aSlotWhy[t];
 					continue;
 				}
 				if (!te)
@@ -641,9 +1412,23 @@ class MUD_MudSheet
 					te.ClearFlags(EntityFlags.VISIBLE, false);
 					DropColl(te);
 					spare.Insert(te);
+					if (LIFT_BY_DRAWN && m_aSlotUnlift[t] != 0)
+						MUD_WorldGroundEntity.SheetLiftDirty((oldTx + ti) * TILE_M, (oldTz + tk) * TILE_M);   // zone edge: lift back
 				}
 			}
 		}
+		for (int tb = 0; tb < TILES * TILES; tb++)
+		{
+			m_aSlotBuiltMs[tb] = newBuilt[tb];
+			m_aSlotUnlift[tb] = newUnlift[tb];
+			m_aSlotBand[tb] = newBand[tb];
+			if (LEV_L1_CARRY)
+			{
+				m_aSlotDirty[tb] = newDirty[tb];
+				m_aSlotWhy[tb] = newWhy[tb];
+			}
+		}
+		LiftDirtyWindow(wantX / TQ, wantZ / TQ, oldTx, oldTz);
 		// 2. field data moves by whole tiles
 		int si = sti * TQ;
 		int sk = stk * TQ;
@@ -663,6 +1448,9 @@ class MUD_MudSheet
 					m_T.m_aOu[v] = m_F.m_aOu[o];
 					m_T.m_aOv[v] = m_F.m_aOv[o];
 					m_T.m_aBare[v] = m_F.m_aBare[o];
+					m_T.m_aTouch[v] = m_F.m_aTouch[o];
+					m_T.m_aBand[v] = m_F.m_aBand[o];
+					m_T.m_aLastY[v] = m_F.m_aLastY[o];
 				}
 				else
 				{
@@ -672,6 +1460,9 @@ class MUD_MudSheet
 					m_T.m_aOu[v] = 0;
 					m_T.m_aOv[v] = 0;
 					m_T.m_aBare[v] = 0;
+					m_T.m_aTouch[v] = 0;
+					m_T.m_aBand[v] = 0;
+					m_T.m_aLastY[v] = 0;
 				}
 			}
 		}
@@ -685,6 +1476,20 @@ class MUD_MudSheet
 		m_iBoxI1 -= si;
 		m_iBoxK0 -= sk;
 		m_iBoxK1 -= sk;
+		m_Drag.Shift(si, sk);     // L2 / L3 cell sets move with the field (empty while those levers are off)
+		m_Chg.Shift(si, sk);
+		for (int cn = 0; cn < TILES * TILES; cn++)
+		{
+			m_aCoNext[cn] = 0;     // stage 2 A3: slot numbers moved (the shift rebuilds its slots anyway)
+			m_aCoNextSide[cn] = 0;
+		}
+		if (m_bLocal && BAND_INCR)
+			DistShift(sti, stk);     // stage 2 C1
+		for (int sgr = 0; sgr < TILES * TILES; sgr++)
+		{
+			m_aSlotSig1[sgr] = 0;     // stage 2 C3: slot numbers moved - unknown until the next build
+			m_aSlotSig2[sgr] = 0;
+		}
 		// 3. empty slots: the trail tile there comes back to life, else a spare or new entity
 		int nTx = m_iX0 / TQ;
 		int nTz = m_iZ0 / TQ;
@@ -695,19 +1500,37 @@ class MUD_MudSheet
 				int t2 = tk2 * TILES + ti2;
 				if (newEnt[t2])
 					continue;
+				m_aSlotBand[t2] = 1;     // SHEET LOCAL: an entering slot's band is computed again before its build
 				int tx = nTx + ti2;
 				int tz = nTz + tk2;
 				int key = TrailKey(tx, tz);
 				MUD_MudSheetStore st = m_mTrail.Get(key);
 				if (st && st.m_Ent)
 				{
+					if (LEV_L1_CARRY && StoreCurrent(st, key))
+					{
+						m_aSlotDirty[t2] = 0;     // L1: comes back with a current full mesh - clean
+						m_aSlotWhy[t2] = 0;
+						m_aSlotBand[t2] = 0;
+					}
 					Unpack(st.m_D, ti2, tk2);
+					if (m_bLocal && BAND_INCR)
+						DistUnpack(st.m_D, key, t2, ti2, tk2);     // stage 2 C1: its kept distances, if current
+					m_aSlotSig1[t2] = st.m_D.m_iSig1;     // stage 2 C3: the signature of the mesh it comes back with
+					m_aSlotSig2[t2] = st.m_D.m_iSig2;
+					m_aSlotUnlift[t2] = st.m_D.m_iUnlift;
 					newEnt[t2] = st.m_Ent;
 					newRes[t2] = st.m_Res;
 					m_mTrail.Remove(key);
 					RemoveTrailKey(key);
 				}
-				else if (!spare.IsEmpty())
+				else
+				{
+					FillSlot(ti2, tk2, tx, tz);
+				}
+				if (newEnt[t2])
+					continue;
+				if (!spare.IsEmpty())
 				{
 					IEntity se = spare[spare.Count() - 1];
 					spare.Remove(spare.Count() - 1);
@@ -726,7 +1549,9 @@ class MUD_MudSheet
 		m_aTileEnt = newEnt;
 		m_aTileRes = newRes;
 		m_Ent = m_aTileEnt[0];
+		m_bSlotsKeep = LEV_L1_CARRY;
 		UpdateSlots();
+		m_bSlotsKeep = false;
 		m_iUntraced = 0;
 		for (int u = 0; u < NN; u++)
 		{
@@ -735,7 +1560,3533 @@ class MUD_MudSheet
 		}
 		m_bIdxDirty = true;
 		m_bDirty = true;
+		if (LEV_L1_CARRY && !AnySlotDirty())
+			return;         // L1: no slot really changed - no forced upload
 		m_fNextUp = 0;      // upload at once, else the old mesh shows one shift off
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB sheet local switch (MUD_LabSheetLocal): preset 0 = off (sheet parked as before, SYNC back to true),
+	//! 1..4 = BAND_IN 0.4 / 0.4 / 0.8 / 0.8 x BAND_FADE 0.8 / 1.2 / 0.8 / 1.2. Every switch starts fresh: the old
+	//! instance's tiles are deleted and its data freed (the next Tick makes a new instance).
+	static void LabSet(int preset, string why)
+	{
+		if (s_Inst)
+			s_Inst.DropAllLab(why);
+		s_Inst = null;
+		s_iLabPreset = preset;
+		ENABLED = preset > 0;
+		SYNC = preset <= 0;
+		BAND_IN = 0.4;
+		BAND_FADE = 0.8;
+		if (preset == 3 || preset == 4)
+			BAND_IN = 0.8;
+		if (preset == 2 || preset == 4)
+			BAND_FADE = 1.2;
+		s_iCoverGen++;
+		s_iDistGen++;
+		BandLutBuild();     // C1 / C2: band by distance for this preset
+		if (preset <= 0 && s_iLeverSet != 0)
+			LeverApply(0, why);
+		if (preset <= 0 && s_iFixSet != 0)
+			FixApply(0, why);
+		Print(string.Format("MUD sheet local: preset %1 (enabled %2, sync %3, band in %4 m, fade %5 m) | %6", preset, ENABLED, SYNC, BAND_IN, BAND_FADE, why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LabSet: every tile entity of this instance deleted now (live slots, stored meshes, dying ones), data freed
+	protected void DropAllLab(string why)
+	{
+		int live = 0;
+		foreach (IEntity te : m_aTileEnt)
+		{
+			if (!te)
+				continue;
+			DropColl(te);
+			SCR_EntityHelper.DeleteEntityAndChildren(te);
+			live++;
+		}
+		int stored = 0;
+		int dataOnly = 0;
+		foreach (int key, MUD_MudSheetStore st : m_mTrail)
+		{
+			if (!st)
+				continue;
+			if (!st.m_Ent)
+			{
+				dataOnly++;
+				continue;
+			}
+			DropColl(st.m_Ent);
+			SCR_EntityHelper.DeleteEntityAndChildren(st.m_Ent);
+			stored++;
+		}
+		int dying = 0;
+		foreach (MUD_MudSheetStore dy : m_aDying)
+		{
+			if (!dy || !dy.m_Ent)
+				continue;
+			DropColl(dy.m_Ent);
+			SCR_EntityHelper.DeleteEntityAndChildren(dy.m_Ent);
+			dying++;
+		}
+		Print(string.Format("MUD sheet local: exit (%1) - deleted %2 live, %3 stored, %4 dying tile entities; freed %5 data-only, %8 compact tiles; %6 born tiles, %7 touched cells",
+			why, live, stored, dying, dataOnly, m_mBorn.Count(), m_iTouchCells, m_mFar.Count()), LogLevel.NORMAL);
+		m_mFar.Clear();
+		m_aFarOrder.Clear();
+		m_mOwn.Clear();
+		m_mEdgeRec.Clear();
+		m_aTileEnt.Clear();
+		m_aTileRes.Clear();
+		m_mTrail.Clear();
+		m_aTrailOrder.Clear();
+		m_aDying.Clear();
+		m_aOneBuild.Clear();
+		m_mQWhy.Clear();
+		m_aBandQ.Clear();
+		m_mBorn.Clear();
+		m_aBuildTx.Clear();
+		m_aBuildTz.Clear();
+		m_mEase.Clear();
+		m_TchSt = null;
+		m_TchFar = null;
+		m_bPlaced = false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB 10 s line: 'tiles <n> built <n> kept <n> | born <n> touched cells <n> | live <n> stored <n> data-only <n>'
+	static string LabCounts()
+	{
+		if (!s_Inst)
+			return "tiles 0 built 0 kept 0 | born 0 touched cells 0 | live 0 stored 0 data-only 0";
+		return s_Inst.LabCountsI();
+	}
+
+	protected string LabCountsI()
+	{
+		int live = 0;
+		int liveBuilt = 0;
+		if (m_bPlaced)
+		{
+			for (int t = 0; t < TILES * TILES; t++)
+			{
+				if (m_aSlotZone[t] == 0)
+					continue;
+				live++;
+				// stage 2 D: a null build ('nothing to draw') hides the entity but leaves the old m_aTileRes - count only
+				// slots whose last build gave a mesh (BuildTileMesh sets VISIBLE then)
+				if (t < m_aTileRes.Count() && m_aTileRes[t] && m_aTileEnt[t] && (m_aTileEnt[t].GetFlags() & EntityFlags.VISIBLE) != 0)
+					liveBuilt++;
+			}
+		}
+		int stored = 0;
+		int dataOnly = 0;
+		foreach (int key, MUD_MudSheetStore st : m_mTrail)
+		{
+			if (!st)
+				continue;
+			if (st.m_Ent)
+				stored++;
+			else
+				dataOnly++;
+		}
+		return string.Format("tiles %1 built %2 kept %3 | born %4 touched cells %5 | live %6 stored %7 data-only %8",
+			live + stored + dataOnly, liveBuilt + stored, dataOnly, m_mBorn.Count(), m_iTouchCells, live, stored, dataOnly)
+			+ string.Format(" compact %1", m_mFar.Count());     // MUD LAB part D
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB: running ms totals (never reset)
+	static int SlumpMsAll()
+	{
+		return s_iSlumpMsAll;
+	}
+
+	static int BandMsAll()
+	{
+		return s_iBandMsAll;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: band reach in cells across a tile side (at most (BAND_W - TV) / 2)
+	protected int BandMargin()
+	{
+		int mg = Math.Ceil((BAND_IN + BAND_FADE) / CELL);
+		int cap = (BAND_W - TV) / 2;
+		if (mg > cap)
+			mg = cap;
+		return mg;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: live slot t (world tile key) is born - a zone slot from now on, traced, band computed, built
+	protected void Birth(int t, int key)
+	{
+		m_mBorn.Set(key, 1);
+		m_aSlotZone[t] = 1;
+		m_aSlotDirty[t] = 1;
+		m_aSlotBand[t] = 1;
+		m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_BAND;
+		m_bAnyZone = true;
+		m_iScan = 0;
+		m_iUntraced = NN;     // Grounds makes one pass and traces the new slot
+		m_bDirty = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: a stamp touched new cells in window cells i0..i1 x k0..k1. Every tile within the band margin is
+	//! born (live: now; outside the window: CAMERA RADIUS builds it) and its band is due.
+	protected void BandMark(int i0, int i1, int k0, int k1)
+	{
+		if (!m_bPlaced)
+			return;
+		BandMarkWorld(m_iX0 + i0, m_iX0 + i1, m_iZ0 + k0, m_iZ0 + k1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! BandMark on world cells wi0..wi1 x wk0..wk1 (MUD LAB part E: op stamps outside the window too)
+	protected void BandMarkWorld(int wi0, int wi1, int wk0, int wk1)
+	{
+		int mg = BandMargin();
+		int gi0 = wi0 - mg;
+		int gi1 = wi1 + mg;
+		int gk0 = wk0 - mg;
+		int gk1 = wk1 + mg;
+		int tx0 = (gi0 - 1) / TQ;     // tile tx holds cells tx * TQ .. tx * TQ + TQ (sides shared)
+		int tx1 = gi1 / TQ;
+		int tz0 = (gk0 - 1) / TQ;
+		int tz1 = gk1 / TQ;
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		for (int tz = tz0; tz <= tz1; tz++)
+		{
+			for (int tx = tx0; tx <= tx1; tx++)
+			{
+				int key = TrailKey(tx, tz);
+				bool born = m_mBorn.Contains(key);
+				if (IsLive(tx, tz))
+				{
+					int t = (tz - z0) * TILES + tx - x0;
+					if (!born)
+						Birth(t, key);
+					if (m_bIncrMark)
+						continue;
+					if (BAND_INCR)
+						m_aSlotDist[t] = 0;     // stage 2 C1: a touch outside the window (op) - BandTile again
+					m_aSlotBand[t] = 1;
+					m_aSlotDirty[t] = 1;
+					m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_BAND;
+					m_bDirty = true;
+					continue;
+				}
+				if (BAND_BORN_FRONT)
+					BornFront(tx, tz, key);     // stage 2 A5: no mesh yet -> built before the radius list
+				if (!born)
+				{
+					m_mBorn.Set(key, 1);     // outside the window: QueueNear builds it, its band in BuildZoneTile
+					continue;
+				}
+				if (TrailGet(key) && !m_aBandQ.Contains(key))     // MUD LAB part D: a compact one comes back first
+					m_aBandQ.Insert(key);
+				m_bDirty = true;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A5 BAND_BORN_FRONT: tile tx, tz outside the window (born or re-banded now) without a mesh goes to the front
+	//! of the radius builds (Radius takes m_aFrontTx first; QueueNear's re-sort does not touch it). Only within MESH_R
+	//! of the last radius camera and where the sheet is wanted (as QueueNear).
+	protected void BornFront(int tx, int tz, int key)
+	{
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (st && st.m_Ent)
+			return;     // has its mesh: a re-band rebuilds it (BandStored)
+		if (!m_bLodCam || !SheetWanted(tx, tz))
+			return;
+		float mx = (tx + 0.5) * TILE_M - m_vLodCam[0];
+		float mz = (tz + 0.5) * TILE_M - m_vLodCam[2];
+		if (mx * mx + mz * mz > MESH_R * MESH_R)
+			return;
+		for (int f = 0; f < m_aFrontTx.Count(); f++)
+		{
+			if (m_aFrontTx[f] == tx && m_aFrontTz[f] == tz)
+				return;
+		}
+		m_aFrontTx.Insert(tx);
+		m_aFrontTz.Insert(tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: stored tile tx, tz (BandTile's one-store cache)
+	protected MUD_MudSheetStore TouchStore(int tx, int tz)
+	{
+		int key = TrailKey(tx, tz);
+		if (key != m_iTchKey)
+		{
+			m_iTchKey = key;
+			m_TchSt = m_mTrail.Get(key);
+			m_TchFar = null;
+			if (!m_TchSt && !m_mFar.IsEmpty())
+				m_TchFar = m_mFar.Get(key);     // MUD LAB part D: or its compact far data
+		}
+		return m_TchSt;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: was world cell gi, gk touched by a stamp? The window field, else the stored tile that holds it
+	protected int TouchAt(int gi, int gk)
+	{
+		if (m_bPlaced)
+		{
+			int i = gi - m_iX0;
+			int k = gk - m_iZ0;
+			if (i >= 0 && i < N && k >= 0 && k < N)
+				return m_F.m_aTouch[k * N + i];
+		}
+		if (gi < 0 || gk < 0)
+			return 0;
+		int tx = gi / TQ;
+		int tz = gk / TQ;
+		int li = gi - tx * TQ;
+		int lk = gk - tz * TQ;
+		MUD_MudSheetStore st = TouchStore(tx, tz);
+		if (!st && !m_TchFar && li == 0 && tx > 0)
+		{
+			tx = tx - 1;     // a shared side cell: the tile on its other side may hold it
+			li = TQ;
+			st = TouchStore(tx, tz);
+		}
+		if (!st && !m_TchFar && lk == 0 && tz > 0)
+		{
+			tz = tz - 1;
+			lk = TQ;
+			st = TouchStore(tx, tz);
+		}
+		if (st)
+			return st.m_D.m_aTouch[lk * TV + li];
+		if (m_TchFar)
+			return (m_TchFar.m_aC[lk * TV + li] >> 25) & 1;     // MUD LAB part D: class bit 1
+		return 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL deposit band of world tile tx, tz: 2-pass chamfer distance to the nearest touched cell over the tile
+	//! + BandMargin cells, then band 1 within BAND_IN, a sine fall to 0 at BAND_IN + BAND_FADE. Written to d (a store)
+	//! or, d null, to live slot ti, tk of the field.
+	protected void BandTile(int tx, int tz, MUD_MudSheetTileData d, int ti, int tk)
+	{
+		if (BAND_MICRO)
+		{
+			BandTileMicro(tx, tz, d, ti, tk);     // stage 2 C2
+			return;
+		}
+		int tB = System.GetTickCount();
+		m_iTchKey = -1;
+		m_TchSt = null;
+		m_TchFar = null;
+		int mg = BandMargin();
+		int w = TV + 2 * mg;
+		int gi0 = tx * TQ - mg;
+		int gk0 = tz * TQ - mg;
+		float dist[2401];      // BAND_W x BAND_W
+		bool any = false;
+		for (int k = 0; k < w; k++)
+		{
+			for (int i = 0; i < w; i++)
+			{
+				int li = i - mg;
+				int lk = k - mg;
+				int tc;
+				if (d && li >= 0 && li < TV && lk >= 0 && lk < TV)
+					tc = d.m_aTouch[lk * TV + li];
+				else
+					tc = TouchAt(gi0 + i, gk0 + k);
+				if (tc != 0)
+				{
+					dist[k * w + i] = 0;
+					any = true;
+				}
+				else
+				{
+					dist[k * w + i] = 1000000;
+				}
+			}
+		}
+		if (any)
+		{
+			for (int k2 = 0; k2 < w; k2++)
+			{
+				for (int i2 = 0; i2 < w; i2++)
+				{
+					int a = k2 * w + i2;
+					float best = dist[a];
+					if (best == 0)
+						continue;
+					if (i2 > 0)
+						best = Math.Min(best, dist[a - 1] + 1);
+					if (k2 > 0)
+					{
+						best = Math.Min(best, dist[a - w] + 1);
+						if (i2 > 0)
+							best = Math.Min(best, dist[a - w - 1] + 1.4142);
+						if (i2 < w - 1)
+							best = Math.Min(best, dist[a - w + 1] + 1.4142);
+					}
+					dist[a] = best;
+				}
+			}
+			for (int k3 = w - 1; k3 >= 0; k3--)
+			{
+				for (int i3 = w - 1; i3 >= 0; i3--)
+				{
+					int b = k3 * w + i3;
+					float best2 = dist[b];
+					if (best2 == 0)
+						continue;
+					if (i3 < w - 1)
+						best2 = Math.Min(best2, dist[b + 1] + 1);
+					if (k3 < w - 1)
+					{
+						best2 = Math.Min(best2, dist[b + w] + 1);
+						if (i3 < w - 1)
+							best2 = Math.Min(best2, dist[b + w + 1] + 1.4142);
+						if (i3 > 0)
+							best2 = Math.Min(best2, dist[b + w - 1] + 1.4142);
+					}
+					dist[b] = best2;
+				}
+			}
+		}
+		float cap = mg + 1;
+		if (BAND_INCR)
+			DistPrep(d);     // stage 2 C1: the distances are kept too
+		for (int lk2 = 0; lk2 < TV; lk2++)
+		{
+			for (int li2 = 0; li2 < TV; li2++)
+			{
+				float dm = dist[(lk2 + mg) * w + li2 + mg] * CELL;
+				float band = 0;
+				if (dm <= BAND_IN)
+				{
+					band = 1;
+				}
+				else if (dm < BAND_IN + BAND_FADE)
+				{
+					float f = (dm - BAND_IN) / BAND_FADE;
+					band = 0.5 + 0.5 * Math.Cos(f * Math.PI);
+				}
+				if (d)
+					d.m_aBand[lk2 * TV + li2] = band;
+				else
+					m_F.m_aBand[(tk * TQ + lk2) * N + ti * TQ + li2] = band;
+				if (BAND_INCR)
+				{
+					float dv = dist[(lk2 + mg) * w + li2 + mg];
+					if (dv > cap)
+						dv = cap;
+					if (d)
+						d.m_Dist.m_aDist[lk2 * TV + li2] = dv;
+					else
+						m_DistF.m_aDist[(tk * TQ + lk2) * N + ti * TQ + li2] = dv;
+				}
+			}
+		}
+		if (BAND_INCR)
+			DistDone(d, ti, tk);
+		m_TchSt = null;
+		m_TchFar = null;
+		s_iBandMsAll += System.GetTickCount(tB);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 / C2: band by distance (cells) - the same curve as BandTile (1 within BAND_IN, a cosine fall to 0
+	//! at BAND_IN + BAND_FADE), 32 steps a cell, read with a straight line between steps (LabSet; first use)
+	static void BandLutBuild()
+	{
+		for (int j = 0; j < LUT_N; j++)
+		{
+			float dm = j / 32.0 * CELL;
+			float band = 0;
+			if (dm <= BAND_IN)
+			{
+				band = 1;
+			}
+			else if (dm < BAND_IN + BAND_FADE)
+			{
+				float f = (dm - BAND_IN) / BAND_FADE;
+				band = 0.5 + 0.5 * Math.Cos(f * Math.PI);
+			}
+			s_aBandLut[j] = band;
+		}
+		s_bLutOk = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 / C2: band at distance dv (cells) from the table
+	protected float BandOf(float dv)
+	{
+		float fj = dv * 32;
+		int j = fj;
+		if (j >= LUT_N - 1)
+			return 0;
+		float b0 = s_aBandLut[j];
+		return b0 + (s_aBandLut[j + 1] - b0) * (fj - j);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1: kept distances of an older switch / preset are dropped (every live slot due again); holders made
+	protected void DistGenCheck()
+	{
+		if (!m_DistF)
+		{
+			m_DistF = new MUD_MudSheetDist();
+			m_DistT = new MUD_MudSheetDist();
+		}
+		if (m_iDistGen == s_iDistGen)
+			return;
+		m_iDistGen = s_iDistGen;
+		for (int t = 0; t < TILES * TILES; t++)
+			m_aSlotDist[t] = 0;
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, BandTile before writing distances: d's holder (a store) or the window's
+	protected void DistPrep(MUD_MudSheetTileData d)
+	{
+		DistGenCheck();
+		if (d && !d.m_Dist)
+			d.m_Dist = new MUD_MudSheetTileDist();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, BandTile done: d's distances (or live slot ti, tk's) are current
+	protected void DistDone(MUD_MudSheetTileData d, int ti, int tk)
+	{
+		if (d)
+			d.m_Dist.m_iGen = s_iDistGen;
+		else
+			m_aSlotDist[tk * TILES + ti] = 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C2 BAND_MICRO: BandTile with direct m_F.m_aTouch reads when the tile + margin lies in the window, if
+	//! compares instead of Math.Min and the band table instead of Math.Cos (same distances, band within the table's
+	//! step error)
+	protected void BandTileMicro(int tx, int tz, MUD_MudSheetTileData d, int ti, int tk)
+	{
+		int tB = System.GetTickCount();
+		if (!s_bLutOk)
+			BandLutBuild();
+		m_iTchKey = -1;
+		m_TchSt = null;
+		m_TchFar = null;
+		int mg = BandMargin();
+		int w = TV + 2 * mg;
+		int gi0 = tx * TQ - mg;
+		int gk0 = tz * TQ - mg;
+		int wi0 = gi0 - m_iX0;
+		int wk0 = gk0 - m_iZ0;
+		bool inWin = m_bPlaced && wi0 >= 0 && wk0 >= 0 && wi0 + w <= N && wk0 + w <= N;
+		float dist[2401];      // BAND_W x BAND_W
+		bool any = false;
+		for (int k = 0; k < w; k++)
+		{
+			for (int i = 0; i < w; i++)
+			{
+				int li = i - mg;
+				int lk = k - mg;
+				int tc;
+				if (d && li >= 0 && li < TV && lk >= 0 && lk < TV)
+					tc = d.m_aTouch[lk * TV + li];
+				else if (inWin)
+					tc = m_F.m_aTouch[(wk0 + k) * N + wi0 + i];
+				else
+					tc = TouchAt(gi0 + i, gk0 + k);
+				if (tc != 0)
+				{
+					dist[k * w + i] = 0;
+					any = true;
+				}
+				else
+				{
+					dist[k * w + i] = 1000000;
+				}
+			}
+		}
+		if (any)
+		{
+			for (int k2 = 0; k2 < w; k2++)
+			{
+				for (int i2 = 0; i2 < w; i2++)
+				{
+					int a = k2 * w + i2;
+					float best = dist[a];
+					if (best == 0)
+						continue;
+					float c;
+					if (i2 > 0)
+					{
+						c = dist[a - 1] + 1;
+						if (c < best)
+							best = c;
+					}
+					if (k2 > 0)
+					{
+						c = dist[a - w] + 1;
+						if (c < best)
+							best = c;
+						if (i2 > 0)
+						{
+							c = dist[a - w - 1] + 1.4142;
+							if (c < best)
+								best = c;
+						}
+						if (i2 < w - 1)
+						{
+							c = dist[a - w + 1] + 1.4142;
+							if (c < best)
+								best = c;
+						}
+					}
+					dist[a] = best;
+				}
+			}
+			for (int k3 = w - 1; k3 >= 0; k3--)
+			{
+				for (int i3 = w - 1; i3 >= 0; i3--)
+				{
+					int b = k3 * w + i3;
+					float best2 = dist[b];
+					if (best2 == 0)
+						continue;
+					float c2;
+					if (i3 < w - 1)
+					{
+						c2 = dist[b + 1] + 1;
+						if (c2 < best2)
+							best2 = c2;
+					}
+					if (k3 < w - 1)
+					{
+						c2 = dist[b + w] + 1;
+						if (c2 < best2)
+							best2 = c2;
+						if (i3 < w - 1)
+						{
+							c2 = dist[b + w + 1] + 1.4142;
+							if (c2 < best2)
+								best2 = c2;
+						}
+						if (i3 > 0)
+						{
+							c2 = dist[b + w - 1] + 1.4142;
+							if (c2 < best2)
+								best2 = c2;
+						}
+					}
+					dist[b] = best2;
+				}
+			}
+		}
+		float cap = mg + 1;
+		if (BAND_INCR)
+			DistPrep(d);
+		for (int lk2 = 0; lk2 < TV; lk2++)
+		{
+			for (int li2 = 0; li2 < TV; li2++)
+			{
+				float dv = dist[(lk2 + mg) * w + li2 + mg];
+				if (dv > cap)
+					dv = cap;
+				float band = BandOf(dv);
+				if (d)
+				{
+					d.m_aBand[lk2 * TV + li2] = band;
+					if (BAND_INCR)
+						d.m_Dist.m_aDist[lk2 * TV + li2] = dv;
+				}
+				else
+				{
+					int wv = (tk * TQ + lk2) * N + ti * TQ + li2;
+					m_F.m_aBand[wv] = band;
+					if (BAND_INCR)
+						m_DistF.m_aDist[wv] = dv;
+				}
+			}
+		}
+		if (BAND_INCR)
+			DistDone(d, ti, tk);
+		m_TchSt = null;
+		m_TchFar = null;
+		s_iBandMsAll += System.GetTickCount(tB);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1: live slot t's kept window distances are current (its band needs no BandTile)
+	protected bool DistOk(int t)
+	{
+		return m_aSlotDist[t] != 0 && m_iDistGen == s_iDistGen;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 BAND_INCR, once per Upload and before a Follow shift: the cells touched since the last call lower the
+	//! kept distances round them. Box = the new cells + BandMargin, seeded from the kept distances (new cells 0, no
+	//! TouchAt), two chamfer passes inside the box only; cells whose distance fell get their band from the table, and
+	//! only slots where a band value changed are dirtied. Exact: touches only go 0 -> 1, and a chamfer path between two
+	//! cells stays inside their box. Slots in the box without current distances get a BandTile first.
+	protected void BandIncr()
+	{
+		if (m_aNewGi.IsEmpty() || !m_bPlaced)
+		{
+			m_aNewGi.Clear();
+			m_aNewGk.Clear();
+			return;
+		}
+		int tB = System.GetTickCount();
+		int bandAt = s_iBandMsAll;
+		DistGenCheck();
+		if (!s_bLutOk)
+			BandLutBuild();
+		int mg = BandMargin();
+		int i0 = N;
+		int i1 = -1;
+		int k0 = N;
+		int k1 = -1;
+		m_aNewV.Clear();
+		for (int n = 0; n < m_aNewGi.Count(); n++)
+		{
+			int ni = m_aNewGi[n] - m_iX0;
+			int nk = m_aNewGk[n] - m_iZ0;
+			if (ni < 0 || ni >= N || nk < 0 || nk >= N)
+				continue;
+			m_aNewV.Insert(nk * N + ni);
+			if (ni < i0)
+				i0 = ni;
+			if (ni > i1)
+				i1 = ni;
+			if (nk < k0)
+				k0 = nk;
+			if (nk > k1)
+				k1 = nk;
+		}
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+		if (i1 < 0)
+			return;
+		int bi0 = i0 - mg;
+		if (bi0 < 0)
+			bi0 = 0;
+		int bi1 = i1 + mg;
+		if (bi1 > N - 1)
+			bi1 = N - 1;
+		int bk0 = k0 - mg;
+		if (bk0 < 0)
+			bk0 = 0;
+		int bk1 = k1 + mg;
+		if (bk1 > N - 1)
+			bk1 = N - 1;
+		// slots in the box need current distances first (BandTile: exact, the new touches included)
+		int ta = 0;
+		if (bi0 > 0)
+			ta = (bi0 - 1) / TQ;
+		int tb = bi1 / TQ;
+		if (tb > TILES - 1)
+			tb = TILES - 1;
+		int ka = 0;
+		if (bk0 > 0)
+			ka = (bk0 - 1) / TQ;
+		int kb = bk1 / TQ;
+		if (kb > TILES - 1)
+			kb = TILES - 1;
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		for (int sk = ka; sk <= kb; sk++)
+		{
+			for (int si = ta; si <= tb; si++)
+			{
+				int st = sk * TILES + si;
+				if (m_aSlotDist[st] != 0)
+					continue;
+				BandTile(x0 + si, z0 + sk, null, si, sk);
+				m_aSlotBand[st] = 0;
+				m_aSlotDirty[st] = 1;
+				m_aSlotWhy[st] = m_aSlotWhy[st] | WHY_BAND;
+				m_bDirty = true;
+				m_iIncrFull++;
+			}
+		}
+		MUD_MudSheetDist df = m_DistF;
+		foreach (int nv : m_aNewV)
+		{
+			if (df.m_aDist[nv] != 0)
+			{
+				df.m_aDist[nv] = 0;
+				df.m_aChg[nv] = 1;
+			}
+		}
+		for (int k = bk0; k <= bk1; k++)
+		{
+			for (int i = bi0; i <= bi1; i++)
+			{
+				int a = k * N + i;
+				float best = df.m_aDist[a];
+				if (best == 0)
+					continue;
+				float c;
+				if (i > bi0)
+				{
+					c = df.m_aDist[a - 1] + 1;
+					if (c < best)
+						best = c;
+				}
+				if (k > bk0)
+				{
+					c = df.m_aDist[a - N] + 1;
+					if (c < best)
+						best = c;
+					if (i > bi0)
+					{
+						c = df.m_aDist[a - N - 1] + 1.4142;
+						if (c < best)
+							best = c;
+					}
+					if (i < bi1)
+					{
+						c = df.m_aDist[a - N + 1] + 1.4142;
+						if (c < best)
+							best = c;
+					}
+				}
+				if (best < df.m_aDist[a])
+				{
+					df.m_aDist[a] = best;
+					df.m_aChg[a] = 1;
+				}
+			}
+		}
+		for (int k2 = bk1; k2 >= bk0; k2--)
+		{
+			for (int i2 = bi1; i2 >= bi0; i2--)
+			{
+				int b = k2 * N + i2;
+				float best2 = df.m_aDist[b];
+				if (best2 == 0)
+					continue;
+				float c2;
+				if (i2 < bi1)
+				{
+					c2 = df.m_aDist[b + 1] + 1;
+					if (c2 < best2)
+						best2 = c2;
+				}
+				if (k2 < bk1)
+				{
+					c2 = df.m_aDist[b + N] + 1;
+					if (c2 < best2)
+						best2 = c2;
+					if (i2 < bi1)
+					{
+						c2 = df.m_aDist[b + N + 1] + 1.4142;
+						if (c2 < best2)
+							best2 = c2;
+					}
+					if (i2 > bi0)
+					{
+						c2 = df.m_aDist[b + N - 1] + 1.4142;
+						if (c2 < best2)
+							best2 = c2;
+					}
+				}
+				if (best2 < df.m_aDist[b])
+				{
+					df.m_aDist[b] = best2;
+					df.m_aChg[b] = 1;
+				}
+			}
+		}
+		// bands of the lowered cells; slots (a side cell: both) where a value changed are dirtied
+		int mask = 0;
+		for (int k3 = bk0; k3 <= bk1; k3++)
+		{
+			for (int i3 = bi0; i3 <= bi1; i3++)
+			{
+				int e = k3 * N + i3;
+				if (df.m_aChg[e] == 0)
+					continue;
+				df.m_aChg[e] = 0;
+				float band = BandOf(df.m_aDist[e]);
+				if (band == m_F.m_aBand[e])
+					continue;
+				m_F.m_aBand[e] = band;
+				int ri = i3 % TQ;
+				int rk = k3 % TQ;
+				int ma = i3 / TQ;
+				int mb = ma;
+				if (ri == 0 && ma > 0)
+					ma = ma - 1;
+				if (mb > TILES - 1)
+					mb = TILES - 1;
+				int mc = k3 / TQ;
+				int md = mc;
+				if (rk == 0 && mc > 0)
+					mc = mc - 1;
+				if (md > TILES - 1)
+					md = TILES - 1;
+				for (int mk = mc; mk <= md; mk++)
+				{
+					for (int mi = ma; mi <= mb; mi++)
+						mask = mask | (1 << (mk * TILES + mi));
+				}
+			}
+		}
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if ((mask & (1 << t)) == 0)
+				continue;
+			m_aSlotDirty[t] = 1;
+			m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_BAND;
+			m_bDirty = true;
+			m_iIncrDirty++;
+		}
+		m_iIncrRuns++;
+		m_iIncrCells += (bi1 - bi0 + 1) * (bk1 - bk0 + 1);
+		s_iBandMsAll += System.GetTickCount(tB) - (s_iBandMsAll - bandAt);     // its BandTiles counted once
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Follow after the field moved by sti, stk tiles: the kept distances and slot flags move with it
+	//! (entering slots: not current until DistUnpack / BandTile)
+	protected void DistShift(int sti, int stk)
+	{
+		DistGenCheck();
+		int si = sti * TQ;
+		int sk = stk * TQ;
+		float cap = BandMargin() + 1;
+		MUD_MudSheetDist f = m_DistF;
+		MUD_MudSheetDist nt = m_DistT;
+		for (int k = 0; k < N; k++)
+		{
+			for (int i = 0; i < N; i++)
+			{
+				int oi = i + si;
+				int ok = k + sk;
+				int v = k * N + i;
+				nt.m_aChg[v] = 0;
+				if (oi >= 0 && oi < N && ok >= 0 && ok < N)
+					nt.m_aDist[v] = f.m_aDist[ok * N + oi];
+				else
+					nt.m_aDist[v] = cap;
+			}
+		}
+		m_DistF = nt;
+		m_DistT = f;
+		int nd[16];
+		for (int t = 0; t < TILES * TILES; t++)
+			nd[t] = 0;
+		for (int tk = 0; tk < TILES; tk++)
+		{
+			for (int ti = 0; ti < TILES; ti++)
+			{
+				int nti = ti - sti;
+				int ntk = tk - stk;
+				if (nti >= 0 && nti < TILES && ntk >= 0 && ntk < TILES)
+					nd[ntk * TILES + nti] = m_aSlotDist[tk * TILES + ti];
+			}
+		}
+		for (int t2 = 0; t2 < TILES * TILES; t2++)
+			m_aSlotDist[t2] = nd[t2];
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Freeze after Pack: live slot ti, tk's distances go with its store (none if not current)
+	protected void DistPack(int ti, int tk, MUD_MudSheetTileData d)
+	{
+		if (!DistOk(tk * TILES + ti))
+		{
+			d.m_Dist = null;
+			return;
+		}
+		if (!d.m_Dist)
+			d.m_Dist = new MUD_MudSheetTileDist();
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+				d.m_Dist.m_aDist[lk * TV + li] = m_DistF.m_aDist[(tk * TQ + lk) * N + ti * TQ + li];
+		}
+		d.m_Dist.m_iGen = s_iDistGen;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1, Follow after Unpack: a store's current distances come back into slot t (ti, tk); none, stale or its
+	//! band still queued (m_aBandQ) -> the slot is not current (BandTile before its build, as before)
+	protected void DistUnpack(MUD_MudSheetTileData d, int key, int t, int ti, int tk)
+	{
+		MUD_MudSheetTileDist sd = d.m_Dist;
+		if (!sd || sd.m_iGen != s_iDistGen || m_aBandQ.Contains(key))
+			return;
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+				m_DistF.m_aDist[(tk * TQ + lk) * N + ti * TQ + li] = sd.m_aDist[lk * TV + li];
+		}
+		m_aSlotDist[t] = 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 C1 TEST_KIT bench (once, first Upload with BAND_INCR): 1000 random stamps (discs r 0..2 cells) through
+	//! BandIncr every 10 stamps, then every live slot's band again from scratch (BandTile into a scratch store) - max
+	//! |incremental - full| of band and distance. The window is put back as it was (touches, bands, distances, slots).
+	protected void BandBench()
+	{
+		m_bBenchDone = true;
+		if (!m_bPlaced)
+			return;
+		int bandAll = s_iBandMsAll;
+		bool wasDirty = m_bDirty;
+		DistGenCheck();
+		MUD_MudSheetBench sv = new MUD_MudSheetBench();
+		for (int v = 0; v < NN; v++)
+		{
+			sv.m_aTouch[v] = m_F.m_aTouch[v];
+			sv.m_aBand[v] = m_F.m_aBand[v];
+			sv.m_aDist[v] = m_DistF.m_aDist[v];
+		}
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			sv.m_aSlot[t] = m_aSlotDist[t];
+			sv.m_aSlot[16 + t] = m_aSlotBand[t];
+			sv.m_aSlot[32 + t] = m_aSlotDirty[t];
+			sv.m_aSlot[48 + t] = m_aSlotWhy[t];
+		}
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		for (int t1 = 0; t1 < TILES * TILES; t1++)
+		{
+			int ti1 = t1 % TILES;
+			int tk1 = t1 / TILES;
+			if (m_aSlotDist[t1] == 0)
+				BandTile(x0 + ti1, z0 + tk1, null, ti1, tk1);
+		}
+		int tI = System.GetTickCount();
+		int news = 0;
+		for (int s = 0; s < 1000; s++)
+		{
+			int ci = Math.RandomInt(0, N);
+			int ck = Math.RandomInt(0, N);
+			int r = Math.RandomInt(0, 3);
+			for (int dk = -r; dk <= r; dk++)
+			{
+				for (int di = -r; di <= r; di++)
+				{
+					int i = ci + di;
+					int k = ck + dk;
+					if (i < 0 || i >= N || k < 0 || k >= N || di * di + dk * dk > r * r)
+						continue;
+					if (m_F.m_aTouch[k * N + i] != 0)
+						continue;
+					m_F.m_aTouch[k * N + i] = 1;
+					m_aNewGi.Insert(m_iX0 + i);
+					m_aNewGk.Insert(m_iZ0 + k);
+					news++;
+				}
+			}
+			int sm = s % 10;
+			if (sm == 9)
+				BandIncr();
+		}
+		BandIncr();
+		int incrMs = System.GetTickCount(tI);
+		MUD_MudSheetTileData sc = new MUD_MudSheetTileData();
+		float maxBand = 0;
+		float maxDist = 0;
+		int at = -1;
+		int tF = System.GetTickCount();
+		for (int t2 = 0; t2 < TILES * TILES; t2++)
+		{
+			int ti = t2 % TILES;
+			int tk = t2 / TILES;
+			for (int lk = 0; lk < TV; lk++)
+			{
+				for (int li = 0; li < TV; li++)
+					sc.m_aTouch[lk * TV + li] = m_F.m_aTouch[(tk * TQ + lk) * N + ti * TQ + li];
+			}
+			BandTile(x0 + ti, z0 + tk, sc, ti, tk);
+			for (int lk2 = 0; lk2 < TV; lk2++)
+			{
+				for (int li2 = 0; li2 < TV; li2++)
+				{
+					int wv = (tk * TQ + lk2) * N + ti * TQ + li2;
+					float db = Math.AbsFloat(sc.m_aBand[lk2 * TV + li2] - m_F.m_aBand[wv]);
+					if (db > maxBand)
+					{
+						maxBand = db;
+						at = wv;
+					}
+					float dd = Math.AbsFloat(sc.m_Dist.m_aDist[lk2 * TV + li2] - m_DistF.m_aDist[wv]);
+					if (dd > maxDist)
+						maxDist = dd;
+				}
+			}
+		}
+		int fullMs = System.GetTickCount(tF);
+		Print(string.Format("MUD band incr bench: 1000 stamps (%1 new cells), incremental %2 ms in 101 passes, full BandTile x 16 %3 ms | max |incr - full| band %4 (window cell %5), distance %6 cells | band micro %7, within 1e-4: %8",
+			news, incrMs, fullMs, maxBand, at, maxDist, BAND_MICRO, maxBand <= 0.0001), LogLevel.NORMAL);
+		for (int v2 = 0; v2 < NN; v2++)
+		{
+			m_F.m_aTouch[v2] = sv.m_aTouch[v2];
+			m_F.m_aBand[v2] = sv.m_aBand[v2];
+			m_DistF.m_aDist[v2] = sv.m_aDist[v2];
+			m_DistF.m_aChg[v2] = 0;
+		}
+		for (int t3 = 0; t3 < TILES * TILES; t3++)
+		{
+			m_aSlotDist[t3] = sv.m_aSlot[t3];
+			m_aSlotBand[t3] = sv.m_aSlot[16 + t3];
+			m_aSlotDirty[t3] = sv.m_aSlot[32 + t3];
+			m_aSlotWhy[t3] = sv.m_aSlot[48 + t3];
+		}
+		m_aNewGi.Clear();
+		m_aNewGk.Clear();
+		m_bDirty = wasDirty;
+		s_iBandMsAll = bandAll;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL, after each Upload: stored tiles a band change reached - band again; a shown one is rebuilt
+	protected void BandStored()
+	{
+		foreach (int key : m_aBandQ)
+		{
+			MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: compacted since it was queued: back first
+			if (!st)
+				continue;
+			BandTile(st.m_iTx, st.m_iTz, st.m_D, 0, 0);
+			if (!st.m_Ent)
+				continue;     // data only: its mesh comes on approach with this band
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_BAND);
+			QueueBuild(st.m_iTx, st.m_iTz);
+		}
+		m_aBandQ.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Builds-by-reason: what live slot t's Upload build is for (mesh-less first, then slump-only / band-only dirt,
+	//! then the reason UploadPick picked it)
+	protected int UploadWhy(int t)
+	{
+		int pw = m_aPickWhy[t];
+		if (pw == BW_MESHLESS || pw == BW_COBUILD)
+			return pw;
+		int w = m_aSlotWhy[t];
+		if (w == WHY_SLUMP)
+			return BW_SLUMP;
+		if (w == WHY_BAND)
+			return BW_BAND;
+		if (pw >= 0)
+			return pw;
+		return BW_NEAREST;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL: the heights live slot ti, tk was just drawn with (m_TD) back to the field ('would skip' meter)
+	protected void CopyLastY(int ti, int tk)
+	{
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+				m_F.m_aLastY[(tk * TQ + lk) * N + ti * TQ + li] = m_TD.m_aLastY[lk * TV + li];
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL Freeze: the slot's ground eases end at their final ground; its band is brought up to date
+	protected void FreezeLocal(int tx, int tz, int ti, int tk)
+	{
+		if (!m_mEase.IsEmpty())
+		{
+			int i0 = ti * TQ;
+			int k0 = tk * TQ;
+			array<int> done = {};
+			foreach (int key, MUD_MudSheetEase e : m_mEase)
+			{
+				int i = e.m_iGi - m_iX0;
+				int k = e.m_iGk - m_iZ0;
+				if (i < i0 || i > i0 + TQ || k < k0 || k > k0 + TQ)
+					continue;
+				int v = k * N + i;
+				if (m_F.m_aGs[v] != 0)
+				{
+					m_F.m_aG[v] = e.m_fTo;
+					FillAround(i, k);
+				}
+				done.Insert(key);
+			}
+			foreach (int dk : done)
+				m_mEase.Remove(dk);
+		}
+		int t = tk * TILES + ti;
+		if (m_aSlotBand[t] != 0)
+		{
+			m_aSlotBand[t] = 0;
+			if (!BAND_INCR || !DistOk(t))
+				BandTile(tx, tz, null, ti, tk);     // stage 2 C1: not when the kept distances are current
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Grounds: window cell i, k lies on a zone slot. SHEET LOCAL: any slot that holds it (side and corner cells are
+	//! shared, and a born slot next to an unborn one needs its side traced too)
+	protected bool ZoneAtCellAny(int i, int k)
+	{
+		if (!m_bLocal)
+			return ZoneAtCell(i, k);
+		if (i < 0 || k < 0 || i >= N || k >= N)
+			return false;
+		int ri = i % TQ;
+		int rk = k % TQ;
+		int ta = i / TQ;
+		int tb = ta;
+		if (ri == 0 && ta > 0)
+			ta = ta - 1;
+		int ka = k / TQ;
+		int kb = ka;
+		if (rk == 0 && ka > 0)
+			ka = ka - 1;
+		if (ta >= TILES)
+			ta = TILES - 1;
+		if (tb >= TILES)
+			tb = TILES - 1;
+		if (ka >= TILES)
+			ka = TILES - 1;
+		if (kb >= TILES)
+			kb = TILES - 1;
+		for (int tk = ka; tk <= kb; tk++)
+		{
+			for (int ti = ta; ti <= tb; ti++)
+			{
+				if (m_aSlotZone[tk * TILES + ti] != 0)
+					return true;
+			}
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B5 CRATER_PREBUILD (TakeOp, client, sheet local): crater op seen at Submit - its voxels are carved right
+	//! after (data), their meshes build over the next frames and go live together (MUD_VoxelProbe.GoLive)
+	protected void PreNote(MUD_VoxelOp op)
+	{
+		if (MUD_TestKit.TEST_KIT)
+			PreMeter();     // stage 3 Part 0 D meter
+		if (PRE_LIVE_ONLY && (!SCR_PlayerController.GetLocalControlledEntity() || m_iPreFrameN >= PRE_FRAME_MAX))
+		{
+			m_iPreSkip++;
+			return;     // stage 3 D1: joining (replay) or a burst - not noted: the normal go-live dig (PreTaken false)
+		}
+		m_iPreFrameN++;
+		if (m_aPreWp.Count() >= 32)
+		{
+			if (MUD_TestKit.TEST_KIT)
+				m_iDCapDrop += m_aPreWp.Count();
+			PreForget();     // go-lives that never came: start clean
+		}
+		m_aPreLo.Insert(op.m_vLo);
+		m_aPreHi.Insert(op.m_vHi);
+		m_aPreWp.Insert(op.m_vWp);
+		m_aPreR.Insert(MUD_VoxelProbe.CraterCrest(op.m_fDepth));
+		m_aPreSt.Insert(0);
+	}
+
+	protected void PreForget()
+	{
+		m_aPreLo.Clear();
+		m_aPreHi.Clear();
+		m_aPreWp.Clear();
+		m_aPreR.Clear();
+		m_aPreSt.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5, GroundChanged at the go-live: true = the crater at wp was dug ahead (skip it). Its entry goes either way.
+	protected bool PreTaken(vector wp)
+	{
+		for (int i = 0; i < m_aPreWp.Count(); i++)
+		{
+			if (vector.DistanceSq(m_aPreWp[i], wp) > 0.0001)
+				continue;
+			int st = m_aPreSt[i];
+			m_aPreLo.RemoveOrdered(i);
+			m_aPreHi.RemoveOrdered(i);
+			m_aPreWp.RemoveOrdered(i);
+			m_aPreR.RemoveOrdered(i);
+			m_aPreSt.RemoveOrdered(i);
+			return st == 1;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: voxel ground top at x, z from the data, not cached (MUD_VoxelProbe.SurfaceAt's cache holds the last
+	//! go-live's tops until the next one): TopAt with the rut floor under it (a little smoother at rut edges)
+	static bool PreSurf(float x, float z, out float y)
+	{
+		s_iPreReads++;
+		if (!PRE_COL_CACHE || !PreTopCached(x, z, y))
+		{
+			if (!MUD_VoxelProbe.TopAt(x, z, y))
+				return false;
+		}
+		float f = MUD_VoxelProbe.FieldFloorAt(x, z, y);
+		if (f < y)
+			y = f;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B6 PRE_COL_CACHE (PreSurf): TopAt from the 4 grid column tops round x, z, each read once per frame (TopAt scans
+	//! 4 columns per call, ~11 sheet verts share a column). False = a corner has no cached top (box edge, no origin):
+	//! the caller reads TopAt itself (counted in s_iPreFall)
+	protected static bool PreTopCached(float x, float z, out float y)
+	{
+		float x0;
+		float z0;
+		if (!MUD_VoxelProbe.LookOrigin(x0, z0))
+		{
+			s_iPreFall++;
+			return false;
+		}
+		float gx = (x - x0) / MUD_VoxelProbe.CELL;
+		float gz = (z - z0) / MUD_VoxelProbe.CELL;
+		int gi = Math.Floor(gx);
+		int gk = Math.Floor(gz);
+		float fx = gx - gi;
+		float fz = gz - gk;
+		float h00;
+		float h10;
+		float h01;
+		float h11;
+		if (!PreNode(gi, gk, x0, z0, h00) || !PreNode(gi + 1, gk, x0, z0, h10) || !PreNode(gi, gk + 1, x0, z0, h01) || !PreNode(gi + 1, gk + 1, x0, z0, h11))
+		{
+			s_iPreFall++;
+			return false;
+		}
+		y = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+		return true;
+	}
+
+	//! B6: grid column gi, gk's top (TopAt right at the column = its top), cached until s_mPreTop is cleared
+	//! (every PreStep, every TakeOp: the data only changes with an op)
+	protected static bool PreNode(int gi, int gk, float x0, float z0, out float h)
+	{
+		if (gi < 0 || gk < 0 || gi >= PRE_KEY || gk >= PRE_KEY)
+			return false;
+		int key = gk * PRE_KEY + gi;
+		if (s_mPreTop.Find(key, h))
+			return h != PRE_TOP_NONE;
+		if (!MUD_VoxelProbe.TopAt(x0 + gi * MUD_VoxelProbe.CELL, z0 + gk * MUD_VoxelProbe.CELL, h))
+			h = PRE_TOP_NONE;
+		s_mPreTop.Set(key, h);
+		return h != PRE_TOP_NONE;
+	}
+
+	//! DigNow's voxel ground read: uncached in the ahead dig (B5)
+	protected bool DigSurf(float x, float z, out float y)
+	{
+		if (m_bPreDig)
+			return PreSurf(x, z, y);
+		return MUD_VoxelProbe.SurfaceAt(x, z, y);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: is tile tx, tz's build held (window open, in a dug-ahead crater's reach + 1 tile)?
+	protected bool PreHeld(int tx, int tz)
+	{
+		return m_bPreWin && m_mPreTiles.Contains(TrailKey(tx, tz));
+	}
+
+	//! B5: keep mesh res (null = hide) for te until PreClose; a later build of te replaces it
+	protected void PreKeep(IEntity te, Resource res, int tx, int tz)
+	{
+		m_iPreHeld++;
+		int at = m_aHoldEnt.Find(te);
+		if (at < 0)
+		{
+			// the shown mesh: its caller drops its ref when it stores res (m_aTileRes / st.m_Res) - keep it until the swap
+			Resource old;
+			if (m_bPlaced && IsLive(tx, tz))
+			{
+				int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+				if (t >= 0 && t < m_aTileRes.Count())
+					old = m_aTileRes[t];
+			}
+			else
+			{
+				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (st)
+					old = st.m_Res;
+			}
+			m_aHoldEnt.Insert(te);
+			m_aHoldRes.Insert(res);
+			m_aHoldKey.Insert(TrailKey(tx, tz));
+			m_aHoldOld.Insert(old);
+			return;
+		}
+		m_aHoldRes[at] = res;
+		m_aHoldKey[at] = TrailKey(tx, tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5, every Frame while on or a window is open: dig new crater ops ahead (data, held builds queued), then build
+	//! held now-slots and taper tiles PRE_MS each; close on timeout / switch off / sheet local off
+	protected void PreStep()
+	{
+		if (!CRATER_PREBUILD || !m_bLocal)
+		{
+			if (m_bPreWin)
+				PreClose("switch off");
+			PreForget();
+			return;
+		}
+		s_mPreTop.Clear();     // B6: a new frame - ops may have carved since
+		int preT0 = System.GetTickCount();
+		bool dig = false;
+		for (int i = 0; i < m_aPreSt.Count(); i++)
+		{
+			if (m_aPreSt[i] != 0)
+				continue;
+			if (!m_bPreWin)
+			{
+				m_bPreWin = true;
+				m_iPreT0 = System.GetTickCount();
+				m_iPreOps = 0;
+				m_iPreHeld = 0;
+				m_iPreFrames = 0;
+				m_iPreDigMs = 0;
+				m_iPreDigWorst = 0;
+				s_iPreReads = 0;
+				s_iPreFall = 0;
+			}
+			m_aPreSt[i] = 1;
+			m_iPreOps++;
+			dig = true;
+			// held tiles: the blast reach (BlastNow) and the dig box, + 1 tile for the taper neighbours
+			vector wp = m_aPreWp[i];
+			float reach = BlastReach(m_aPreR[i]);
+			vector lo = m_aPreLo[i];
+			vector hi = m_aPreHi[i];
+			int tx0 = Math.Floor(Math.Min(lo[0], wp[0] - reach) / TILE_M) - 1;
+			int tx1 = Math.Floor(Math.Max(hi[0], wp[0] + reach) / TILE_M) + 1;
+			int tz0 = Math.Floor(Math.Min(lo[2], wp[2] - reach) / TILE_M) - 1;
+			int tz1 = Math.Floor(Math.Max(hi[2], wp[2] + reach) / TILE_M) + 1;
+			for (int tz = tz0; tz <= tz1; tz++)
+			{
+				for (int tx = tx0; tx <= tx1; tx++)
+					m_mPreTiles.Set(TrailKey(tx, tz), 1);
+			}
+			m_bPreDig = true;
+			m_bMarkNow = true;     // as GroundChanged: its live slots get m_aSlotNow
+			QueueChange(lo, hi, wp, m_aPreR[i]);
+			m_bMarkNow = false;
+			m_bPreDig = false;
+		}
+		if (dig)
+		{
+			m_bPreDig = true;
+			m_bMarkNow = true;
+			DigNow();     // data now, its builds held (stored ones queued at the front)
+			m_bMarkNow = false;
+			m_bPreDig = false;
+			m_aNowLo.Clear();
+			m_aNowHi.Clear();
+			int preMs = System.GetTickCount(preT0);
+			m_iPreDigMs += preMs;
+			if (preMs > m_iPreDigWorst)
+				m_iPreDigWorst = preMs;
+		}
+		if (!m_bPreWin)
+			return;
+		if (System.GetTickCount(m_iPreT0) > PRE_MAX_MS)
+		{
+			PreClose("no go-live in time");
+			return;
+		}
+		m_iPreFrames++;
+		m_iNowBudget = PRE_MS;
+		BuildNowSlots();
+		m_iNowBudget = 0;
+		m_iTaperCap = PRE_MS;
+		TaperNow();
+		m_iTaperCap = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! B5: the window ends (FlushNow at the go-live, or PreStep): what is left builds now (held), then every held mesh
+	//! goes on its entity in this frame. A tile that moved (window shift, stored, gone) is built again instead.
+	protected void PreClose(string why)
+	{
+		int t0 = System.GetTickCount();
+		int late = BuildNowSlots();
+		m_iTaperCap = -1;
+		late += TaperNow();
+		m_iTaperCap = 0;
+		int shown = 0;
+		int lost = 0;
+		m_aLostOld.Clear();
+		for (int h = 0; h < m_aHoldEnt.Count(); h++)
+		{
+			IEntity te = m_aHoldEnt[h];
+			int key = m_aHoldKey[h];
+			int tx = key / 20000;
+			int tz = key - tx * 20000;
+			bool ok = false;
+			if (te && m_bPlaced && IsLive(tx, tz))
+			{
+				int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+				ok = t >= 0 && t < m_aTileEnt.Count() && m_aTileEnt[t] == te;
+			}
+			else if (te)
+			{
+				MUD_MudSheetStore st = m_mTrail.Get(key);
+				ok = st && st.m_Ent == te;
+			}
+			if (!ok)
+			{
+				lost++;
+				m_aLostOld.Insert(m_aHoldOld[h]);     // te may still show it until its rebuild
+				if (m_bPlaced && IsLive(tx, tz))
+				{
+					int i0 = (tx - m_iX0 / TQ) * TQ;
+					int k0 = (tz - m_iZ0 / TQ) * TQ;
+					MarkRect(i0, i0 + TQ, k0, k0 + TQ);
+					m_bDirty = true;
+				}
+				else
+					QueueBuild(tx, tz);
+				continue;
+			}
+			Resource res = m_aHoldRes[h];
+			if (!res || !res.GetResource())
+			{
+				te.ClearFlags(EntityFlags.VISIBLE, false);
+				shown++;
+				continue;
+			}
+			te.SetFlags(EntityFlags.VISIBLE, false);
+			te.SetObject(res.GetResource().ToMeshObject(), "");
+			te.Update();
+			shown++;
+		}
+		m_aHoldEnt.Clear();
+		m_aHoldRes.Clear();
+		m_aHoldKey.Clear();
+		m_aHoldOld.Clear();     // after every SetObject above
+		m_mPreTiles.Clear();
+		s_mPreTop.Clear();
+		m_bPreWin = false;
+		if (why == "go-live")
+			PreForget();     // every crater of this go-live passed GroundChanged already
+		Print(string.Format("MUD sheet prebuild: %1 after %2 ms (%3 ahead frames) | crater ops %4, builds held %5, built at close %6, shown %7, moved -> rebuilt %8, close %9 ms",
+			why, System.GetTickCount(m_iPreT0), m_iPreFrames, m_iPreOps, m_iPreHeld, late, shown, lost, System.GetTickCount(t0))
+			+ string.Format(" | dig ahead %1 ms (worst frame %2) | voxel top reads %3, col cache %4 (misses -> plain read %5)",
+			m_iPreDigMs, m_iPreDigWorst, s_iPreReads, PRE_COL_CACHE, s_iPreFall) + DMeter(), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL holes (DoDigNow): live zone slots a crater / dig marked are built in the blast frame (not through
+	//! UploadPick / UPLOAD_SLOTS / SLOT_MIN_S). A slot not traced yet stays dirty for Upload.
+	protected int BuildNowSlots()
+	{
+		if (!m_bPlaced)
+			return 0;
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		int built = 0;
+		int tNow = System.GetTickCount();
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aSlotNow[t] == 0)
+				continue;
+			if (m_iNowBudget > 0 && built > 0 && System.GetTickCount(tNow) >= m_iNowBudget)
+				break;     // stage 2 B5: the rest next frame (still flagged)
+			m_aSlotNow[t] = 0;
+			int ti = t % TILES;
+			int tk = t / TILES;
+			bool traceNow = false;
+			if (CRATER_TRACE_NOW && m_aSlotZone[t] != 0 && t < m_aTileEnt.Count() && m_aTileEnt[t] && !SlotTraced(t))
+			{
+				TraceSlotNow(ti, tk);     // stage 2 B2 (O1a): its missing cells now, built below
+				traceNow = true;
+			}
+			if (m_aSlotZone[t] == 0 || t >= m_aTileEnt.Count() || !m_aTileEnt[t] || !SlotTraced(t))
+			{
+				if (MUD_TestKit.TEST_KIT)
+					CraterSkip(t, x0 + ti, z0 + tk);     // stage 2 B1 crater log
+				continue;
+			}
+			if (MUD_TestKit.TEST_KIT && traceNow)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TRACED_NOW, x0 + ti, z0 + tk, true);
+			else if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_LIVE_BUILT, x0 + ti, z0 + tk, true);
+			if (m_aSlotBand[t] != 0)
+			{
+				m_aSlotBand[t] = 0;
+				if (!BAND_INCR || !DistOk(t))
+					BandTile(x0 + ti, z0 + tk, null, ti, tk);     // stage 2 C1: not when the kept distances are current
+			}
+			Pack(ti, tk, m_TD);
+			m_iBuildWhy = BW_HOLE;
+			Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
+			if (r)
+				m_aTileRes[t] = r;
+			CopyLastY(ti, tk);
+			m_aSlotDirty[t] = 0;
+			m_aSlotWhy[t] = 0;
+			m_aSlotWait[t] = 0;
+			m_aSlotBuiltMs[t] = Math.Round(m_fLast * 1000);
+			built++;
+		}
+		return built;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B2 CRATER_TRACE_NOW (O1a): live slot ti, tk - every untraced even cell traced now and the cells between
+	//! filled, as Grounds would (Trace reads HoleGround over our holes), so BuildNowSlots builds it in the go-live frame
+	protected void TraceSlotNow(int ti, int tk)
+	{
+		int i0 = ti * TQ;
+		int k0 = tk * TQ;
+		for (int k = k0; k <= k0 + TQ; k += 2)
+		{
+			for (int i = i0; i <= i0 + TQ; i += 2)
+			{
+				if (m_F.m_aGs[k * N + i] != 0)
+					continue;
+				Trace(i, k);
+				m_iUntraced--;
+				m_bIdxDirty = true;
+			}
+		}
+		for (int fk = k0; fk <= k0 + TQ; fk += 2)
+		{
+			for (int fi = i0; fi <= i0 + TQ; fi += 2)
+				FillAround(fi, fk);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B1 crater log (TEST_KIT): why BuildNowSlots skipped now-slot t (world tile tx, tz)
+	protected void CraterSkip(int t, int tx, int tz)
+	{
+		if (m_aSlotZone[t] == 0)
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_UNBORN, tx, tz, false);
+		else if (t >= m_aTileEnt.Count() || !m_aTileEnt[t])
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_NOENT, tx, tz, true);
+		else
+			MUD_CraterTrace.Tile(MUD_CraterTrace.C_SKIP_UNTRACED, tx, tz, true);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B3 CRATER_TAPER_NOW (O1b), right after BuildNowSlots: the BW_HOLE entries at the front of m_aOneBuild
+	//! (DigNow's taper neighbours) are built in the go-live frame too, up to TAPER_NOW_MAX tiles / TAPER_NOW_MS ms;
+	//! the rest stay in front for FlushOneBuild (logged). Same build as FlushOneBuild (no A5 rendered gate).
+	protected int TaperNow()
+	{
+		int t0 = System.GetTickCount();
+		int built = 0;
+		while (!m_aOneBuild.IsEmpty())
+		{
+			int key = m_aOneBuild[0];
+			int qWhy;
+			if (!m_mQWhy.Find(key, qWhy) || qWhy != BW_HOLE)
+				break;
+			if (m_iTaperCap > 0 && built > 0 && System.GetTickCount(t0) >= m_iTaperCap)
+				break;     // stage 2 B5 ahead frame: the rest next frame
+			if (m_iTaperCap == 0 && (built >= TAPER_NOW_MAX || System.GetTickCount(t0) >= TAPER_NOW_MS))
+			{
+				int left = 0;
+				for (int q = 0; q < m_aOneBuild.Count(); q++)
+				{
+					int lw;
+					if (!m_mQWhy.Find(m_aOneBuild[q], lw) || lw != BW_HOLE)
+						break;
+					left++;
+				}
+				Print(string.Format("MUD sheet taper now: cap hit after %1 tiles / %2 ms, %3 hole tiles left for the next frame", built, System.GetTickCount(t0), left), LogLevel.NORMAL);
+				break;
+			}
+			m_aOneBuild.RemoveOrdered(0);
+			m_mQWhy.Remove(key);
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Ent)
+				continue;
+			int tx = Math.Round(key / 20000.0);
+			int tz = key - tx * 20000;
+			if (IsLive(tx, tz))
+				continue;
+			if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TAPER_NOW, tx, tz, false);
+			m_iBuildWhy = BW_HOLE;
+			Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
+			if (res)
+				st.m_Res = res;
+			built++;
+		}
+		return built;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: tile vertex l of border vert j on side s (0 south k 0, 1 north k TQ, 2 west i 0, 3 east i TQ)
+	protected int EdgeL(int s, int j)
+	{
+		if (s == 0)
+			return j;
+		if (s == 1)
+			return TQ * TV + j;
+		if (s == 2)
+			return j * TV;
+		return j * TV + TQ;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A9 EDGE_MATCH: the edge record of the tile beside tile tx, tz on side s (S N W E) when that tile is drawn,
+	//! else null; m_iMatchOs = its facing side
+	protected array<float> EdgeNb(int tx, int tz, int s)
+	{
+		int ntx = tx + 1;
+		int ntz = tz;
+		m_iMatchOs = 2;
+		if (s == 0)
+		{
+			ntx = tx;
+			ntz = tz - 1;
+			m_iMatchOs = 1;
+		}
+		else if (s == 1)
+		{
+			ntx = tx;
+			ntz = tz + 1;
+			m_iMatchOs = 0;
+		}
+		else if (s == 2)
+		{
+			ntx = tx - 1;
+			m_iMatchOs = 3;
+		}
+		int nk = TrailKey(ntx, ntz);
+		if (!EdgeDrawn(nk))
+			return null;
+		return m_mEdgeRec.Get(nk);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A9: tile vertex r rows / columns in from border vertex j of side s
+	protected int EdgeIn(int s, int j, int r)
+	{
+		if (s == 0)
+			return r * TV + j;
+		if (s == 1)
+			return (TQ - r) * TV + j;
+		if (s == 2)
+			return j * TV + r;
+		return j * TV + TQ - r;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: tile vertex a (lower corner) of quad q along side s, on the row / column next to the side
+	protected int EdgeQuad(int s, int q)
+	{
+		if (s == 0)
+			return q;
+		if (s == 1)
+			return (TQ - 1) * TV + q;
+		if (s == 2)
+			return q * TV;
+		return q * TV + TQ - 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT, after each build of tile tx, tz: per border vert (S N W E x TV) the drawn world y (-10000 not drawn:
+	//! untraced quad, -20000 band 0 quads, -30000 no mesh), its height over the ground and its band. Drawn = a quad of
+	//! this tile beside it passed BuildTileMesh's traced + band skips (bare / hole skips not counted)
+	protected void EdgeRecord(MUD_MudSheetTileData d, int tx, int tz, bool drawn)
+	{
+		array<float> ea = {};
+		ea.Resize(12 * TV);
+		for (int s = 0; s < 4; s++)
+		{
+			for (int j = 0; j < TV; j++)
+			{
+				int l = EdgeL(s, j);
+				int e = s * TV + j;
+				ea[4 * TV + e] = d.m_aLastY[l] - d.m_aG[l];
+				ea[8 * TV + e] = d.m_aBand[l];
+				float y = -20000;
+				for (int q = j - 1; q <= j; q++)
+				{
+					if (q < 0 || q >= TQ)
+						continue;
+					int la = EdgeQuad(s, q);
+					if (d.m_aGs[la] == 0 || d.m_aGs[la + 1] == 0 || d.m_aGs[la + TV] == 0 || d.m_aGs[la + TV + 1] == 0)
+					{
+						if (y < -9000)
+							y = -10000;
+						continue;
+					}
+					if (d.m_aBand[la] > 0 || d.m_aBand[la + 1] > 0 || d.m_aBand[la + TV] > 0 || d.m_aBand[la + TV + 1] > 0)
+						y = d.m_aLastY[l];
+				}
+				if (!drawn)
+					y = -30000;
+				ea[e] = y;
+			}
+		}
+		m_mEdgeRec.Set(TrailKey(tx, tz), ea);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT: is world tile key's mesh on screen now (live slot or stored tile, entity visible)?
+	protected bool EdgeDrawn(int key)
+	{
+		int tx = key / 20000;
+		int tz = key - tx * 20000;
+		IEntity e;
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t < 0 || t >= m_aTileEnt.Count() || t >= m_aTileRes.Count() || m_aSlotZone[t] == 0 || !m_aTileRes[t])
+				return false;
+			e = m_aTileEnt[t];
+		}
+		else
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Res)
+				return false;
+			e = st.m_Ent;
+		}
+		return e && (e.GetFlags() & EntityFlags.VISIBLE) != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EDGE AUDIT 10 s part: every border vert (corners left out) of a drawn tile drawn EDGE_RAISED over the ground,
+	//! against the facing vert of the tile beside it: ok, a step (beside drawn lower), or open (beside not drawn: tile
+	//! not born, no mesh, its vert untraced, its band 0 there). Records of tiles no longer drawn go.
+	protected string EdgeAudit()
+	{
+		if (!EDGE_AUDIT)
+			return "";
+		int raised = 0;
+		int ok = 0;
+		int step = 0;
+		float stepMax = 0;
+		int stepBand = 0;
+		int open = 0;
+		float openMax = 0;
+		int nbUnborn = 0;
+		int nbNoMesh = 0;
+		int nbUnt = 0;
+		int nbBand0 = 0;
+		array<int> gone = {};
+		foreach (int key, array<float> ea : m_mEdgeRec)
+		{
+			if (!ea || !EdgeDrawn(key))
+			{
+				gone.Insert(key);
+				continue;
+			}
+			int tx = key / 20000;
+			int tz = key - tx * 20000;
+			for (int s = 0; s < 4; s++)
+			{
+				int nk = TrailKey(tx + 1, tz);
+				int os = 2;
+				if (s == 0)
+				{
+					nk = TrailKey(tx, tz - 1);
+					os = 1;
+				}
+				else if (s == 1)
+				{
+					nk = TrailKey(tx, tz + 1);
+					os = 0;
+				}
+				else if (s == 2)
+				{
+					nk = TrailKey(tx - 1, tz);
+					os = 3;
+				}
+				array<float> nb = null;
+				if (EdgeDrawn(nk))
+					nb = m_mEdgeRec.Get(nk);
+				for (int j = 1; j < TQ; j++)
+				{
+					int e = s * TV + j;
+					float rz = ea[4 * TV + e];
+					if (ea[e] < -9000 || rz < EDGE_RAISED)
+						continue;
+					raised++;
+					float ny = -30000;
+					if (nb)
+						ny = nb[os * TV + j];
+					if (ny < -9000)
+					{
+						open++;
+						openMax = Math.Max(openMax, rz);
+						if (!m_mBorn.Contains(nk))
+							nbUnborn++;
+						else if (ny > -15000)
+							nbUnt++;
+						else if (ny > -25000)
+							nbBand0++;
+						else
+							nbNoMesh++;
+						continue;
+					}
+					float dy = ea[e] - ny;
+					if (dy > EDGE_STEP)
+					{
+						step++;
+						stepMax = Math.Max(stepMax, dy);
+						if (nb[8 * TV + os * TV + j] < ea[8 * TV + e] - 0.05)
+							stepBand++;
+						continue;
+					}
+					ok++;
+				}
+			}
+		}
+		foreach (int g : gone)
+			m_mEdgeRec.Remove(g);
+		int stepCm = Math.Round(stepMax * 100);
+		int openCm = Math.Round(openMax * 100);
+		string a = string.Format(" | edge audit: raised border verts %1: ok %2, step > 3 cm %3 (max %4 cm, beside band lower %5)",
+			raised, ok, step, stepCm, stepBand);
+		return a + string.Format(", open %1 (max %2 cm: beside not born %3, no mesh %4, vert untraced %5, band 0 %6)",
+			open, openCm, nbUnborn, nbNoMesh, nbUnt, nbBand0);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A3 with EDGE_AUDIT off: the edge records of tiles no longer drawn go (EdgeAudit does it while it runs)
+	protected void EdgePrune()
+	{
+		array<int> gone = {};
+		foreach (int key, array<float> ea : m_mEdgeRec)
+		{
+			if (!ea || !EdgeDrawn(key))
+				gone.Insert(key);
+		}
+		foreach (int g : gone)
+			m_mEdgeRec.Remove(g);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A2: m_aWheelSlot[t] = 1 where a wheel contact of a vehicle lies in live slot t (as PickWheelSlots finds them)
+	protected void WheelSlotMask()
+	{
+		for (int c = 0; c < TILES * TILES; c++)
+			m_aWheelSlot[c] = 0;
+		array<Vehicle> vs = MUD_Wheels.GetAll();
+		if (LEV_L8_VEH)
+			vs = m_aNearVeh;
+		foreach (int vi, Vehicle v : vs)
+		{
+			if (!v)
+				continue;
+			VehicleWheeledSimulation sim;
+			if (LEV_L8_VEH)
+				sim = m_aNearSim[vi];
+			else
+				sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+			if (!sim)
+				continue;
+			int count = sim.WheelCount();
+			for (int w = 0; w < count; w++)
+			{
+				if (!sim.WheelHasContact(w))
+					continue;
+				vector cp = sim.WheelGetContactPosition(w);
+				int i = Math.Round(cp[0] / CELL) - m_iX0;
+				int k = Math.Round(cp[2] / CELL) - m_iZ0;
+				if (i < 0 || i >= N || k < 0 || k >= N)
+					continue;
+				int ti = Math.Min(i / TQ, TILES - 1);     // ints first: Math.Min returns float
+				int tk = Math.Min(k / TQ, TILES - 1);
+				m_aWheelSlot[tk * TILES + ti] = 1;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 part A, after UploadPick. A2 (EDGE_COBUILD_PICK): a dirty zone slot dirtied by the band or a stamp, beside
+	//! a picked wheel slot, is picked too (no SLOT_MIN_S hold, outside UPLOAD_SLOTS; Upload still waits for its traces).
+	//! A3 (EDGE_COBUILD): slots a co-build asked for at the last upload (m_aCoNext) are picked as co-builds.
+	protected void CoPick()
+	{
+		if (EDGE_COBUILD)
+		{
+			for (int n = 0; n < TILES * TILES; n++)
+			{
+				if (m_aCoNext[n] == 0)
+					continue;
+				m_aCoNext[n] = 0;
+				int ns = m_aCoNextSide[n];
+				m_aCoNextSide[n] = 0;
+				if (m_aSlotZone[n] == 0)
+					continue;
+				m_aSlotDirty[n] = 1;
+				m_aPick[n] = 1;
+				m_aPickWhy[n] = BW_COBUILD;
+				m_aCoLive[n] = 1;
+				m_aCoSide[n] = m_aCoSide[n] | ns;     // stage 3 A11
+			}
+		}
+		if (!EDGE_COBUILD_PICK)
+			return;
+		WheelSlotMask();
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aWheelSlot[t] == 0 || m_aSlotDirty[t] == 0 || m_aPick[t] != 1)
+				continue;
+			int ti = t % TILES;
+			int tk = t / TILES;
+			for (int s = 0; s < 4; s++)
+			{
+				int ni = ti;
+				int nk = tk;
+				if (s == 0)
+					nk--;
+				else if (s == 1)
+					nk++;
+				else if (s == 2)
+					ni--;
+				else
+					ni++;
+				if (ni < 0 || ni >= TILES || nk < 0 || nk >= TILES)
+					continue;
+				int u = nk * TILES + ni;
+				if (m_aSlotDirty[u] == 0 || m_aSlotZone[u] == 0 || (m_aSlotWhy[u] & (WHY_BAND | WHY_STAMP)) == 0)
+					continue;
+				if (m_aPick[u] != 0 && m_aPick[u] != 2)
+					continue;
+				m_aPick[u] = 1;
+				m_aPickWhy[u] = BW_COBUILD;
+				m_iCoPick++;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A3 EDGE_COBUILD, after a build of tile tx, tz (its edge record is new): each side whose border verts differ from
+	//! the drawn neighbour's by more than EDGE_CO_STEP, or where one side is drawn raised and the other is not drawn,
+	//! gets the neighbour built too. Live neighbour: in this upload (we are in Upload's slot loop) or the next one.
+	//! Stored neighbour with an entity: now, at most CO_MAX per upload (the rest queued). Unborn neighbours: nothing to
+	//! build. A co-build triggers no co-builds (m_bCoBuilding).
+	protected void CoCheck(int tx, int tz)
+	{
+		array<float> ea = m_mEdgeRec.Get(TrailKey(tx, tz));
+		if (!ea)
+			return;
+		for (int s = 0; s < 4; s++)
+		{
+			int ntx = tx + 1;
+			int ntz = tz;
+			int os = 2;
+			if (s == 0)
+			{
+				ntx = tx;
+				ntz = tz - 1;
+				os = 1;
+			}
+			else if (s == 1)
+			{
+				ntx = tx;
+				ntz = tz + 1;
+				os = 0;
+			}
+			else if (s == 2)
+			{
+				ntx = tx - 1;
+				os = 3;
+			}
+			int nk = TrailKey(ntx, ntz);
+			if (!m_mBorn.Contains(nk))
+				continue;
+			array<float> nb = null;
+			if (EdgeDrawn(nk))
+				nb = m_mEdgeRec.Get(nk);
+			bool need = false;
+			for (int j = 1; j < TQ && !need; j++)
+			{
+				int e = s * TV + j;
+				float y = ea[e];
+				float ny = -30000;
+				float nr = 0;
+				if (nb)
+				{
+					ny = nb[os * TV + j];
+					nr = nb[4 * TV + os * TV + j];
+				}
+				if (y < -9000 && ny < -9000)
+					continue;
+				if (y < -9000)
+					need = nr >= EDGE_RAISED;     // the neighbour shows raised here, we draw nothing
+				else if (ny < -9000)
+					need = ea[4 * TV + e] >= EDGE_RAISED;
+				else
+					need = Math.AbsFloat(y - ny) > EDGE_CO_STEP;
+			}
+			if (need)
+				CoBuild(ntx, ntz, os);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! A3: build neighbour tile tx, tz for a co-build (see CoCheck); os = its side facing the tile that asked (stage 3
+	//! A11: with EDGE_CO_SIDE only those sides are copied unconditionally)
+	protected void CoBuild(int tx, int tz, int os)
+	{
+		int bit = 1 << os;
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
+				return;
+			if (m_bInUpload)
+			{
+				m_aCoSide[t] = m_aCoSide[t] | bit;     // A11: a second asker adds its side
+				if (m_aCoLive[t] != 0)
+					return;
+				m_aCoLive[t] = 1;
+				m_aSlotDirty[t] = 1;
+				m_aPick[t] = 1;
+				m_aPickWhy[t] = BW_COBUILD;
+				m_bCoAny = true;
+				return;
+			}
+			m_aCoNext[t] = 1;
+			m_aCoNextSide[t] = m_aCoNextSide[t] | bit;
+			m_aSlotDirty[t] = 1;
+			m_bDirty = true;
+			return;
+		}
+		int key = TrailKey(tx, tz);
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (!st || !st.m_Ent)
+			return;     // data only or none: its mesh comes with the radius builds
+		if (m_iCoStoredUp >= CO_MAX && !EDGE_MATCH)     // A9: a moved border's neighbour is built now, no cap
+		{
+			m_iCoCapped++;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_COBUILD);
+			QueueBuild(tx, tz);
+			return;
+		}
+		m_iCoStoredUp++;
+		m_iCoStored++;
+		int bq = m_aBandQ.Find(key);
+		if (bq >= 0)
+		{
+			m_aBandQ.Remove(bq);
+			BandTile(tx, tz, st.m_D, 0, 0);     // its band is due: bring it up to date first
+		}
+		int keepWhy = m_iBuildWhy;
+		m_bCoBuilding = true;
+		m_iCoSideMask = bit;     // A11
+		m_iBuildWhy = BW_COBUILD;
+		Resource res = BuildTile(st.m_Ent, st.m_D, tx, tz, false);
+		if (res)
+			st.m_Res = res;
+		m_bCoBuilding = false;
+		m_iCoSideMask = 0;
+		m_iBuildWhy = keepWhy;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A11: does the co-build running now copy side s unconditionally? (without A11: every side, as A3 / A9)
+	protected bool CoSideOk(int s)
+	{
+		if (!EDGE_CO_SIDE)
+			return true;
+		int bit = m_iCoSideMask & (1 << s);
+		return bit != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A11, after a co-build of tile tx, tz: a side it kept (over EDGE_CO_STEP, m_aMatchCo) gets its neighbour
+	//! built LATER, never now (no chains): live -> the next upload as a co-build copying the side facing us; stored ->
+	//! a plain queued build (A9 then copies or co-builds us)
+	protected void CoLater(int tx, int tz)
+	{
+		for (int s = 0; s < 4; s++)
+		{
+			if (m_aMatchCo[s] == 0)
+				continue;
+			int ntx = tx;
+			int ntz = tz;
+			int os = 2;
+			if (s == 0)
+			{
+				ntz = tz - 1;
+				os = 1;
+			}
+			else if (s == 1)
+			{
+				ntz = tz + 1;
+				os = 0;
+			}
+			else if (s == 2)
+			{
+				ntx = tx - 1;
+				os = 3;
+			}
+			else
+			{
+				ntx = tx + 1;
+			}
+			m_iCoLater++;
+			if (m_bPlaced && IsLive(ntx, ntz))
+			{
+				int t = (ntz - m_iZ0 / TQ) * TILES + ntx - m_iX0 / TQ;
+				if (t < 0 || t >= TILES * TILES || m_aSlotZone[t] == 0)
+					continue;
+				int bit = 1 << os;
+				m_aCoNext[t] = 1;
+				m_aCoNextSide[t] = m_aCoNextSide[t] | bit;
+				m_aSlotDirty[t] = 1;
+				m_bDirty = true;
+				continue;
+			}
+			int key = TrailKey(ntx, ntz);
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Ent)
+				continue;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_COBUILD);
+			QueueBuild(ntx, ntz);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 A12: vertex rows the A9 ramp moves at border vert j (a corner moves only itself)
+	protected int RampRows(int j)
+	{
+		if (j == 0 || j == TQ)
+			return 1;
+		return 4;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 TURN METER (TEST_KIT, print only): counters per motion bucket (0 straight, 1 turning, 2 stopped)
+	protected void TurnInit()
+	{
+		if (m_aTurnN.Count() == 3 * TURN_K)
+			return;
+		m_aTurnN.Clear();
+		for (int i = 0; i < 3 * TURN_K; i++)
+			m_aTurnN.Insert(0);
+		m_aTurnMax.Clear();
+		for (int b = 0; b < 3; b++)
+			m_aTurnMax.Insert(0);
+	}
+
+	//! TURN METER: counter k of the bucket this frame is in, + n
+	protected void TurnNote(int k, int n)
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return;
+		TurnInit();
+		int c = m_iTurnB * TURN_K + k;
+		m_aTurnN[c] = m_aTurnN[c] + n;
+	}
+
+	//! TURN METER, every sheet frame: the followed vehicle's smoothed turn rate (deg/s) and speed -> bucket
+	protected void TurnRate(Vehicle veh, float time)
+	{
+		if (!veh)
+		{
+			m_iTurnB = 2;
+			m_fTurnYaw = -1000;
+			TurnNote(0, 1);
+			return;
+		}
+		vector fw = veh.GetTransformAxis(2);
+		float yaw = Math.Atan2(fw[0], fw[2]) * Math.RAD2DEG;
+		float spd = 0;
+		Physics ph = veh.GetPhysics();
+		if (ph)
+			spd = ph.GetVelocity().Length();
+		float dt = time - m_fTurnT;
+		if (m_fTurnYaw > -900 && dt > 0.001 && dt < 1)
+		{
+			float dy = yaw - m_fTurnYaw;
+			if (dy > 180)
+				dy = dy - 360;
+			else if (dy < -180)
+				dy = dy + 360;
+			m_fTurnRate = m_fTurnRate * 0.8 + Math.AbsFloat(dy) / dt * 0.2;
+		}
+		m_fTurnYaw = yaw;
+		m_fTurnT = time;
+		m_iTurnB = 0;
+		if (spd < 1)
+			m_iTurnB = 2;
+		else if (m_fTurnRate >= TURN_DEG_S)
+			m_iTurnB = 1;
+		TurnNote(0, 1);
+	}
+
+	//! TURN METER, after an Upload that built a live slot: every drawn live slot's edge record against the drawn
+	//! neighbour's, corners included (EdgeAudit leaves them out): raised verts, step > EDGE_STEP, open, corner steps
+	protected void TurnEdges(int x0, int z0)
+	{
+		int tm = System.GetTickCount();
+		TurnNote(1, 1);
+		int o = m_iTurnB * TURN_K;
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			int ti = t % TILES;
+			int tx = x0 + ti;
+			int tz = z0 + t / TILES;
+			int key = TrailKey(tx, tz);
+			array<float> ea = m_mEdgeRec.Get(key);
+			if (!ea || !EdgeDrawn(key))
+				continue;
+			for (int s = 0; s < 4; s++)
+			{
+				array<float> nb = EdgeNb(tx, tz, s);
+				int os = m_iMatchOs * TV;
+				for (int j = 0; j < TV; j++)
+				{
+					int e = s * TV + j;
+					if (ea[e] < -9000 || ea[4 * TV + e] < EDGE_RAISED)
+						continue;
+					m_aTurnN[o + 2] = m_aTurnN[o + 2] + 1;
+					float ny = -30000;
+					if (nb)
+						ny = nb[os + j];
+					if (ny < -9000)
+					{
+						m_aTurnN[o + 4] = m_aTurnN[o + 4] + 1;
+						continue;
+					}
+					float dy = ea[e] - ny;
+					if (dy <= EDGE_STEP)
+						continue;
+					if (j == 0 || j == TQ)
+						m_aTurnN[o + 5] = m_aTurnN[o + 5] + 1;
+					else
+						m_aTurnN[o + 3] = m_aTurnN[o + 3] + 1;
+					if (dy > m_aTurnMax[m_iTurnB])
+						m_aTurnMax[m_iTurnB] = dy;
+				}
+			}
+		}
+		m_iTurnMs += System.GetTickCount(tm);
+	}
+
+	//! TURN METER part of the 10 s builds line, then reset
+	protected string TurnLog()
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return "";
+		TurnInit();
+		string a = string.Format(" | TURN METER (%1 ms; turning >= %2 deg/s, stopped < 1 m/s; edge records need EDGE_MATCH / AUDIT / COBUILD)", m_iTurnMs, TURN_DEG_S);
+		for (int b = 0; b < 3; b++)
+		{
+			int o = b * TURN_K;
+			string nm = "straight";
+			if (b == 1)
+				nm = "turning";
+			else if (b == 2)
+				nm = "stopped";
+			int mx = Math.Round(m_aTurnMax[b] * 100);
+			a += string.Format(" | %1: %2 frames, %3 checks, raised %4, step > 3 cm %5 (max %6 cm), open %7, corner step %8",
+				nm, m_aTurnN[o], m_aTurnN[o + 1], m_aTurnN[o + 2], m_aTurnN[o + 3], mx, m_aTurnN[o + 4], m_aTurnN[o + 5]);
+			a += string.Format(", drape cut %1 (skirt quads left %2), co-copy over 3 cm %3 sides, born waits %4",
+				m_aTurnN[o + 6], m_aTurnN[o + 7], m_aTurnN[o + 8], m_aTurnN[o + 9]);
+		}
+		for (int c = 0; c < 3 * TURN_K; c++)
+			m_aTurnN[c] = 0;
+		for (int m = 0; m < 3; m++)
+			m_aTurnMax[m] = 0;
+		m_iTurnMs = 0;
+		return a;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 D meter (TEST_KIT, PreNote): crater notes, while joining (no local controlled entity), per frame,
+	//! entries dropped at the 32 cap
+	protected void PreMeter()
+	{
+		m_iDNotes++;
+		if (!SCR_PlayerController.GetLocalControlledEntity())
+			m_iDJoin++;
+		m_iDFrameN++;
+	}
+
+	protected string DMeter()
+	{
+		if (!MUD_TestKit.TEST_KIT)
+			return "";
+		int most = m_iDFrameMax;
+		if (m_iDFrameN > most)
+			most = m_iDFrameN;
+		return string.Format(" | PART D notes %1 (joining %2, most in one frame %3, dropped at the 32 cap %4, D1 left to the go-live %5)", m_iDNotes, m_iDJoin, most, m_iDCapDrop, m_iPreSkip);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! stage 3 Part 0 B meter (later B9): is world point x, z under the sheet's FULL cover now? Sheet local, live window
+	//! only: nearest vert traced, band >= 0.999, its tile drawn, no bare tile in taper reach (NearBareTile); within 4 rows
+	//! of a side the drawn tile beside is raised at band 1 at that border vert (the A9 ramp). Stored tiles: not covered.
+	static bool FullCoverAt(float x, float z)
+	{
+		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
+			return false;
+		return s_Inst.CoverAt(x, z);
+	}
+
+	protected bool CoverAt(float x, float z)
+	{
+		int i = Math.Round(x / CELL) - m_iX0;
+		int k = Math.Round(z / CELL) - m_iZ0;
+		if (i < 0 || k < 0 || i >= N || k >= N)
+			return false;
+		int v = k * N + i;
+		if (m_F.m_aGs[v] == 0 || m_F.m_aBand[v] < 0.999)
+			return false;
+		int ti = i / TQ;
+		if (ti >= TILES)
+			ti = TILES - 1;
+		int tk = k / TQ;
+		if (tk >= TILES)
+			tk = TILES - 1;
+		int li = i - ti * TQ;
+		int lk = k - tk * TQ;
+		int tx = m_iX0 / TQ + ti;
+		int tz = m_iZ0 / TQ + tk;
+		if (!EdgeDrawn(TrailKey(tx, tz)) || NearBareTile(tx, tz))
+			return false;
+		if (lk < 4 && !CoverSide(tx, tz, 0, li))
+			return false;
+		if (lk > TQ - 4 && !CoverSide(tx, tz, 1, li))
+			return false;
+		if (li < 4 && !CoverSide(tx, tz, 2, lk))
+			return false;
+		if (li > TQ - 4 && !CoverSide(tx, tz, 3, lk))
+			return false;
+		return true;
+	}
+
+	//! CoverAt: the drawn tile beside side s draws border vert j raised at band 1
+	protected bool CoverSide(int tx, int tz, int s, int j)
+	{
+		array<float> nb = EdgeNb(tx, tz, s);
+		if (!nb)
+			return false;
+		int e = m_iMatchOs * TV + j;
+		return nb[e] > -9000 && nb[8 * TV + e] >= 0.999;
+	}
+
+	//! stage 3 Part 0 B8 meter (MUD_LookRuts): does sheet local stamp a wheel at p itself (inside the live window
+	//! +- 2 cells, on TileCovered ground)?
+	static bool LocalStampsAt(vector p)
+	{
+		if (!ENABLED || !s_Inst || !s_Inst.m_bLocal || !s_Inst.m_bPlaced)
+			return false;
+		int i = Math.Round(p[0] / CELL) - s_Inst.m_iX0;
+		int k = Math.Round(p[2] / CELL) - s_Inst.m_iZ0;
+		if (i < 2 || k < 2 || i > N - 3 || k > N - 3)
+			return false;
+		return MUD_MudZoneEntity.TileCovered(Math.Floor(p[0] / TILE_M), Math.Floor(p[2] / TILE_M));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SHEET LOCAL 10 s line (Log10): builds by reason, then reset
+	protected void LocalLog()
+	{
+		string p1 = string.Format("MUD sheet builds: wheel %1, oldest %2, nearest %3, mesh-less %4, freeze %5, restore %6, slump %7, band %8",
+			m_aBuildsBy[BW_WHEEL], m_aBuildsBy[BW_OLDEST], m_aBuildsBy[BW_NEAREST], m_aBuildsBy[BW_MESHLESS], m_aBuildsBy[BW_FREEZE], m_aBuildsBy[BW_RESTORE], m_aBuildsBy[BW_SLUMP], m_aBuildsBy[BW_BAND]);
+		string p2 = string.Format(" | would skip (max change < 3 mm) %1 | fit %2, hole %3, op %5 | born slots waited for traces %4 uploads",
+			m_iWouldSkip, m_aBuildsBy[BW_FIT], m_aBuildsBy[BW_HOLE], m_iBornWait, m_aBuildsBy[BW_OP]);
+		// stage 2 A6: co-builds (the cobuild builds by reason = pick + live + stored + queued ones that ran)
+		string p3 = string.Format(" | cobuild pick %1, cobuild live %2, cobuild stored %3 (capped %4), cobuild builds %5, born front %6",
+			m_iCoPick, m_iCoLive, m_iCoStored, m_iCoCapped, m_aBuildsBy[BW_COBUILD], m_iBornFront);
+		if (BAND_INCR)
+			p3 += string.Format(" | band incr: passes %1, box cells %2, slots dirtied %3, slot BandTiles %4", m_iIncrRuns, m_iIncrCells, m_iIncrDirty, m_iIncrFull);
+		if (EDGE_DRAPE)
+			p3 += string.Format(" | drape cut at cap %1", m_iDrapeCut);
+		if (EDGE_OPEN_FADE)
+			p3 += string.Format(" | sides faded (beside not drawn) %1", m_iOpenFade);
+		if (EDGE_MATCH)
+			p3 += string.Format(" | edge match: sides copied %1, moved + co-built %2, faded (beside not drawn) %3", m_iMatchCopy, m_iMatchMove, m_iMatchFade);
+		if (EDGE_CO_SIDE)
+			p3 += string.Format(" | co-build sides sent later %1", m_iCoLater);     // stage 3 A11
+		m_iCoLater = 0;
+		if (BUILD_SKIP_SAME)
+			p3 += string.Format(" | skip same: kept old mesh %1", m_iSkipSame);
+		if (BAND_STORED_HOLD)
+			p3 += string.Format(" | stored band builds held %1", m_iBandHeld);
+		if (!EDGE_AUDIT && EDGE_COBUILD)
+			EdgePrune();
+		Print(p1 + p2 + p3 + FarLog() + EdgeAudit() + TurnLog() + DMeter(), LogLevel.NORMAL);
+		m_iDNotes = 0;     // stage 3 Part 0 D meter (10 s)
+		m_iDJoin = 0;
+		m_iDFrameMax = 0;
+		m_iDCapDrop = 0;
+		m_iPreSkip = 0;
+		for (int b = 0; b < BW_N; b++)
+			m_aBuildsBy[b] = 0;
+		m_iWouldSkip = 0;
+		m_iBornWait = 0;
+		m_iCoPick = 0;
+		m_iCoLive = 0;
+		m_iCoStored = 0;
+		m_iCoCapped = 0;
+		m_iBornFront = 0;
+		m_iIncrRuns = 0;
+		m_iIncrCells = 0;
+		m_iIncrDirty = 0;
+		m_iIncrFull = 0;
+		m_iSkipSame = 0;
+		m_iDrapeCut = 0;
+		m_iOpenFade = 0;
+		m_iMatchCopy = 0;
+		m_iMatchMove = 0;
+		m_iMatchFade = 0;
+		m_iBandHeld = 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part C: lever set s (0 none, 1 all, 2 L1, 3 L2, 4 L3, 5 L6, 6 L8)
+	static void LeverApply(int s, string why)
+	{
+		s_iLeverSet = s;
+		LEV_L1_CARRY = s == 1 || s == 2;
+		LEV_L2_DRAG = s == 1 || s == 3;
+		LEV_L3_SLUMP = s == 1 || s == 4;
+		LEV_L6_EASE = s == 1 || s == 5;
+		LEV_L8_VEH = s == 1 || s == 6;
+		Print(string.Format("MUD sheet levers: %1 | %2", LeverNames(), why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB stage 2: fix set s. 0 none, 1 A2, 2 A2 A3, 3 A2 A3 A4 A5 (all A), 4 C1 C2 (band), 5 all C, 6 all A + all C,
+	//! 7 all B (craters), 8 all A + B + C; stage 3: 16 = 15 + A10, 17 = 16 + A11 + A12, 18 = 17 + D1, 19 = 18 + B8, 20 = 19 + B9, 21 = 20 + B10
+	static void FixApply(int s, string why)
+	{
+		s_iFixSet = s;
+		bool a = s == 3 || s == 6 || s == 8;
+		bool c = s == 5 || s == 6 || s == 8;
+		bool b = s == 7 || s == 8 || s >= 12;     // set 12 = set 11 + all B (crater)
+		EDGE_COBUILD_PICK = a || s == 1 || s == 2 || s >= 9;
+		EDGE_COBUILD = a || s == 2 || s >= 9;     // A8 needs A3 to lift the fade again
+		SKIRT_APRON = a;
+		EDGE_DRAPE = s >= 9;     // A7: set 9 = cobuild pick + cobuild + drape + born front (set 3 with the drape)
+		EDGE_OPEN_FADE = s == 10;          // A8: set 10 = set 9 + open fade
+		EDGE_MATCH = s >= 11;              // A9: set 11 = set 9 + edge match
+		BAND_BORN_FRONT = a || s >= 9;
+		BAND_INCR = c || s == 4;
+		BAND_MICRO = c || s == 4;
+		BUILD_SKIP_SAME = c;
+		UV64_FAST = c;
+		BAND_STORED_HOLD = c;
+		CRATER_TRACE_NOW = b;
+		CRATER_TAPER_NOW = b;
+		CRATER_EASE_DROP = b;
+		CRATER_PREBUILD = s >= 13;     // B5: set 13 = set 12 + prebuild (stage 3: later sets keep B5-B7)
+		PRE_COL_CACHE = s >= 14;     // B6: set 14 = set 13 + column cache
+		MUD_WorldGroundEntity.VOX_MESH_LATER = s >= 15;     // B7: set 15 = set 14 + go-live patch meshes one per frame
+		EDGE_DRAPE_FIT = s >= 16;     // stage 3 A10: set 16 = set 15 + drape fit
+		EDGE_CO_SIDE = s >= 17;       // A11 + A12: set 17 = set 16 + co-build sides + corners
+		EDGE_CORNER = s >= 17;
+		PRE_LIVE_ONLY = s >= 18;      // D1: set 18 = set 17 + pre-build for live craters only
+		MUD_LookRuts.LOOK_UNDER_SKIP = s >= 19;     // B8: set 19 = set 18 + no look cuts where the sheet stamps
+		MUD_WorldGroundEntity.GROOVE_UNDER_OFF = s >= 20;     // B9: set 20 = set 19 + no groove section under full cover
+		MUD_WorldGroundEntity.MESH_UNDER_HOLD = s >= 21;      // B10: set 21 = set 20 + queued rut meshes held under the sheet
+		s_iDistGen++;     // C1: kept distances were not updated while BAND_INCR was off
+		Print(string.Format("MUD sheet fixes: set %1: %2 | %3", s, FixNames(), why), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT numpad * while sheet local runs: the next fix set (FixApply)
+	static int FixSet()
+	{
+		return s_iFixSet;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static void LabFixStep(string why)
+	{
+		int s = s_iFixSet + 1;
+		if (s > FIX_SETS)
+			s = 0;
+		FixApply(s, why);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static string FixNames()
+	{
+		string s = "";
+		if (EDGE_COBUILD_PICK)
+			s += " cobuild_pick";
+		if (EDGE_COBUILD)
+			s += " cobuild";
+		if (SKIRT_APRON)
+			s += " apron";
+		if (EDGE_DRAPE)
+			s += " drape";
+		if (EDGE_OPEN_FADE)
+			s += " open_fade";
+		if (EDGE_MATCH)
+			s += " edge_match";
+		if (BAND_BORN_FRONT)
+			s += " born_front";
+		if (BAND_INCR)
+			s += " band_incr";
+		if (BAND_MICRO)
+			s += " band_micro";
+		if (BUILD_SKIP_SAME)
+			s += " skip_same";
+		if (UV64_FAST)
+			s += " uv64_fast";
+		if (BAND_STORED_HOLD)
+			s += " stored_hold";
+		if (CRATER_TRACE_NOW)
+			s += " crater_trace";
+		if (CRATER_TAPER_NOW)
+			s += " crater_taper";
+		if (CRATER_EASE_DROP)
+			s += " crater_ease";
+		if (CRATER_PREBUILD)
+			s += " prebuild";
+		if (PRE_COL_CACHE)
+			s += " col_cache";
+		if (MUD_WorldGroundEntity.VOX_MESH_LATER)
+			s += " vox_mesh_later";
+		if (EDGE_DRAPE_FIT)
+			s += " drape_fit";
+		if (EDGE_CO_SIDE)
+			s += " co_side";
+		if (EDGE_CORNER)
+			s += " corner";
+		if (PRE_LIVE_ONLY)
+			s += " pre_live_only";
+		if (MUD_LookRuts.LOOK_UNDER_SKIP)
+			s += " look_under_skip";
+		if (MUD_WorldGroundEntity.GROOVE_UNDER_OFF)
+			s += " groove_under_off";
+		if (MUD_WorldGroundEntity.MESH_UNDER_HOLD)
+			s += " mesh_under_hold";
+		if (s == "")
+			return "off";
+		return s.Trim();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST_KIT numpad 0 while sheet local runs: the next lever set (none -> all -> L1 -> L2 -> L3 -> L6 -> L8 -> none)
+	static void LabLeverStep(string why)
+	{
+		int s = s_iLeverSet + 1;
+		if (s > LEVER_SETS)
+			s = 0;
+		LeverApply(s, why);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static string LeverNames()
+	{
+		string s = "";
+		if (LEV_L1_CARRY)
+			s += " L1";
+		if (LEV_L2_DRAG)
+			s += " L2";
+		if (LEV_L3_SLUMP)
+			s += " L3";
+		if (LEV_L6_EASE)
+			s += " L6";
+		if (LEV_L8_VEH)
+			s += " L8";
+		if (s == "")
+			return "off";
+		return s.Trim();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L1: does any live slot need a build?
+	protected bool AnySlotDirty()
+	{
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aSlotDirty[t] != 0)
+				return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L1: stored tile key (store st) shows a current full mesh: built, no rebuild queued or held, no band due, not low
+	protected bool StoreCurrent(MUD_MudSheetStore st, int key)
+	{
+		if (!st || !st.m_Ent || !st.m_Res || st.m_D.m_iLow != 0)
+			return false;
+		return !m_aOneBuild.Contains(key) && !m_aHeldBuild.Contains(key) && !m_aBandQ.Contains(key);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L2: LimitDrag once per upload over the cells stamps wrote since the last one + 1 ring (all inside 1..N-2), two
+	//! sweeps in opposite raster order as LimitDrag, clamps inline
+	protected void LimitDragCells()
+	{
+		array<int> list = m_Drag.m_aList;
+		int n0 = list.Count();
+		for (int a = 0; a < n0; a++)
+		{
+			int va = list[a];
+			int ia = va % N;
+			int ka = va / N;
+			for (int dk = -1; dk <= 1; dk++)
+			{
+				for (int di = -1; di <= 1; di++)
+				{
+					int ci = ia + di;
+					int ck = ka + dk;
+					if (ci >= 1 && ci <= N - 2 && ck >= 1 && ck <= N - 2)
+						m_Drag.Add(ck * N + ci);
+				}
+			}
+		}
+		list.Sort();
+		int cnt = list.Count();
+		for (int sweep = 0; sweep < 2; sweep++)
+		{
+			for (int b = 0; b < cnt; b++)
+			{
+				int v = list[b];
+				if (sweep == 1)
+					v = list[cnt - 1 - b];
+				int i = v % N;
+				int k = v / N;
+				if (i < 1 || i > N - 2 || k < 1 || k > N - 2)
+					continue;
+				float ou = m_F.m_aOu[v];
+				float ov = m_F.m_aOv[v];
+				for (int q = 0; q < 4; q++)
+				{
+					int nb = v - 1;
+					if (q == 1)
+						nb = v + 1;
+					else if (q == 2)
+						nb = v - N;
+					else if (q == 3)
+						nb = v + N;
+					float lo = m_F.m_aOu[nb] - DRAG_LIM;
+					if (ou < lo)
+						ou = lo;
+					else if (ou > lo + 2 * DRAG_LIM)
+						ou = lo + 2 * DRAG_LIM;
+					float lo2 = m_F.m_aOv[nb] - DRAG_LIM;
+					if (ov < lo2)
+						ov = lo2;
+					else if (ov > lo2 + 2 * DRAG_LIM)
+						ov = lo2 + 2 * DRAG_LIM;
+				}
+				m_F.m_aOu[v] = ou;
+				m_F.m_aOv[v] = ov;
+			}
+		}
+		m_Drag.Clear();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L3 Slump: only the cells that changed since the last slump (Grow marks them) + 1 ring, one pass at L3_FACTOR
+	//! (offline: equal to 3 passes at 0.25, results/2026-10-19-sheet-sync-maths-offline.md), mud flows only inside
+	//! that set; the changed rectangle is marked once
+	protected void SlumpCells()
+	{
+		if (m_Chg.m_aList.IsEmpty())
+			return;
+		m_iSlumpGen++;
+		array<int> work = {};
+		foreach (int vc : m_Chg.m_aList)
+		{
+			int ic = vc % N;
+			int kc = vc / N;
+			for (int dk = -1; dk <= 1; dk++)
+			{
+				for (int di = -1; di <= 1; di++)
+				{
+					int wi = ic + di;
+					int wk = kc + dk;
+					if (wi < 0 || wi >= N || wk < 0 || wk >= N)
+						continue;
+					int wv = wk * N + wi;
+					if (m_Chg.m_aGen[wv] == m_iSlumpGen)
+						continue;
+					m_Chg.m_aGen[wv] = m_iSlumpGen;
+					work.Insert(wv);
+					m_T.m_aD[wv] = 0;
+				}
+			}
+		}
+		m_Chg.Clear();
+		float step = REPOSE * CELL;
+		bool moved = false;
+		foreach (int v : work)
+		{
+			float da = m_F.m_aD[v];
+			if (da <= 0)
+				continue;
+			int i = v % N;
+			int k = v / N;
+			float sa = GroundAt(v) + da;
+			float give = 0;
+			for (int n = 0; n < 4; n++)
+			{
+				int ni = i;
+				int nk = k;
+				if (n == 0)
+					ni++;
+				else if (n == 1)
+					ni--;
+				else if (n == 2)
+					nk++;
+				else
+					nk--;
+				if (ni < 0 || ni >= N || nk < 0 || nk >= N)
+					continue;
+				int nv = nk * N + ni;
+				if (m_Chg.m_aGen[nv] != m_iSlumpGen)
+					continue;     // only the set is applied (as the box in Slump)
+				float drop = sa - GroundAt(nv) - m_F.m_aD[nv] - step;
+				if (drop <= 0)
+					continue;
+				float f = Math.Min(drop * L3_FACTOR * 0.5, da * 0.25);
+				if (f < 0.0002)
+					continue;
+				m_T.m_aD[nv] = m_T.m_aD[nv] + f;
+				give += f;
+				moved = true;
+			}
+			m_T.m_aD[v] = m_T.m_aD[v] - give;
+		}
+		if (!moved)
+			return;
+		int ri0 = N;
+		int ri1 = -1;
+		int rk0 = N;
+		int rk1 = -1;
+		foreach (int v3 : work)
+		{
+			float dd = m_T.m_aD[v3];
+			if (dd == 0)
+				continue;
+			m_F.m_aD[v3] = m_F.m_aD[v3] + dd;
+			int i3 = v3 % N;
+			int k3 = v3 / N;
+			Grow(i3, k3);     // marks it changed for the next slump (L3), keeps the Slump box when L3 goes off
+			if (Math.AbsFloat(dd) <= SLUMP_SHOW)
+				continue;
+			if (i3 < ri0)
+				ri0 = i3;
+			if (i3 > ri1)
+				ri1 = i3;
+			if (k3 < rk0)
+				rk0 = k3;
+			if (k3 > rk1)
+				rk1 = k3;
+		}
+		if (ri1 < 0)
+			return;
+		MarkRect(ri0, ri1, rk0, rk1);
+		m_bDirty = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! L8 Frame: the vehicles near the window (origin within VEH_NEAR_M of it; their sims cached), then Wheels for each
+	protected void WheelsNear(float time)
+	{
+		m_aNearVeh.Clear();
+		m_aNearSim.Clear();
+		float wx0 = m_iX0 * CELL - VEH_NEAR_M;
+		float wz0 = m_iZ0 * CELL - VEH_NEAR_M;
+		float wx1 = (m_iX0 + N - 1) * CELL + VEH_NEAR_M;
+		float wz1 = (m_iZ0 + N - 1) * CELL + VEH_NEAR_M;
+		foreach (Vehicle v : MUD_Wheels.GetAll())
+		{
+			if (!v)
+				continue;
+			vector o = v.GetOrigin();
+			if (o[0] < wx0 || o[0] > wx1 || o[2] < wz0 || o[2] > wz1)
+				continue;
+			MUD_MudSheetVeh mv = m_mVeh.Get(v);
+			if (!mv)
+			{
+				mv = new MUD_MudSheetVeh();
+				mv.m_Veh = v;
+				mv.m_Sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+				m_iNextVehId++;
+				mv.m_iId = m_iNextVehId;
+				m_mVeh.Set(v, mv);
+				m_aVeh.Insert(mv);
+			}
+			if (!mv.m_Sim)
+				continue;
+			m_aNearVeh.Insert(v);
+			m_aNearSim.Insert(mv.m_Sim);
+			WheelsSim(v, mv.m_Sim, mv, time);
+		}
+		if (time < m_fVehPrune)
+			return;
+		m_fVehPrune = time + VEH_PRUNE_S;
+		// dead or far entries go (a far one comes back as a new entry: its last wheel points are stale anyway)
+		for (int n = m_aVeh.Count() - 1; n >= 0; n--)
+		{
+			MUD_MudSheetVeh pv = m_aVeh[n];
+			bool keep = pv && pv.m_Veh;
+			if (keep)
+			{
+				vector po = pv.m_Veh.GetOrigin();
+				keep = po[0] >= wx0 - VEH_PRUNE_M && po[0] <= wx1 + VEH_PRUNE_M && po[2] >= wz0 - VEH_PRUNE_M && po[2] <= wz1 + VEH_PRUNE_M;
+			}
+			if (keep)
+				continue;
+			if (pv && pv.m_Veh)
+				m_mVeh.Remove(pv.m_Veh);
+			m_aVeh.Remove(n);
+		}
+		// keys of deleted vehicles (null) cannot be looked up: rebuild the map when it holds more than the list
+		if (m_mVeh.Count() > m_aVeh.Count())
+		{
+			m_mVeh.Clear();
+			foreach (MUD_MudSheetVeh kv : m_aVeh)
+			{
+				if (kv && kv.m_Veh)
+					m_mVeh.Set(kv.m_Veh, kv);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: store of key; SHEET LOCAL: a compact far tile comes back as a full data-only store first
+	protected MUD_MudSheetStore TrailGet(int key)
+	{
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (st || m_mFar.IsEmpty())
+			return st;
+		return FarTake(key);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D, SHEET LOCAL: stored tile key (no mesh) leaves m_mTrail as compact far data - one int a cell:
+	//! byte 0 height 0..FAR_H, byte 1 / 2 drag u / v (-DRAG_MAX..DRAG_MAX), byte 3 class (bit 0 bare, bit 1 touched,
+	//! bits 2-6 deposit band 0..31). Ground, traces and the last-build heights are not kept (traced again on approach).
+	//! Past TILE_DATA_CAP data tiles the oldest compact ones go.
+	protected void FarPut(int key, MUD_MudSheetStore st)
+	{
+		ref MUD_MudSheetFar f = new MUD_MudSheetFar();
+		f.m_iTx = st.m_iTx;
+		f.m_iTz = st.m_iTz;
+		MUD_MudSheetTileData d = st.m_D;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int h = Math.Round(Math.Clamp(d.m_aD[l], 0, FAR_H) * (255 / FAR_H));
+			int u = Math.Round(Math.Clamp(d.m_aOu[l], -DRAG_MAX, DRAG_MAX) * (127 / DRAG_MAX));
+			int w = Math.Round(Math.Clamp(d.m_aOv[l], -DRAG_MAX, DRAG_MAX) * (127 / DRAG_MAX));
+			int bq = Math.Round(Math.Clamp(d.m_aBand[l], 0, 1) * 31);
+			int c = bq * 4;
+			if (d.m_aBare[l] != 0)
+				c += 1;
+			if (d.m_aTouch[l] != 0)
+				c += 2;
+			f.m_aC[l] = h | ((u + 128) << 8) | ((w + 128) << 16) | (c << 24);
+		}
+		if (d.m_iLow != 0)
+			m_iLowNow--;
+		m_iTchKey = -1;     // BandTile's store cache
+		m_TchSt = null;
+		m_TchFar = null;
+		m_mTrail.Remove(key);     // st is gone from here on
+		RemoveTrailKey(key);
+		m_mFar.Set(key, f);
+		int at = m_aFarOrder.Find(key);
+		if (at >= 0)
+			m_aFarOrder.RemoveOrdered(at);
+		m_aFarOrder.Insert(key);
+		m_iFarIn++;
+		int over = m_mTrail.Count() + m_mFar.Count() - TILE_DATA_CAP;
+		while (over > 0 && !m_aFarOrder.IsEmpty())
+		{
+			int ok = m_aFarOrder[0];
+			m_aFarOrder.RemoveOrdered(0);
+			if (!m_mFar.Contains(ok))
+				continue;
+			m_mFar.Remove(ok);
+			m_iFarCap++;
+			over--;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: compact far tile key back as a full data-only store in m_mTrail (null: none)
+	protected MUD_MudSheetStore FarTake(int key)
+	{
+		MUD_MudSheetFar f = m_mFar.Get(key);
+		if (!f)
+			return null;
+		ref MUD_MudSheetStore st = new MUD_MudSheetStore();
+		st.m_iTx = f.m_iTx;
+		st.m_iTz = f.m_iTz;
+		MUD_MudSheetTileData d = st.m_D;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int c = f.m_aC[l];
+			int h = c & 255;
+			int u = (c >> 8) & 255;
+			int w = (c >> 16) & 255;
+			int cls = (c >> 24) & 255;
+			int bq = (cls >> 2) & 31;
+			d.m_aD[l] = h * (FAR_H / 255);
+			d.m_aOu[l] = (u - 128) * (DRAG_MAX / 127);
+			d.m_aOv[l] = (w - 128) * (DRAG_MAX / 127);
+			d.m_aBare[l] = cls & 1;
+			d.m_aTouch[l] = (cls >> 1) & 1;
+			d.m_aBand[l] = bq / 31.0;
+		}
+		m_iTchKey = -1;
+		m_TchSt = null;
+		m_TchFar = null;
+		m_mFar.Remove(key);     // f is gone from here on
+		int at = m_aFarOrder.Find(key);
+		if (at >= 0)
+			m_aFarOrder.RemoveOrdered(at);
+		m_mTrail.Set(key, st);
+		m_aTrailOrder.Insert(key);
+		m_iFarOut++;
+		return st;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D: MudAt of cell l of compact far tile key (mud x band; 0 when there is none)
+	protected float FarMud(int key, int l)
+	{
+		if (m_mFar.IsEmpty())
+			return 0;
+		MUD_MudSheetFar f = m_mFar.Get(key);
+		if (!f)
+			return 0;
+		int c = f.m_aC[l];
+		int h = c & 255;
+		int cls = (c >> 24) & 255;
+		int bq = (cls >> 2) & 31;
+		return h * (FAR_H / 255) * (bq / 31.0);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part D, 10 s line part: 'far data: compacted <n> expanded <n> cap drops <n> | compact <n> (<n> KB),
+	//! full stores <n> | far-ring 11 x 11 builds <n>'
+	protected string FarLog()
+	{
+		int kb = m_mFar.Count() * TV * TV * 4 / 1024;
+		string s = string.Format(" | far data: compacted %1 expanded %2 cap drops %3 | compact %4 (%5 KB), full stores %6 | far-ring 11 x 11 builds %7",
+			m_iFarIn, m_iFarOut, m_iFarCap, m_mFar.Count(), kb, m_mTrail.Count(), m_iFarLow);
+		m_iFarIn = 0;
+		m_iFarOut = 0;
+		m_iFarCap = 0;
+		m_iFarLow = 0;
+		return s;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E (sync-lite), MUD_MudSync.RutOp in sheet local: every machine's rut op (kind 4), in seq order. Its
+	//! segments are stamped into the tile data with the Stamp maths. The op has no vehicle or speed (the op tag stays
+	//! off): OP_SPEED, TyreHalf of OP_RADIUS. Segments within COVER_R of this client's own recent wheel stamps are
+	//! skipped (Wheels stamped them already).
+	static void OpStamps(MUD_VoxelOp op)
+	{
+		if (!ENABLED || SYNC || !s_Inst || !s_Inst.m_bLocal || !op || op.m_iKind != 4)
+			return;
+		s_Inst.OpStampsI(op);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E, MUD_MudSync.ClearOp in sheet local: craters / digs reach the sheet at their go-live already
+	//! (MUD_VoxelProbe.GoLive -> GroundChanged, every op on this machine) - only counted here, or they would clear twice
+	static void OpClear(MUD_VoxelOp op)
+	{
+		if (!ENABLED || SYNC || !s_Inst || !op || op.m_iKind < 0 || op.m_iKind > 3)
+			return;
+		s_Inst.m_iOpClears++;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected void OpStampsI(MUD_VoxelOp op)
+	{
+		int tO = System.GetTickCount();
+		float half = TyreHalf(OP_RADIUS);
+		m_iOpKey = -1;
+		m_OpD = null;
+		m_aOpShown.Clear();
+		int segs = Math.Min(op.m_aSegA.Count(), op.m_aSegB.Count());
+		for (int s = 0; s < segs; s++)
+		{
+			vector a = op.m_aSegA[s];
+			vector b = op.m_aSegB[s];
+			float len = Math.Sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[2] - a[2]) * (b[2] - a[2]));
+			if (len < 0.01 || len >= 3)
+				continue;     // as MUD_MudSync.StepStamp: never across a jump
+			int ztx = Math.Floor(b[0] / TILE_M);
+			int ztz = Math.Floor(b[2] / TILE_M);
+			if (!MUD_MudZoneEntity.TileCovered(ztx, ztz))
+				continue;     // as Wheels (ZoneAtWorld in sheet local): only where the wheel stands on holed offroad ground
+			if (OwnNear(b))
+			{
+				m_iOpSkipOwn++;
+				continue;
+			}
+			m_iOpStamps++;
+			if (OpInWindow(a, b))
+				Stamp(a, b, OP_SPEED, m_fLast, OP_VEH, half);
+			else
+				OpStampStore(a, b, OP_SPEED, m_fLast, OP_VEH, half);
+		}
+		// shown stored tiles the stamps changed: rebuilt by FlushOneBuild
+		foreach (int key : m_aOpShown)
+		{
+			int tx = key / 20000;     // TrailKey back to the tile (tx, tz >= 0 on Arland)
+			int tz = key - tx * 20000;
+			if (!m_mQWhy.Contains(key))
+				m_mQWhy.Set(key, BW_OP);
+			QueueBuild(tx, tz);
+		}
+		m_aOpShown.Clear();
+		m_iOpKey = -1;
+		m_OpD = null;
+		if (!m_bPlaced && !m_aBandQ.IsEmpty())
+			BandStored();     // no window: no Upload to band them
+		m_iOpMs += System.GetTickCount(tO);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: does op segment a -> b stamp only inside the window (OP_EDGE_M from its sides)? Then Stamp does it.
+	protected bool OpInWindow(vector a, vector b)
+	{
+		if (!m_bPlaced)
+			return false;
+		float x0 = m_iX0 * CELL + OP_EDGE_M;
+		float x1 = (m_iX0 + N - 1) * CELL - OP_EDGE_M;
+		float z0 = m_iZ0 * CELL + OP_EDGE_M;
+		float z1 = (m_iZ0 + N - 1) * CELL - OP_EDGE_M;
+		if (a[0] < x0 || a[0] > x1 || a[2] < z0 || a[2] > z1)
+			return false;
+		return b[0] >= x0 && b[0] <= x1 && b[2] >= z0 && b[2] <= z1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: an own wheel stamp at p (WheelsSim) covers the cells within COVER_R for OWN_S seconds
+	protected void OwnMark(vector p, float time)
+	{
+		int ci = Math.Round(p[0] / CELL);
+		int ck = Math.Round(p[2] / CELL);
+		int rc = Math.Ceil(COVER_R / CELL);
+		float r2 = (COVER_R * COVER_R) / (CELL * CELL);
+		for (int dk = -rc; dk <= rc; dk++)
+		{
+			for (int di = -rc; di <= rc; di++)
+			{
+				if (di * di + dk * dk > r2)
+					continue;
+				m_mOwn.Set(OwnKey(ci + di, ck + dk), time);
+			}
+		}
+		if (time < m_fOwnPrune)
+			return;
+		m_fOwnPrune = time + OWN_PRUNE_S;
+		array<int> old = {};
+		foreach (int key, float t : m_mOwn)
+		{
+			if (time - t > OWN_S)
+				old.Insert(key);
+		}
+		foreach (int ok : old)
+			m_mOwn.Remove(ok);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: did this client stamp within COVER_R of p in the last OWN_S seconds?
+	protected bool OwnNear(vector p)
+	{
+		if (m_mOwn.IsEmpty())
+			return false;
+		float t;
+		int gi = Math.Round(p[0] / CELL);
+		int gk = Math.Round(p[2] / CELL);
+		if (!m_mOwn.Find(OwnKey(gi, gk), t))
+			return false;
+		return m_fLast - t <= OWN_S;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: map key of world cell gi, gk (wraps every 32768 cells = 4.9 km; a wrap only skips a segment)
+	protected int OwnKey(int gi, int gk)
+	{
+		return (gi & 32767) | ((gk & 32767) << 15);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: one op segment a -> b on stored tiles (Stamp's BOX + SOFT + GRADUAL maths on world cells, as
+	//! MUD_MudSync.Stamp; cells of live tiles are left to the window). Sink: the data ground beside the tyre.
+	protected void OpStampStore(vector a, vector b, float speed, float time, int veh, float half)
+	{
+		if (SOFT && GRADUAL)
+		{
+			// WIDEN: how pressed the mud at the contact was when this pass began
+			int wgi = Math.Round(b[0] / CELL);
+			int wgk = Math.Round(b[2] / CELL);
+			float wd;
+			float wou;
+			float wov;
+			OpGet(wgi, wgk, wd, wou, wov);
+			int wpk = PassKey(wgi, wgk);
+			if (m_mPassT.Contains(wpk) && m_mPassV.Get(wpk) == veh && time - m_mPassT.Get(wpk) <= PASS_GAP)
+				wd = m_mPassD.Get(wpk);
+			float pressed = Math.Clamp((THICK - wd) / THICK, 0, 1);
+			half = half * (W_FIRST + (1 - W_FIRST) * pressed);
+		}
+		float band = BAND * half / HALF;
+		vector dir = Vector(b[0] - a[0], 0, b[2] - a[2]);
+		float len = dir.Length();
+		dir = dir * (1 / len);
+		vector side = Vector(dir[2], 0, -dir[0]);
+		float reach = half + band;
+		float nose = len + NOSE;
+		float far = nose + FRONT_LEN;
+		float ex = a[0] + dir[0] * far;
+		float ez = a[2] + dir[2] * far;
+		int i0 = Math.Floor((Math.Min(a[0], ex) - reach) / CELL);
+		int i1 = Math.Ceil((Math.Max(a[0], ex) + reach) / CELL);
+		int k0 = Math.Floor((Math.Min(a[2], ez) - reach) / CELL);
+		int k1 = Math.Ceil((Math.Max(a[2], ez) + reach) / CELL);
+		float sideSum = 0;
+		int sideN = 0;
+		for (int sd = -1; sd <= 1; sd += 2)
+		{
+			vector q = b + side * (sd * (reach + CELL));
+			float gq;
+			if (!OpDataGround(q[0], q[2], gq))
+				continue;
+			sideSum += gq;
+			sideN++;
+		}
+		float sink = 0;
+		if (sideN > 0)
+			sink = Math.Max(0, sideSum / sideN - b[1]);
+		float h = Math.Min(HMAX, H0 + H_SPEED * speed + H_SINK * sink);
+		float drag = DRAG * len;
+		bool any = false;
+		for (int k = k0; k <= k1; k++)
+		{
+			for (int i = i0; i <= i1; i++)
+			{
+				float px = i * CELL - a[0];
+				float pz = k * CELL - a[2];
+				float t = px * dir[0] + pz * dir[2];
+				if (t < 0 || t > far)
+					continue;
+				float latS = px * side[0] + pz * side[2];
+				float lat = Math.AbsFloat(latS);
+				if (lat >= reach || (t > nose && lat >= half))
+					continue;
+				if (OpCell(i, k, t, lat, latS, nose, half, band, h, drag, dir, side, time, veh))
+					any = true;
+			}
+		}
+		if (!any)
+			return;
+		if (DRAG_LIM > 0)
+			OpLimitDrag(i0, i1, k0, k1);
+		BandMarkWorld(i0, i1, k0, k1);     // tiles born, bands due
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: Stamp's per-cell PRESS / PUSH (BOX path) on world cell i, k of the tile data. False = no data
+	//! (a live tile: the window's).
+	protected bool OpCell(int i, int k, float t, float lat, float latS, float nose, float half, float band, float h, float drag, vector dir, vector side, float time, int veh)
+	{
+		if (i < 0 || k < 0)
+			return false;     // off the map side (int division would put it in tile 0 at a negative index)
+		int tx = i / TQ;
+		int tz = k / TQ;
+		MUD_MudSheetTileData d = OpTile(tx, tz, true);
+		if (!d)
+			return false;
+		int l = (k - tz * TQ) * TV + (i - tx * TQ);
+		float cur = d.m_aD[l];
+		float d0 = cur;     // mud depth when this pass over the cell began
+		if (GRADUAL)
+		{
+			int pk = PassKey(i, k);
+			if (!m_mPassT.Contains(pk) || m_mPassV.Get(pk) != veh || time - m_mPassT.Get(pk) > PASS_GAP)
+				m_mPassD.Set(pk, d0);     // a new pass starts here
+			else
+				d0 = m_mPassD.Get(pk);
+			m_mPassT.Set(pk, time);
+			m_mPassV.Set(pk, veh);
+		}
+		float target = 0;
+		float du = 0;
+		float dv = 0;
+		if (t <= nose && lat < half)
+		{
+			// PRESS (SOFT_WALL: full in the middle, none at the side), texture dragged along
+			float pf = 1;
+			if (SOFT)
+			{
+				float inW = half * SOFT_WALL;
+				float fromSide = half - lat;
+				if (fromSide < inW)
+					pf = 0.5 * (1 - Math.Cos(Math.PI * fromSide / inW));
+			}
+			if (GRADUAL)
+				cur = Math.Min(cur, Math.Max(0, Math.Min(d0, THICK) - PRESS_STEP * pf));
+			else
+				cur = Math.Min(cur, THICK * (1 - pf));
+			du = dir[0] * drag;
+			dv = dir[2] * drag;
+		}
+		else
+		{
+			// PUSH: push ahead (tyre wide) or side ridge (round shoulder, flat top, falls off)
+			float w = 1;
+			float hh = h;
+			vector pushDir = dir;
+			if (t > nose)
+			{
+				hh = h * ARCH_H;
+				w = Math.Cos((t - nose) / FRONT_LEN * Math.PI * 0.5);
+			}
+			else
+			{
+				float x = (lat - half) / band;
+				if (x > RIDGE_TOP)
+					w = 0.5 * (1 + Math.Cos(Math.PI * (x - RIDGE_TOP) / (1 - RIDGE_TOP)));
+				else if (SOFT)
+					w = Math.Sin(0.5 * Math.PI * x / RIDGE_TOP);
+				pushDir = side;
+				if (latS < 0)
+					pushDir = -side;
+			}
+			target = THICK + hh * w;
+			if (GRADUAL)
+				target = Math.Min(target, Math.Max(d0, THICK) + hh * w * PRESS_STEP / THICK);
+			du = pushDir[0] * drag * 0.5 * w;
+			dv = pushDir[2] * drag * 0.5 * w;
+		}
+		if (target > cur)
+			cur = target;
+		float ou = d.m_aOu[l] + du;
+		float ov = d.m_aOv[l] + dv;
+		float ol = Math.Sqrt(ou * ou + ov * ov);
+		if (ol > DRAG_MAX)
+		{
+			ou *= DRAG_MAX / ol;
+			ov *= DRAG_MAX / ol;
+		}
+		OpSet(i, k, cur, ou, ov, true);
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: tile tx, tz's data for op stamps (one-tile cache). make: a missing store is made (THICK, data
+	//! only) and the tile born. Null for a live tile (the window holds it) or nothing there (make false).
+	protected MUD_MudSheetTileData OpTile(int tx, int tz, bool make)
+	{
+		int key = TrailKey(tx, tz);
+		if (key == m_iOpKey && (m_bOpMake || !make))
+			return m_OpD;
+		m_iOpKey = key;
+		m_bOpMake = make;
+		m_OpD = null;
+		if (tx < 0 || tz < 0 || IsLive(tx, tz))
+			return null;
+		ref MUD_MudSheetStore st = TrailGet(key);
+		if (!st)
+		{
+			if (!make)
+				return null;
+			st = new MUD_MudSheetStore();
+			st.m_iTx = tx;
+			st.m_iTz = tz;
+			for (int l = 0; l < TV * TV; l++)
+				st.m_D.m_aD[l] = THICK;     // untouched mud (no sync layer to ask)
+			m_mTrail.Set(key, st);
+			m_aTrailOrder.Insert(key);
+		}
+		if (make)
+		{
+			if (!m_mBorn.Contains(key))
+				m_mBorn.Set(key, 1);
+			if (st.m_Ent && !m_aOpShown.Contains(key))
+				m_aOpShown.Insert(key);
+		}
+		m_OpD = st.m_D;
+		return m_OpD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: world cell gi, gk's mud and drag into every stored tile holding it (sides are shared);
+	//! stamp: a deposit band source too
+	protected void OpSet(int gi, int gk, float dd, float ou, float ov, bool stamp)
+	{
+		if (gi < 0 || gk < 0)
+			return;
+		int tx1 = gi / TQ;
+		int tz1 = gk / TQ;
+		int ri = gi - tx1 * TQ;
+		int rk = gk - tz1 * TQ;
+		for (int ax = 0; ax < 2; ax++)
+		{
+			int tx = tx1 - ax;
+			if (ax == 1 && (ri != 0 || tx < 0))
+				continue;
+			for (int az = 0; az < 2; az++)
+			{
+				int tz = tz1 - az;
+				if (az == 1 && (rk != 0 || tz < 0))
+					continue;
+				MUD_MudSheetTileData d = OpTile(tx, tz, stamp);
+				if (!d)
+					continue;
+				int l = (gk - tz * TQ) * TV + gi - tx * TQ;
+				if (stamp)
+				{
+					d.m_aD[l] = dd;
+					if (d.m_aTouch[l] == 0)
+					{
+						d.m_aTouch[l] = 1;
+						m_iTouchCells++;
+					}
+				}
+				d.m_aOu[l] = ou;
+				d.m_aOv[l] = ov;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: world cell gi, gk's mud and drag - the window, else the stored tile (THICK / 0 where none)
+	protected bool OpGet(int gi, int gk, out float dd, out float ou, out float ov)
+	{
+		dd = THICK;
+		ou = 0;
+		ov = 0;
+		if (gi < 0 || gk < 0)
+			return false;
+		int tx = gi / TQ;
+		int tz = gk / TQ;
+		if (IsLive(tx, tz))
+		{
+			int wi = gi - m_iX0;
+			int wk = gk - m_iZ0;
+			if (wi < 0 || wi >= N || wk < 0 || wk >= N)
+				return false;
+			int v = wk * N + wi;
+			dd = m_F.m_aD[v];
+			ou = m_F.m_aOu[v];
+			ov = m_F.m_aOv[v];
+			return true;
+		}
+		MUD_MudSheetTileData d = OpTile(tx, tz, false);
+		if (!d)
+			return false;
+		int l = (gk - tz * TQ) * TV + gi - tx * TQ;
+		dd = d.m_aD[l];
+		ou = d.m_aOu[l];
+		ov = d.m_aOv[l];
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: LimitDrag on world cells i0..i1 x k0..k1 of the tile data (two sweeps, opposite directions;
+	//! a neighbour with no data reads 0 drag, as MUD_MudSync.LimitDragCell)
+	protected void OpLimitDrag(int i0, int i1, int k0, int k1)
+	{
+		for (int sweep = 0; sweep < 2; sweep++)
+		{
+			for (int kk = k0; kk <= k1; kk++)
+			{
+				int k = kk;
+				if (sweep == 1)
+					k = k0 + k1 - kk;
+				for (int ii = i0; ii <= i1; ii++)
+				{
+					int i = ii;
+					if (sweep == 1)
+						i = i0 + i1 - ii;
+					if (i < 0 || k < 0 || IsLive(i / TQ, k / TQ))
+						continue;
+					float dd;
+					float ou;
+					float ov;
+					if (!OpGet(i, k, dd, ou, ov))
+						continue;
+					for (int q = 0; q < 4; q++)
+					{
+						int ni = i;
+						int nk = k;
+						if (q == 0)
+							ni = i - 1;
+						else if (q == 1)
+							ni = i + 1;
+						else if (q == 2)
+							nk = k - 1;
+						else
+							nk = k + 1;
+						float nd;
+						float nou;
+						float nov;
+						OpGet(ni, nk, nd, nou, nov);
+						ou = Math.Clamp(ou, nou - DRAG_LIM, nou + DRAG_LIM);
+						ov = Math.Clamp(ov, nov - DRAG_LIM, nov + DRAG_LIM);
+					}
+					OpSet(i, k, dd, ou, ov, false);
+				}
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB part E: the data ground at x, z (as MUD_MudSync.GroundY: voxel top, else the heightfield + rut floor)
+	protected bool OpDataGround(float x, float z, out float y)
+	{
+		if (MUD_VoxelProbe.ColumnAt(x, z) && MUD_VoxelProbe.TopAt(x, z, y))
+			return true;
+		float dug;
+		float undug;
+		if (MUD_WorldGroundEntity.DugUndug(x, z, dug, undug))
+		{
+			y = dug;
+			return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! MUD LAB 10 s line part E: 'op stamps <n> skipped own <n>' (+ ms, clear ops seen), then reset
+	static string OpLog()
+	{
+		if (!s_Inst)
+			return " | op stamps 0 skipped own 0";
+		string s = string.Format(" | op stamps %1 skipped own %2 (%3 ms, own cells %4) | clear ops %5 (taken at go-live)",
+			s_Inst.m_iOpStamps, s_Inst.m_iOpSkipOwn, s_Inst.m_iOpMs, s_Inst.m_mOwn.Count(), s_Inst.m_iOpClears);
+		s_Inst.m_iOpStamps = 0;
+		s_Inst.m_iOpSkipOwn = 0;
+		s_Inst.m_iOpMs = 0;
+		s_Inst.m_iOpClears = 0;
+		return s;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -766,7 +5117,7 @@ class MUD_MudSheet
 	protected void Freeze(int tx, int tz, int ti, int tk, IEntity te, Resource res)
 	{
 		int key = TrailKey(tx, tz);
-		MUD_MudSheetStore st = m_mTrail.Get(key);
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: no stale compact copy left behind
 		if (st)
 		{
 			// cannot happen (a trail tile is unpacked when the sheet covers it); keep the newer one
@@ -779,7 +5130,35 @@ class MUD_MudSheet
 		st.m_iTz = tz;
 		st.m_Ent = te;
 		st.m_Res = res;
+		if (m_bLocal)
+			FreezeLocal(tx, tz, ti, tk);     // SHEET LOCAL: eases end, band up to date
 		Pack(ti, tk, st.m_D);
+		if (m_bLocal && BAND_INCR)
+			DistPack(ti, tk, st.m_D);     // stage 2 C1
+		st.m_D.m_iSig1 = m_aSlotSig1[tk * TILES + ti];     // stage 2 C3: its mesh goes with it
+		st.m_D.m_iSig2 = m_aSlotSig2[tk * TILES + ti];
+		st.m_D.m_iDrawn = m_aSlotReady[tk * TILES + ti];     // LAZY RUT MESH: the slot's mesh had no hole
+		st.m_D.m_iUnlift = m_aSlotUnlift[tk * TILES + ti];   // LIFT BY DRAWN: the mesh stays on screen
+		if (m_bLocal && te && !SlotTraced(tk * TILES + ti))
+		{
+			// SHEET LOCAL: never built before every cell is traced - data only; CAMERA RADIUS traces + builds it
+			te.ClearFlags(EntityFlags.VISIBLE, false);
+			MUD_MudSheetStore fdy = new MUD_MudSheetStore();
+			fdy.m_Ent = te;
+			fdy.m_Res = res;
+			fdy.m_fDieAt = m_fLast + 1;
+			m_aDying.Insert(fdy);
+			st.m_Ent = null;
+			st.m_Res = null;
+		}
+		// S1 (UPLOAD_SLOTS): a slot Upload put off leaves with a stale mesh - build it from the stored data now
+		else if (UPLOAD_SLOTS > 0 && te && m_aSlotDirty[tk * TILES + ti] != 0 && m_aSlotZone[tk * TILES + ti] != 0)
+		{
+			m_iBuildWhy = BW_FREEZE;
+			Resource r = BuildTile(te, st.m_D, tx, tz, false);
+			if (r)
+				st.m_Res = r;
+		}
 		m_mTrail.Set(key, st);
 		m_aTrailOrder.Insert(key);
 	}
@@ -808,6 +5187,9 @@ class MUD_MudSheet
 				d.m_aOu[l] = m_F.m_aOu[v];
 				d.m_aOv[l] = m_F.m_aOv[v];
 				d.m_aBare[l] = m_F.m_aBare[v];
+				d.m_aTouch[l] = m_F.m_aTouch[v];
+				d.m_aBand[l] = m_F.m_aBand[v];
+				d.m_aLastY[l] = m_F.m_aLastY[v];
 			}
 		}
 	}
@@ -827,6 +5209,9 @@ class MUD_MudSheet
 				m_F.m_aOu[v] = d.m_aOu[l];
 				m_F.m_aOv[v] = d.m_aOv[l];
 				m_F.m_aBare[v] = d.m_aBare[l];
+				m_F.m_aTouch[v] = d.m_aTouch[l];
+				m_F.m_aBand[v] = d.m_aBand[l];
+				m_F.m_aLastY[v] = d.m_aLastY[l];
 			}
 		}
 	}
@@ -835,20 +5220,131 @@ class MUD_MudSheet
 	//! Is world tile tx, tz a mud tile (its middle inside a zone)? Fades go where the next tile is not one.
 	protected bool HasTile(int tx, int tz)
 	{
+		if (m_bLocal && EDGE_OPEN_FADE)
+			return OpenDrawn(tx, tz);     // stage 2 A8
+		if (m_bLocal)
+			return true;     // SHEET LOCAL: no EDGE fade - the deposit band takes the mud into the ground
 		return TileInZone(tx, tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 A8 EDGE_OPEN_FADE: world tile tx, tz counts as a drawn neighbour (no fade toward it) when its mesh is on
+	//! screen or it is a live slot built in this upload. Otherwise a raised border beside it would show its skirt / drape
+	//! (the striped wedges, user screenshots 2026-10-20). When it gets drawn, A3 (CoCheck: raised beside not drawn, or
+	//! step) builds this tile again without the fade.
+	protected bool OpenDrawn(int tx, int tz)
+	{
+		if (m_bPlaced && IsLive(tx, tz))
+		{
+			int t = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			if (t >= 0 && t < TILES * TILES && m_aPick[t] == 1)
+				return true;
+		}
+		bool drawn = EdgeDrawn(TrailKey(tx, tz));
+		if (!drawn)
+			m_iOpenFade++;
+		return drawn;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SPARSE SHEET A2: is world tile tx, tz in the live window (no patch lift under it: own fresh ruts are drawn there
+	//! before their op's sync tile comes)?
+	static bool LiveTile(int tx, int tz)
+	{
+		return s_Inst && s_Inst.IsLive(tx, tz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LIFT BY DRAWN: is the sheet mesh of world tile tx, tz on screen (patches under it are drawn unlifted)?
+	static bool Unlifted(int tx, int tz)
+	{
+		if (!s_Inst)
+			return false;
+		if (s_Inst.IsLive(tx, tz))
+		{
+			int ux = tx - s_Inst.m_iX0 / TQ;
+			int uz = tz - s_Inst.m_iZ0 / TQ;
+			return s_Inst.m_aSlotUnlift[uz * TILES + ux] != 0;
+		}
+		MUD_MudSheetStore ust = s_Inst.m_mTrail.Get(TrailKey(tx, tz));
+		return ust && ust.m_Ent && ust.m_D.m_iUnlift != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SPARSE SHEET A2: the window moved from tile corner oldTx, oldTz to newTx, newTz - patches under the tiles that left
+	//! or came rebuild (their lift changes). A far old corner (first placement) = every new tile.
+	protected void LiftDirtyWindow(int newTx, int newTz, int oldTx, int oldTz)
+	{
+		if (!PatchLiftOn() || LIFT_BY_DRAWN)
+			return;     // LIFT BY DRAWN: the flags move with the tiles; builds and drops tell the patches
+		for (int lt = 0; lt < TILES * TILES; lt++)
+		{
+			int lox = oldTx + lt % TILES;
+			int loz = oldTz + lt / TILES;
+			if (oldTx > -100000 && (lox < newTx || lox >= newTx + TILES || loz < newTz || loz >= newTz + TILES))
+				MUD_WorldGroundEntity.SheetLiftDirty(lox * TILE_M, loz * TILE_M);
+			int lnx = newTx + lt % TILES;
+			int lnz = newTz + lt / TILES;
+			if (lnx < oldTx || lnx >= oldTx + TILES || lnz < oldTz || lnz >= oldTz + TILES)
+				MUD_WorldGroundEntity.SheetLiftDirty(lnx * TILE_M, lnz * TILE_M);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Stage 2 B7 (MUD_WorldGround DoVoxCells): does this machine run sheet local?
+	static bool LocalOn()
+	{
+		return ENABLED && s_Inst && s_Inst.m_bLocal;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SPARSE SHEET: is the A2 patch lift on (MUD_WorldGroundEntity mesh builds ask this)?
+	static bool PatchLiftOn()
+	{
+		return ENABLED && SPARSE && SYNC && MUD_MudZoneEntity.ALL_OFFROAD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS: are ground patch meshes drawn pressed by the sync layer (MUD_WorldGroundEntity asks)?
+	static bool FarPressOn()
+	{
+		return ENABLED && SYNC && s_bFarPress && !PatchLiftOn();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! FAR PRESS meter: stored sheet meshes at the last DropFar
+	static int MeshesStored()
+	{
+		return s_iMeshesStored;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SPARSE SHEET A2: m a ground patch mesh is drawn higher on untouched covered ground (times its edge lock)
+	static float PatchLift()
+	{
+		if (LIFT_BY_DRAWN)
+			return THICK + LIFT - LIFT_UNDER;
+		return THICK - PATCH_GAP;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: build a sheet tile at tx, tz? Covered ground, and with SPARSE only where there is mud data
+	//! (tiles tx..tx+1 x tz..tz+1: this tile's cells reach into the next one)
+	protected bool SheetWanted(int tx, int tz)
+	{
+		if (!TileInZone(tx, tz))
+			return false;
+		if (!PatchLiftOn())
+			return true;
+		return MUD_MudSync.AnyTileNear(tx, tz);
 	}
 
 	//------------------------------------------------------------------------------------------------
 	protected bool TileInZone(int tx, int tz)
 	{
-		float cx = (tx * TQ + TQ / 2) * CELL;
-		float cz = (tz * TQ + TQ / 2) * CELL;
-		foreach (MUD_MudZoneEntity z : m_aZones)
-		{
-			if (z && z.Contains(cx, cz))
-				return true;
-		}
-		return false;
+		if (m_bLocal)
+			return m_mBorn.Contains(TrailKey(tx, tz));     // SHEET LOCAL: only tiles a stamp's band reached
+		return MUD_MudZoneEntity.TileCovered(tx, tz);     // placed zones, or H3 ALL_OFFROAD holed ground
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -874,17 +5370,142 @@ class MUD_MudSheet
 			m_aSlotZone[t] = 0;
 			if (inZ)
 				m_aSlotZone[t] = 1;
+			if (m_bSlotsKeep)
+				continue;     // L1: Follow carried each slot's dirty flag
 			m_aSlotDirty[t] = 1;
+			m_aSlotWhy[t] = m_aSlotWhy[t] | WHY_OTHER;
 		}
 		m_bAnyZone = false;
 		for (int tz2 = 0; tz2 < TILES * TILES; tz2++)
 		{
 			if (m_aSlotZone[tz2] != 0)
 				m_bAnyZone = true;
+			// LAZY RUT MESH: the slot's entity moved with its tile (Follow) - ready while its old mesh is up and traced
+			int was = m_aSlotReady[tz2];
+			m_aSlotReady[tz2] = 0;
+			if (m_aSlotZone[tz2] != 0 && tz2 < m_aTileRes.Count() && m_aTileRes[tz2] && SlotTraced(tz2))
+				m_aSlotReady[tz2] = 1;
+			if (was != 0 && m_aSlotReady[tz2] == 0)
+				s_iCoverGen++;
 		}
 		m_iScan = 0;
 		m_iUntraced = NN;       // Grounds makes one pass and sets it back to 0
 		m_bDirty = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LAZY RUT MESH: every cell of live slot t has its ground (untraced cells draw no quad)
+	protected bool SlotTraced(int t)
+	{
+		int ti = t % TILES;
+		int tk = t / TILES;
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+			{
+				if (m_F.m_aGs[(tk * TQ + lk) * N + ti * TQ + li] == 0)
+					return false;
+			}
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LAZY RUT MESH (MUD_WorldGroundEntity): changes whenever the sheet's cover may have shrunk (a mesh dropped, a
+	//! live slot not ready, new bare cells) - held patches are checked again at once
+	static int CoverGen()
+	{
+		return s_iCoverGen;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LAZY RUT MESH (MUD_WorldGroundEntity): does the sheet draw over all of world box x0..x1, z0..z1 (x z)? Every
+	//! tile within EDGE of it is a zone tile (no fade into the ground), and every tile it touches has its sheet mesh
+	//! up (stored with a mesh, or a ready live slot) and no bare cell in reach (no holes, no taper). False when off.
+	static bool LazyOn()
+	{
+		return LAZY_RUT_MESH && s_bLazyOn && SYNC;     // MUD LAB sheet local (SYNC false): patch meshes never hidden
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEMP LAZY A/B: flips s_bLazyOn every LAZY_AB_S s of play (rendering machines)
+	protected static void LazyAbTick(float time)
+	{
+		if (LAZY_AB_S <= 0 || !LAZY_RUT_MESH)
+			return;
+		int phase = Math.Floor(time / LAZY_AB_S);
+		if (phase == s_iLazyPhase)
+			return;
+		s_iLazyPhase = phase;
+		s_bLazyOn = phase % 2 == 0;
+		s_iCoverGen++;      // cached cover answers go: hidden patches show again when off
+		string txt = "LAZY MESH OFF (patch meshes drawn under the mud)";
+		if (s_bLazyOn)
+			txt = "LAZY MESH ON (sheet only)";
+		Print(string.Format("MUD lazy A/B: %1 at %2 s", txt, time), LogLevel.NORMAL);
+		SCR_HintManagerComponent.ShowCustomHint(txt + ". Next switch in " + LAZY_AB_S.ToString() + " s", "Mud A/B", 6, true);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	static bool Covers(float x0, float z0, float x1, float z1)
+	{
+		if (!ENABLED || !LazyOn() || !s_Inst)
+			return false;
+		int why = s_Inst.CoversBox(x0, z0, x1, z1);
+		s_aCoverNo.Set(why, s_aCoverNo[why] + 1);
+		return why == 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! R5 perf 2026-10-18 (research/2026-10-18-mud-zone-rut-perf.md): Covers answers since the last call, for the
+	//! ground's 10 s line; resets them
+	static string CoverWhy()
+	{
+		string s = string.Format("asked: yes %1, too big %2, zone edge %3, bare near %4, live slot not ready %5, stored tile no mesh %6",
+			s_aCoverNo[0], s_aCoverNo[1], s_aCoverNo[2], s_aCoverNo[3], s_aCoverNo[4], s_aCoverNo[5]);
+		for (int i = 0; i < 6; i++)
+			s_aCoverNo.Set(i, 0);
+		return s;
+	}
+
+	//! 0 = covered, else why not (s_aCoverNo)
+	protected int CoversBox(float x0, float z0, float x1, float z1)
+	{
+		int ea = Math.Floor((x0 - EDGE) / TILE_M);
+		int eb = Math.Floor((x1 + EDGE) / TILE_M);
+		int ec = Math.Floor((z0 - EDGE) / TILE_M);
+		int ed = Math.Floor((z1 + EDGE) / TILE_M);
+		if (eb - ea > 8 || ed - ec > 8)
+			return 1;     // a ground patch is 8 m: anything bigger is not asked for
+		for (int ez = ec; ez <= ed; ez++)
+		{
+			for (int ex = ea; ex <= eb; ex++)
+			{
+				if (!TileInZone(ex, ez))
+					return 2;
+			}
+		}
+		int x0t = m_iX0 / TQ;
+		int z0t = m_iZ0 / TQ;
+		for (int tz = Math.Floor(z0 / TILE_M); tz <= Math.Floor(z1 / TILE_M); tz++)
+		{
+			for (int tx = Math.Floor(x0 / TILE_M); tx <= Math.Floor(x1 / TILE_M); tx++)
+			{
+				if (NearBareTile(tx, tz))
+					return 3;
+				if (IsLive(tx, tz))
+				{
+					int t = (tz - z0t) * TILES + tx - x0t;
+					if (m_aSlotReady[t] == 0)
+						return 4;
+					continue;
+				}
+				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (!st || !st.m_Ent || !st.m_Res || st.m_D.m_iDrawn == 0)
+					return 5;
+			}
+		}
+		return 0;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -898,18 +5519,26 @@ class MUD_MudSheet
 		for (int tk = ka; tk <= kb; tk++)
 		{
 			for (int ti = ta; ti <= tb; ti++)
-				m_aSlotDirty[tk * TILES + ti] = 1;
+			{
+				int t = tk * TILES + ti;
+				m_aSlotDirty[t] = 1;
+				m_aSlotWhy[t] = m_aSlotWhy[t] | m_iMarkWhy;     // builds by reason (sheet local log)
+				if (m_bMarkNow)
+					m_aSlotNow[t] = 1;     // SHEET LOCAL: a hole - built in the blast frame (DoDigNow)
+			}
 		}
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Map load: queue every zone tile once, then build one per frame (traced, THICK layer, meshed, stored)
+	//! Map load: find the zones once. CAMERA RADIUS (Stage 3): then Radius() builds / drops tiles round the camera.
+	//! Else (ONE_GRID / RADIUS_ON false): queue every zone tile once, build BUILD_MS per frame (traced, THICK, stored).
 	protected void BuildZones()
 	{
 		if (!m_bZonesQueued)
 		{
 			m_bZonesQueued = true;
 			MUD_MudZoneEntity.GetInWorld(m_aZones);
+			m_iZoneTiles = 0;
 			foreach (MUD_MudZoneEntity z : m_aZones)
 			{
 				float x0, z0, x1, z1;
@@ -924,15 +5553,26 @@ class MUD_MudSheet
 					{
 						if (!z.Contains((tx * TQ + TQ / 2) * CELL, (tz * TQ + TQ / 2) * CELL))
 							continue;
+						m_iZoneTiles++;
+						if (RadiusOn())
+							continue;
 						m_aBuildTx.Insert(tx);
 						m_aBuildTz.Insert(tz);
 					}
 				}
 			}
-			m_iZoneTiles = m_aBuildTx.Count();
-			Print(string.Format("MUD mud zones: %1 zones, %2 tiles to build (BUILD_MS per frame)", m_aZones.Count(), m_iZoneTiles), LogLevel.NORMAL);
+			if (RadiusOn())
+				Print(string.Format("MUD mud zones: %1 zones, %2 tiles, built within %3 m of the camera (no pre-build)", m_aZones.Count(), m_iZoneTiles, RADIUS), LogLevel.NORMAL);
+			else
+				Print(string.Format("MUD mud zones: %1 zones, %2 tiles to build (BUILD_MS per frame)", m_aZones.Count(), m_iZoneTiles), LogLevel.NORMAL);
 			if (m_bPlaced)
 				UpdateSlots();
+		}
+		if (RadiusOn())
+		{
+			Radius();
+			RenderAB();
+			return;
 		}
 		if (m_aBuildTx.IsEmpty())
 			return;
@@ -956,36 +5596,476 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! One zone tile at load: traces on the even cells (11 x 11), the cells between filled, the THICK layer, a mesh
+	//! CAMERA RADIUS on (ONE_GRID needs every zone tile built, so it keeps the pre-build)
+	protected bool RadiusOn()
+	{
+		return RADIUS_ON && !ONE_GRID;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: every RADIUS_EVERY s the far meshes go and the near zone tiles without one are queued (nearest
+	//! at the end); then this frame builds from the end for RAD_BUILD_MS (at least one tile)
+	protected void Radius()
+	{
+		if (m_fLast >= m_fNextRad)
+		{
+			m_fNextRad = m_fLast + RADIUS_EVERY;
+			vector cam[4];
+			GetGame().GetWorld().GetCurrentCamera(cam);
+			vector cp = cam[3];
+			RadSpeed(cp);
+			DropFar(cp);
+			QueueNear(cp);
+			m_vLodCam = cp;
+			m_bLodCam = true;
+			LodUpgrade(cp);
+		}
+		if (m_aBuildTx.IsEmpty() && m_aFrontTx.IsEmpty())
+			return;
+		int tB = System.GetTickCount();
+		int built = 0;
+		int buildMs = RAD_BUILD_MS;
+		if (m_bLocal)
+			buildMs = MESH_MS;     // MUD LAB part D
+		// stage 2 A5: born / re-banded tiles first (same ms budget)
+		while (!m_aFrontTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < buildMs))
+		{
+			int fx = m_aFrontTx[0];
+			int fz = m_aFrontTz[0];
+			m_aFrontTx.RemoveOrdered(0);
+			m_aFrontTz.RemoveOrdered(0);
+			BuildZoneTile(fx, fz);
+			m_iBornFront++;
+			built++;
+		}
+		while (!m_aBuildTx.IsEmpty() && (built == 0 || System.GetTickCount(tB) < buildMs))
+		{
+			int n = m_aBuildTx.Count();
+			int bx = m_aBuildTx[n - 1];
+			int bz = m_aBuildTz[n - 1];
+			m_aBuildTx.Remove(n - 1);
+			m_aBuildTz.Remove(n - 1);
+			BuildZoneTile(bx, bz);
+			built++;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEST KIT render A/B (2026-10-18, research/2026-10-18-sheet-alternatives-and-perf.md P3; CLIENT file setting
+	//! sheet_hide_ab = s, 0 = off): every s seconds the stored sheet meshes are hidden, then shown again (live slots
+	//! stay). Not dropped - no rebuilds - so the 'MUD prof 5 s' render ms of shown vs hidden = the cost of drawing them.
+	protected void RenderAB()
+	{
+		float per = MUD_TestKit.SheetHideAB();
+		if (per <= 0)
+			return;
+		int cyc = Math.Floor(m_fLast / per);
+		int phase = cyc % 2;
+		if (phase == m_iAbPhase && m_fLast < m_fAbNext)
+			return;
+		m_fAbNext = m_fLast + 1;
+		bool changed = phase != m_iAbPhase;
+		m_iAbPhase = phase;
+		if (phase == 0)
+		{
+			if (!changed)
+				return;
+			// shown again: only what RenderAB hid (tiles hidden for their own reasons stay hidden)
+			int shown = 0;
+			foreach (IEntity he : m_aAbHidden)
+			{
+				if (!he)
+					continue;
+				he.SetFlags(EntityFlags.VISIBLE, false);
+				shown++;
+			}
+			m_aAbHidden.Clear();
+			Print(string.Format("MUD render A/B: phase 0 - %1 stored sheet meshes %2 for %3 s", shown, MUD_Prof.AbWord(0), per), LogLevel.NORMAL);
+			return;
+		}
+		// hidden: every visible stored mesh (again each second - a rebuilt tile shows itself)
+		int hid = 0;
+		foreach (int key, MUD_MudSheetStore st : m_mTrail)
+		{
+			if (!st || !st.m_Ent)
+				continue;
+			if ((st.m_Ent.GetFlags() & EntityFlags.VISIBLE) == 0)
+				continue;
+			st.m_Ent.ClearFlags(EntityFlags.VISIBLE, false);
+			m_aAbHidden.Insert(st.m_Ent);
+			hid++;
+		}
+		if (changed)
+			Print(string.Format("MUD render A/B: phase 1 - %1 stored sheet meshes %2 for %3 s", hid, MUD_Prof.AbWord(1), per), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: is world x, z within m of any zone's rectangle?
+	protected bool ZoneNear(float x, float z, float m)
+	{
+		if (MUD_MudZoneEntity.AnyBox())
+			return true;     // H3 ALL_OFFROAD: QueueNear's per-tile check decides
+		foreach (MUD_MudZoneEntity zn : m_aZones)
+		{
+			if (!zn)
+				continue;
+			float x0, z0, x1, z1;
+			zn.GetRect(x0, z0, x1, z1);
+			if (x >= x0 - m && x <= x1 + m && z >= z0 - m && z <= z1 + m)
+				return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: the build list anew - zone tiles whose middle is within RADIUS of cp (x z), not live, no mesh.
+	//! Square rings from the outside in, so the nearest tiles sit at the end (built first).
+	protected void QueueNear(vector cp)
+	{
+		m_aBuildTx.Clear();
+		m_aBuildTz.Clear();
+		m_iRadQueued = 0;
+		float rad = m_fRadBuild;
+		if (rad <= 0)
+			rad = RADIUS;
+		if (!ZoneNear(cp[0], cp[2], rad + TILE_M))
+			return;
+		// BUILD AHEAD: build order = distance to a point AHEAD_S s ahead of the camera (at most AHEAD_MAX m), so the tiles
+		// you drive into come first; which tiles = still every tile within rad of the camera
+		vector ap = cp + m_vRadVel * AHEAD_S;
+		float ad = vector.DistanceXZ(ap, cp);
+		if (ad > AHEAD_MAX)
+			ap = cp + (ap - cp) * (AHEAD_MAX / ad);
+		array<int> order = {};
+		int slots = 1024;
+		int dcmMax = 1000000;
+		if (m_bLocal)
+		{
+			slots = 4096;     // MUD LAB part D: ~1710 tiles in the MESH_R 70 circle
+			dcmMax = 500000;  // 500000 x 4096 + 4095 < 2^31
+		}
+		int ctx = Math.Floor(cp[0] / TILE_M);
+		int ctz = Math.Floor(cp[2] / TILE_M);
+		int rt = Math.Ceil(rad / TILE_M) + 1;
+		float r2 = rad * rad;
+		for (int ring = rt; ring >= 0; ring--)
+		{
+			for (int dz = -ring; dz <= ring; dz++)
+			{
+				// the ring's top and bottom rows whole, the rows between only its two side tiles
+				int stepX = 1;
+				if (ring > 0 && dz != -ring && dz != ring)
+					stepX = 2 * ring;
+				for (int dx = -ring; dx <= ring; dx += stepX)
+				{
+					int tx = ctx + dx;
+					int tz = ctz + dz;
+					float mx = (tx * TQ + TQ / 2) * CELL - cp[0];
+					float mz = (tz * TQ + TQ / 2) * CELL - cp[2];
+					if (mx * mx + mz * mz > r2)
+						continue;
+					if (IsLive(tx, tz))
+						continue;
+					MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+					if (st && st.m_Ent)
+						continue;
+					if (!SheetWanted(tx, tz))
+						continue;
+					// sort code: distance to the ahead point in cm x 1024 + list index (ints sort exactly)
+					float ox = (tx * TQ + TQ / 2) * CELL - ap[0];
+					float oz = (tz * TQ + TQ / 2) * CELL - ap[2];
+					int dcm = Math.Min(Math.Round(Math.Sqrt(ox * ox + oz * oz) * 100), dcmMax);
+					order.Insert(dcm * slots + m_aBuildTx.Count());
+					m_aBuildTx.Insert(tx);
+					m_aBuildTz.Insert(tz);
+				}
+			}
+		}
+		m_iRadQueued = m_aBuildTx.Count();
+		if (m_iRadQueued < 2 || m_iRadQueued >= slots)
+			return;     // (>= 1024 cannot happen at RADIUS 40: ~560 tiles in the circle; then the ring order stays)
+		// Radius() builds from the END: farthest from the ahead point first in the list, the nearest last
+		order.Sort();
+		array<int> sx = {};
+		array<int> sz = {};
+		for (int o = order.Count() - 1; o >= 0; o--)
+		{
+			int idx = order[o] % slots;
+			sx.Insert(m_aBuildTx[idx]);
+			sz.Insert(m_aBuildTz[idx]);
+		}
+		m_aBuildTx.Copy(sx);
+		m_aBuildTz.Copy(sz);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SPEED RADIUS + BUILD AHEAD: camera velocity (x z, smoothed) from its move since the last radius check; the build
+	//! radius shrinks at speed so the tiles a second we must build stay near what one build a frame gives
+	protected void RadSpeed(vector cp)
+	{
+		float dt = m_fLast - m_fRadPrevT;
+		if (m_fRadPrevT > 0 && dt > 0.01 && dt < 2)
+		{
+			vector v = (cp - m_vRadPrev) * (1 / dt);
+			v[1] = 0;
+			if (v.Length() > 60)
+				v = vector.Zero;     // teleport / respawn / camera switch: no speed
+			m_vRadVel = m_vRadVel * 0.5 + v * 0.5;
+		}
+		m_vRadPrev = cp;
+		m_fRadPrevT = m_fLast;
+		float speed = m_vRadVel.Length();
+		m_fRadBuild = RADIUS;
+		if (m_bLocal)
+			m_fRadBuild = MESH_R;     // MUD LAB part D: fixed mesh radius
+		if (SPEED_RADIUS && !m_bLocal && speed > 1)
+			m_fRadBuild = Math.Clamp(SPEED_RADIUS_K / speed, RADIUS_MIN, RADIUS);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: stored tiles whose middle is more than RADIUS + RADIUS_HYST from cp (x z) lose their mesh (hidden
+	//! now, deleted 1 s later as m_aDying) and their store (Stage 4: bare cells come back from the sync layer).
+	protected void DropFar(vector cp)
+	{
+		float far = RADIUS + RADIUS_HYST;
+		if (m_bLocal)
+			far = MESH_R + MESH_DROP;     // MUD LAB part D
+		float far2 = far * far;
+		// MESH KEEP: past-radius meshes (key + distance); with MESH_CAP only the farthest over the cap go
+		int meshes = 0;
+		array<int> farKey = {};
+		array<float> farD2 = {};
+		for (int n = m_aTrailOrder.Count() - 1; n >= 0; n--)
+		{
+			int key = m_aTrailOrder[n];
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st)
+			{
+				m_aTrailOrder.RemoveOrdered(n);
+				continue;
+			}
+			float mx = (st.m_iTx * TQ + TQ / 2) * CELL - cp[0];
+			float mz = (st.m_iTz * TQ + TQ / 2) * CELL - cp[2];
+			float d2 = mx * mx + mz * mz;
+			if (!st.m_Ent)
+			{
+				if (m_bLocal && d2 > far2)
+					FarPut(key, st);     // MUD LAB part D: a far data-only store goes compact
+				continue;
+			}
+			meshes++;
+			if (d2 <= far2)
+				continue;
+			farKey.Insert(key);
+			farD2.Insert(d2);
+		}
+		s_iMeshesStored = meshes;
+		int drop = farKey.Count();
+		bool cap = s_iMeshCap > 0 && !m_bLocal;     // MUD LAB part D: SHEET LOCAL drops every mesh past MESH_R + MESH_DROP
+		if (cap)
+			drop = Math.Min(drop, meshes - s_iMeshCap);
+		for (int c = 0; c < drop; c++)
+		{
+			int pick = 0;
+			if (cap)
+			{
+				for (int f = 1; f < farD2.Count(); f++)
+				{
+					if (farD2[f] > farD2[pick])
+						pick = f;
+				}
+			}
+			DropMesh(farKey[pick]);
+			farKey.Remove(pick);
+			farD2.Remove(pick);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: stored tile key loses its mesh (hidden now, deleted 1 s later as m_aDying) and its store (Stage 4:
+	//! bare cells come back from the sync layer)
+	protected void DropMesh(int key)
+	{
+		MUD_MudSheetStore st = m_mTrail.Get(key);
+		if (!st || !st.m_Ent)
+			return;
+		if (m_bLocal)
+		{
+			// MUD LAB part D: deleted at once (no patch re-lift to wait for in this mode), the data goes compact
+			DropColl(st.m_Ent);
+			SCR_EntityHelper.DeleteEntityAndChildren(st.m_Ent);
+			st.m_Ent = null;
+			st.m_Res = null;
+			st.m_D.m_iUnlift = 0;
+			m_iSt10Drops++;
+			s_iCoverGen++;
+			FarPut(key, st);
+			return;
+		}
+		MUD_MudSheetStore dying = new MUD_MudSheetStore();
+		dying.m_Ent = st.m_Ent;
+		dying.m_Res = st.m_Res;
+		dying.m_fDieAt = m_fLast + 1;
+		if (LIFT_BY_DRAWN && st.m_D.m_iUnlift != 0)
+			MUD_WorldGroundEntity.SheetLiftDirty(st.m_iTx * TILE_M, st.m_iTz * TILE_M);     // patches lift back under it first
+		else
+			st.m_Ent.ClearFlags(EntityFlags.VISIBLE, false);
+		st.m_D.m_iUnlift = 0;
+		m_aDying.Insert(dying);
+		st.m_Ent = null;
+		st.m_Res = null;
+		m_iSt10Drops++;
+		s_iCoverGen++;     // LAZY RUT MESH: patches under it show again
+		if (m_bLocal || (HasBare(st.m_D) && !SYNC))
+			return;        // no sync layer to hold the bare cells (SHEET LOCAL: nor the mud): kept, data only
+		m_mTrail.Remove(key);
+		int at = m_aTrailOrder.Find(key);
+		if (at >= 0)
+			m_aTrailOrder.RemoveOrdered(at);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected bool HasBare(MUD_MudSheetTileData d)
+	{
+		for (int l = 0; l < TV * TV; l++)
+		{
+			if (d.m_aBare[l] != 0)
+				return true;
+		}
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS: live slot ti, tk (world tile tx, tz) with no built tile - its cells the window has no data for
+	//! (m_aGs 0: new, or a shared edge not traced yet) take the sync layer's mud; a kept store (data only, bare cells)
+	//! gives its bare cells and goes. The ground is traced again by Grounds (a kept store's ground is old).
+	protected void FillSlot(int ti, int tk, int tx, int tz)
+	{
+		int key = TrailKey(tx, tz);
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: a compact one comes back first
+		float sd;
+		float sou;
+		float sov;
+		int sb;
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+			{
+				int v = (tk * TQ + lk) * N + ti * TQ + li;
+				if (m_F.m_aGs[v] != 0)
+					continue;
+				int l = lk * TV + li;
+				float d = THICK;
+				float ou = 0;
+				float ov = 0;
+				int bare = 0;
+				if (st)
+				{
+					d = st.m_D.m_aD[l];
+					ou = st.m_D.m_aOu[l];
+					ov = st.m_D.m_aOv[l];
+					bare = st.m_D.m_aBare[l];
+				}
+				if (SYNC && bare == 0 && MUD_MudSync.Get(tx * TQ + li, tz * TQ + lk, sd, sou, sov, sb))
+				{
+					d = sd;
+					ou = sou;
+					ov = sov;
+					bare = sb;     // Stage 4: cleared by a crater / dig op
+				}
+				m_F.m_aD[v] = d;
+				m_F.m_aOu[v] = ou;
+				m_F.m_aOv[v] = ov;
+				m_F.m_aBare[v] = bare;
+				m_F.m_aTouch[v] = 0;
+				m_F.m_aBand[v] = 0;
+				m_F.m_aLastY[v] = 0;
+				if (st)
+				{
+					m_F.m_aTouch[v] = st.m_D.m_aTouch[l];     // SHEET LOCAL: a kept store's deposit band source
+					m_F.m_aBand[v] = st.m_D.m_aBand[l];
+				}
+			}
+		}
+		if (!st)
+			return;
+		m_mTrail.Remove(key);
+		RemoveTrailKey(key);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! One zone tile: traces on the even cells (11 x 11), the cells between filled, the THICK layer (SYNC: the sync
+	//! layer's mud), a mesh. CAMERA RADIUS: a kept store (data only) is built again - fresh ground, the sync mud,
+	//! its bare cells kept.
 	protected void BuildZoneTile(int tx, int tz)
 	{
 		int key = TrailKey(tx, tz);
-		if (m_mTrail.Contains(key) || IsLive(tx, tz))
-			return;     // duplicate (overlapping zones) or the window has it already
-		MUD_MudSheetStore st = new MUD_MudSheetStore();
-		st.m_iTx = tx;
-		st.m_iTz = tz;
+		if (IsLive(tx, tz))
+			return;     // the window has it already
+		MUD_MudSheetStore st = TrailGet(key);     // MUD LAB part D: a compact one comes back first
+		if (st && st.m_Ent)
+			return;     // duplicate (overlapping zones) or built already
+		bool kept = st != null;
+		if (!kept)
+		{
+			st = new MUD_MudSheetStore();
+			st.m_iTx = tx;
+			st.m_iTz = tz;
+		}
 		MUD_MudSheetTileData d = st.m_D;
+		int tZ = System.GetTickCount();     // MUD_Prof z parts (2026-10-18 all-offroad deep dive: ~2.9 ms a tile)
 		for (int lk = 0; lk < TV; lk += 2)
 		{
 			for (int li = 0; li < TV; li += 2)
 				d.m_aG[lk * TV + li] = GroundDown((tx * TQ + li) * CELL, (tz * TQ + lk) * CELL);
 		}
+		MUD_Prof.Add(MUD_Prof.Z_GROUND, System.GetTickCount(tZ));
+		tZ = System.GetTickCount();
+		// TILE CHEAP (2026-10-18): no sync tile here = plain THICK mud everywhere, no 441 Get calls
+		bool syncAny = SYNC && MUD_MudSync.AnyTileNear(tx, tz);
 		for (int k = 0; k < TV; k++)
 		{
 			for (int i = 0; i < TV; i++)
 			{
 				int l = k * TV + i;
+				d.m_aGs[l] = 1;
+				if (kept && (d.m_aBare[l] != 0 || m_bLocal))
+					continue;   // blown / dug mud stays as it was (a kept store: SYNC off only since Stage 4; SHEET LOCAL: all its data)
 				d.m_aD[l] = THICK;
 				d.m_aOu[l] = 0;
 				d.m_aOv[l] = 0;
-				d.m_aGs[l] = 1;
 				d.m_aBare[l] = 0;
+				// SYNC: rut ops that came before this tile was built (a no-op where the sync layer has no tile); Stage 4:
+				// craters / digs there cleared it (bare)
+				if (syncAny)
+				{
+					float sd;
+					float sou;
+					float sov;
+					int sb;
+					if (MUD_MudSync.Get(tx * TQ + i, tz * TQ + k, sd, sou, sov, sb))
+					{
+						d.m_aD[l] = sd;
+						d.m_aOu[l] = sou;
+						d.m_aOv[l] = sov;
+						d.m_aBare[l] = sb;
+					}
+				}
 			}
 		}
 		FillTile(d);
+		int bD = s_iBandMsAll;     // stage 2 A1
+		if (m_bLocal)
+			BandTile(tx, tz, d, 0, 0);     // SHEET LOCAL: band from the touched cells around it
+		MUD_Prof.Add(MUD_Prof.Z_DATA, System.GetTickCount(tZ) - (s_iBandMsAll - bD));
+		tZ = System.GetTickCount();
 		st.m_Ent = SpawnTile(tx, tz, d.m_aG[0]);
+		MUD_Prof.Add(MUD_Prof.Z_SPAWN, System.GetTickCount(tZ));
+		tZ = System.GetTickCount();
 		st.m_Res = BuildTile(st.m_Ent, d, tx, tz, false);
+		MUD_Prof.Add(MUD_Prof.Z_MESH, System.GetTickCount(tZ));
+		if (kept)
+			return;
 		m_mTrail.Set(key, st);
 		m_aTrailOrder.Insert(key);
 	}
@@ -1017,7 +6097,342 @@ class MUD_MudSheet
 	{
 		if (!ENABLED || !s_Inst)
 			return;
+		int tCt = System.GetTickCount();
+		if (MUD_TestKit.TEST_KIT && blastR > 0)
+			MUD_CraterTrace.SheetHit(wp);     // stage 2 B1 crater log
+		if (blastR > 0 && s_Inst.PreTaken(wp))
+			return;     // stage 2 B5: dug ahead, its tiles are held for FlushNow
+		s_Inst.m_bMarkNow = s_Inst.m_bLocal;     // SHEET LOCAL: slots a hole marks build in the blast frame (DoDigNow)
 		s_Inst.QueueChange(lo, hi, wp, blastR);
+		s_Inst.m_bMarkNow = false;
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.SheetMs(System.GetTickCount(tCt));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Synced sheet Stage 1 (2026-10-18): MUD_VoxelProbe.Submit - a rut op changed the rut-field floor / ridges in the
+	//! x, z box lo..hi. The mud's ground there is read again now (HoleGround: the data, not the patch collider); the mud
+	//! depth stays (user look choice: drawn = felt ground + mud, the rut deepens under the mud). Live tiles rebuild with
+	//! the next upload, stored ones in FlushOneBuild (next Frame).
+	//! RE-GROUND EXACT (2026-10-18): xs / zs = the floor samples the op changed (MUD_VoxelProbe); only the traced sheet
+	//! cells within one floor sample of one are read again. Empty or capped list -> the whole box as before.
+	static void FloorChanged(vector lo, vector hi, array<float> xs, array<float> zs)
+	{
+		if (!ENABLED || !s_Inst)
+			return;
+		if (REGROUND_EXACT && xs && !xs.IsEmpty() && xs.Count() < MUD_VoxelProbe.REGROUND_EXACT_MAX)
+			s_Inst.ReGroundAt(xs, zs, true);
+		else
+			s_Inst.ReGround(lo, hi);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! H2: MUD_LookRuts wrote (or dropped) look floor samples under the sheet at xs / zs: those cells re-read their
+	//! ground at once (no ease, no drop log: the guess IS the instant rut; the log measures the real cut landing)
+	static void LookChanged(array<float> xs, array<float> zs)
+	{
+		if (!ENABLED || !s_Inst || !xs || xs.IsEmpty())
+			return;
+		s_Inst.m_iLookCuts10++;
+		s_Inst.ReGroundAt(xs, zs, false);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! RE-GROUND EXACT: each changed floor sample re-reads the even (traced) sheet cells within REGROUND_R of it, once
+	//! each; a cell on a tile border goes to both tiles (as the box path: border verts live in both)
+	protected void ReGroundAt(array<float> xs, array<float> zs, bool fromOp)
+	{
+		map<int, bool> seen = new map<int, bool>();
+		map<int, ref MUD_MudSheetTileData> hitTiles = new map<int, ref MUD_MudSheetTileData>();
+		map<int, int> hitTx = new map<int, int>();
+		map<int, int> hitTz = new map<int, int>();
+		float dropMax = 0;
+		float dropX = 0;
+		float dropZ = 0;
+		int cells = 0;
+		for (int n = 0; n < xs.Count(); n++)
+		{
+			int gi0 = Math.Ceil((xs[n] - REGROUND_R) / CELL);
+			int gi1 = Math.Floor((xs[n] + REGROUND_R) / CELL);
+			int gk0 = Math.Ceil((zs[n] - REGROUND_R) / CELL);
+			int gk1 = Math.Floor((zs[n] + REGROUND_R) / CELL);
+			if (gi0 % 2 != 0)
+				gi0++;
+			if (gk0 % 2 != 0)
+				gk0++;
+			for (int gk = gk0; gk <= gk1; gk += 2)
+			{
+				for (int gi = gi0; gi <= gi1; gi += 2)
+				{
+					int key = PassKey(gi, gk);
+					if (seen.Contains(key))
+						continue;
+					seen.Set(key, true);
+					cells++;
+					float wx = gi * CELL;
+					float wz = gk * CELL;
+					// the 1, 2 or 4 tiles holding this vertex (a border vertex is in both tiles' data)
+					int txA = gi / TQ;     // world cells are > 0 on Arland
+					int tzA = gk / TQ;
+					int txB = txA;
+					int tzB = tzA;
+					if (gi - txA * TQ == 0)
+						txB = txA - 1;
+					if (gk - tzA * TQ == 0)
+						tzB = tzA - 1;
+					bool liveDone = false;
+					for (int tz = tzB; tz <= tzA; tz++)
+					{
+						for (int tx = txB; tx <= txA; tx++)
+						{
+							if (IsLive(tx, tz))
+							{
+								if (liveDone)
+									continue;
+								liveDone = true;
+								int i = gi - m_iX0;
+								int k = gk - m_iZ0;
+								if (i < 0 || i >= N || k < 0 || k >= N || m_F.m_aGs[k * N + i] == 0)
+									continue;   // not traced yet: Grounds reads it
+								float gOld = m_F.m_aG[k * N + i];
+								Trace(i, k);
+								float gNew = m_F.m_aG[k * N + i];
+								if (gOld - gNew > dropMax)
+								{
+									dropMax = gOld - gNew;
+									dropX = wx;
+									dropZ = wz;
+								}
+								if (fromOp && EASE_S > 0 && gOld - gNew > EASE_MIN)
+								{
+									m_F.m_aG[k * N + i] = gOld;     // EASE DROP: EaseTick slides it down
+									EaseAdd(gi, gk, gOld, gNew);
+								}
+								else if (!fromOp)
+								{
+									EaseDrop(gi, gk);     // H2: a guess beats a running ease
+								}
+								FillAround(i, k);
+								continue;
+							}
+							int tkey = TrailKey(tx, tz);
+							MUD_MudSheetStore st = m_mTrail.Get(tkey);
+							if (!st || !st.m_Ent)
+								continue;
+							MUD_MudSheetTileData d = st.m_D;
+							int l = (gk - tz * TQ) * TV + gi - tx * TQ;
+							float ng = GroundDown(wx, wz);
+							if (Math.AbsFloat(ng - d.m_aG[l]) <= FIELD_EPS)
+								continue;
+							if (d.m_aG[l] - ng > dropMax)
+							{
+								dropMax = d.m_aG[l] - ng;
+								dropX = wx;
+								dropZ = wz;
+							}
+							d.m_aG[l] = ng;
+							hitTiles.Set(tkey, d);
+							hitTx.Set(tkey, tx);
+							hitTz.Set(tkey, tz);
+						}
+					}
+				}
+			}
+		}
+		foreach (int hk, MUD_MudSheetTileData hd : hitTiles)
+		{
+			FillTile(hd);
+			QueueBuild(hitTx.Get(hk), hitTz.Get(hk));
+		}
+		if (!fromOp)
+		{
+			m_iLookCells10 += cells;
+			return;
+		}
+		m_iReCells10 += cells;
+		m_iReOps10++;
+		if (dropMax > 0.005)
+			DropLog(dropMax, dropX, dropZ);
+	}
+
+	protected void ReGround(vector lo, vector hi)
+	{
+		float rx0 = lo[0] - 2 * CELL;
+		float rx1 = hi[0] + 2 * CELL;
+		float rz0 = lo[2] - 2 * CELL;
+		float rz1 = hi[2] + 2 * CELL;
+		// a rut op box is a few m (one vehicle, 0.25 s of segments); the box comes off the wire, so a garbage one must
+		// not loop over the whole map's tiles
+		if (rx1 - rx0 > REGROUND_MAX || rz1 - rz0 > REGROUND_MAX)
+		{
+			Print(string.Format("MUD mud sheet: rut floor box %1 x %2 m too big, mud ground not re-read", rx1 - rx0, rz1 - rz0), LogLevel.WARNING);
+			return;
+		}
+		int tx0 = Math.Floor(rx0 / TILE_M);
+		int tx1 = Math.Floor(rx1 / TILE_M);
+		int tz0 = Math.Floor(rz0 / TILE_M);
+		int tz1 = Math.Floor(rz1 / TILE_M);
+		// TEMP H1 drop log (plans/old/2026-10-18-hybrid-sheet-feel-plan.md): biggest drop of the drawn mud surface this op
+		// (mud depth stays, so drawn drop = ground drop) and where
+		float dropMax = 0;
+		float dropX = 0;
+		float dropZ = 0;
+		for (int tz = tz0; tz <= tz1; tz++)
+		{
+			for (int tx = tx0; tx <= tx1; tx++)
+			{
+				if (IsLive(tx, tz))
+				{
+					int i0 = (tx - m_iX0 / TQ) * TQ;
+					int k0 = (tz - m_iZ0 / TQ) * TQ;
+					// window parity = world parity (m_iX0 / m_iZ0 are whole tiles): even cells are the traced ones
+					for (int k = k0; k <= k0 + TQ; k += 2)
+					{
+						float wz = (m_iZ0 + k) * CELL;
+						if (wz < rz0 || wz > rz1)
+							continue;
+						for (int i = i0; i <= i0 + TQ; i += 2)
+						{
+							float wx = (m_iX0 + i) * CELL;
+							if (wx < rx0 || wx > rx1 || m_F.m_aGs[k * N + i] == 0)
+								continue;   // not traced yet: Grounds reads it
+							float gOld = m_F.m_aG[k * N + i];
+							Trace(i, k);
+							float gNew = m_F.m_aG[k * N + i];
+							if (gOld - gNew > dropMax)
+							{
+								dropMax = gOld - gNew;
+								dropX = wx;
+								dropZ = wz;
+							}
+							if (EASE_S > 0 && gOld - gNew > EASE_MIN)
+							{
+								m_F.m_aG[k * N + i] = gOld;     // EASE DROP: EaseTick slides it down
+								EaseAdd(m_iX0 + i, m_iZ0 + k, gOld, gNew);
+							}
+							FillAround(i, k);
+						}
+					}
+					continue;
+				}
+				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (!st || !st.m_Ent)
+					continue;
+				MUD_MudSheetTileData d = st.m_D;
+				bool hit = false;
+				for (int lk = 0; lk < TV; lk += 2)
+				{
+					float sz = (tz * TQ + lk) * CELL;
+					if (sz < rz0 || sz > rz1)
+						continue;
+					for (int li = 0; li < TV; li += 2)
+					{
+						float sx = (tx * TQ + li) * CELL;
+						if (sx < rx0 || sx > rx1)
+							continue;
+						int l = lk * TV + li;
+						float ng = GroundDown(sx, sz);
+						if (Math.AbsFloat(ng - d.m_aG[l]) <= FIELD_EPS)
+							continue;
+						if (d.m_aG[l] - ng > dropMax)
+						{
+							dropMax = d.m_aG[l] - ng;
+							dropX = sx;
+							dropZ = sz;
+						}
+						d.m_aG[l] = ng;
+						hit = true;
+					}
+				}
+				if (!hit)
+					continue;
+				FillTile(d);
+				QueueBuild(tx, tz);
+			}
+		}
+		if (dropMax > 0.005)
+			DropLog(dropMax, dropX, dropZ);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EASE DROP: world cell gi, gk slides from g0 down to g1 over EASE_S from now (a newer cut on it restarts from g0)
+	protected void EaseAdd(int gi, int gk, float g0, float g1)
+	{
+		MUD_MudSheetEase e = new MUD_MudSheetEase();
+		e.m_iGi = gi;
+		e.m_iGk = gk;
+		e.m_fFrom = g0;
+		e.m_fTo = g1;
+		e.m_fT0 = m_fLast;
+		m_mEase.Set(PassKey(gi, gk), e);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! H2: cell gi, gk was just traced to its final ground - a running ease must not pull it back
+	protected void EaseDrop(int gi, int gk)
+	{
+		if (!m_mEase.IsEmpty())
+			m_mEase.Remove(PassKey(gi, gk));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! EASE DROP, each frame: every sliding cell one step on (smoothstep); done or out of the window -> its final ground
+	protected void EaseTick(float time)
+	{
+		array<int> done = {};
+		foreach (int key, MUD_MudSheetEase e : m_mEase)
+		{
+			int i = e.m_iGi - m_iX0;
+			int k = e.m_iGk - m_iZ0;
+			if (i < 0 || i >= N || k < 0 || k >= N || m_F.m_aGs[k * N + i] == 0)
+			{
+				done.Insert(key);     // left the window: a later trace reads the real ground
+				continue;
+			}
+			float f = (time - e.m_fT0) / EASE_S;
+			float g = e.m_fTo;
+			if (f < 1)
+			{
+				f = Math.Clamp(f, 0, 1);
+				g = e.m_fFrom + (e.m_fTo - e.m_fFrom) * f * f * (3 - 2 * f);
+			}
+			else
+			{
+				done.Insert(key);
+			}
+			m_F.m_aG[k * N + i] = g;
+			FillAround(i, k);
+			MarkRect(i, i, k, k);
+			m_bDirty = true;
+		}
+		foreach (int dk : done)
+			m_mEase.Remove(dk);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEMP H1 drop log: the floor cut dropped the drawn mud by drop m at x, z; how far is the nearest own-tracked
+	//! wheel contact (any vehicle in m_aVeh) - ~1.5 m = the cut lands behind the truck as planned
+	protected void DropLog(float drop, float x, float z)
+	{
+		float best = 1000000;
+		foreach (MUD_MudSheetVeh mv : m_aVeh)
+		{
+			if (!mv || !mv.m_Veh)
+				continue;
+			for (int w = 0; w < mv.m_aLast.Count(); w++)
+			{
+				if (!mv.m_aHas[w])
+					continue;
+				vector p = mv.m_aLast[w];
+				float dd = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
+				if (dd < best)
+					best = dd;
+			}
+		}
+		float dist = -1;
+		if (best < 1000000)
+			dist = Math.Sqrt(best);
+		Print(string.Format("MUD H1 drop: %1 m at %2 %3, nearest wheel %4 m", drop, x, z, dist), LogLevel.NORMAL);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1027,6 +6442,7 @@ class MUD_MudSheet
 		m_aChgLo.Insert(lo);
 		m_aChgHi.Insert(hi);
 		m_aChgWp.Insert(wp);
+		MarkBareTiles(lo, hi, wp, blastR);
 		int tBlast = System.GetTickCount();
 		int blastTiles = 0;
 		if (DIG_NOW)
@@ -1077,6 +6493,62 @@ class MUD_MudSheet
 		}
 		Print(string.Format("MUD mud sheet: voxel ground changed x %1..%2 z %3..%4, blast %5 m at %6 -> %7 mud tiles to redo",
 			lo[0], hi[0], lo[2], hi[2], blastR, wp, jobs) + string.Format(" | blast now: %1 tiles in %2 ms", blastTiles, tBlast), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TAPER trim (Stage 3): the tiles change lo..hi (and its blast reach) touches may get bare cells - every way of
+	//! baring mud (BlastNow, DigNow, RedoTile) comes from QueueChange. A box bigger than REGROUND_MAX marks all.
+	protected void MarkBareTiles(vector lo, vector hi, vector wp, float blastR)
+	{
+		float x0 = lo[0];
+		float x1 = hi[0];
+		float z0 = lo[2];
+		float z1 = hi[2];
+		if (blastR > 0)
+		{
+			float reach = BlastReach(blastR);
+			x0 = Math.Min(x0, wp[0] - reach);
+			x1 = Math.Max(x1, wp[0] + reach);
+			z0 = Math.Min(z0, wp[2] - reach);
+			z1 = Math.Max(z1, wp[2] + reach);
+		}
+		x0 -= CELL;
+		x1 += CELL;
+		z0 -= CELL;
+		z1 += CELL;
+		if (x1 - x0 > REGROUND_MAX || z1 - z0 > REGROUND_MAX)
+		{
+			if (!m_bBareAll)
+				Print(string.Format("MUD mud sheet: voxel change box %1 x %2 m too big to mark, every tile tapers from now", x1 - x0, z1 - z0), LogLevel.WARNING);
+			m_bBareAll = true;
+			s_iCoverGen++;
+			return;
+		}
+		for (int tz = Math.Floor(z0 / TILE_M); tz <= Math.Floor(z1 / TILE_M); tz++)
+		{
+			for (int tx = Math.Floor(x0 / TILE_M); tx <= Math.Floor(x1 / TILE_M); tx++)
+				m_mBareTiles.Set(TrailKey(tx, tz), 1);
+		}
+		s_iCoverGen++;      // LAZY RUT MESH: patches near new bare cells show again
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TAPER trim: may tile tx, tz or one of its 8 neighbours hold a bare cell? (false = TaperField has nothing to do)
+	protected bool NearBareTile(int tx, int tz)
+	{
+		if (m_bBareAll || ONE_GRID)
+			return true;
+		if (m_mBareTiles.IsEmpty())
+			return false;
+		for (int dz = -1; dz <= 1; dz++)
+		{
+			for (int dx = -1; dx <= 1; dx++)
+			{
+				if (m_mBareTiles.Contains(TrailKey(tx + dx, tz + dz)))
+					return true;
+			}
+		}
+		return false;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -1237,6 +6709,18 @@ class MUD_MudSheet
 	protected void QueueBuild(int tx, int tz)
 	{
 		int key = TrailKey(tx, tz);
+		if (m_bQueueFront)
+		{
+			// SHEET LOCAL hole: first in line (next FlushOneBuild)
+			int at = m_aOneBuild.Find(key);
+			if (at >= 0)
+				m_aOneBuild.RemoveOrdered(at);
+			m_aOneBuild.InsertAt(key, 0);
+			m_mQWhy.Set(key, BW_HOLE);
+			if (MUD_TestKit.TEST_KIT)
+				MUD_CraterTrace.Tile(MUD_CraterTrace.C_TAPER, tx, tz, true);     // stage 2 B1 crater log
+			return;
+		}
 		if (!m_aOneBuild.Contains(key))
 			m_aOneBuild.Insert(key);
 	}
@@ -1368,6 +6852,10 @@ class MUD_MudSheet
 	//! both: the voxels take it too (tunnel / zone edge) - held until their go-live (SYNC), true returned.
 	static bool TakeOp(MUD_VoxelOp op, bool both)
 	{
+		if (PRE_COL_CACHE)
+			s_mPreTop.Clear();     // stage 2 B6: this op carves the voxels next - cached column tops are stale
+		if (CRATER_PREBUILD && ENABLED && s_Inst && s_Inst.m_bLocal && op && op.m_iKind == 0)
+			s_Inst.PreNote(op);     // stage 2 B5: the voxels carve it right after this - dug ahead next Frame
 		if (!ONE_GRID || !ENABLED || !s_Inst || !s_Inst.m_bOneHidden || !op)
 			return false;
 		vector p;
@@ -1551,7 +7039,7 @@ class MUD_MudSheet
 	protected float TrenchGround(MUD_VoxelOp op, float x, float z, float g, float undug)
 	{
 		MUD_TrenchLayout lay = op.m_Lay;
-		float slope = MUD_TrenchPlan.SLOPE_RUN;
+		float slope = lay.Run();
 		if (op.m_iKind == 2)
 		{
 			float depth = op.m_fDepth * MUD_TrenchPlan.LAYER;
@@ -1826,8 +7314,13 @@ class MUD_MudSheet
 	{
 		if (!ENABLED || !s_Inst)
 			return;
+		int tCt = System.GetTickCount();
+		if (s_Inst.m_bPreWin)
+			s_Inst.PreClose("go-live");     // stage 2 B5: the held crater tiles show with the voxels
 		s_Inst.m_bNowDue = true;
 		s_Inst.StepNow();
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.SheetMs(System.GetTickCount(tCt));     // stage 2 B1: the sheet part of the go-live frame
 	}
 
 	protected void DoDigNow()
@@ -1843,7 +7336,13 @@ class MUD_MudSheet
 		m_iDgUp = 0;
 		m_fDgMin = 1000;
 		m_fDgMax = -1000;
+		m_bMarkNow = m_bLocal;
 		int tiles = DigNow();
+		m_bMarkNow = false;
+		if (m_bLocal)
+			tiles += BuildNowSlots();     // SHEET LOCAL: holed live slots in the blast frame
+		if (m_bLocal && CRATER_TAPER_NOW)
+			tiles += TaperNow();     // stage 2 B3: the hole's taper tiles too
 		m_aNowLo.Clear();
 		m_aNowHi.Clear();
 		Print(string.Format("MUD mud sheet: dig now: %1 voxel changes, %2 tiles in %3 ms", boxes, tiles, System.GetTickCount(t0)), LogLevel.NORMAL);
@@ -1915,7 +7414,7 @@ class MUD_MudSheet
 								continue;
 							int v = k * N + i;
 							float ny;
-							if (m_F.m_aGs[v] == 0 || !MUD_VoxelProbe.SurfaceAt(wx, wz, ny))
+							if (m_F.m_aGs[v] == 0 || !DigSurf(wx, wz, ny))
 								continue;
 							// ONE_GRID: the voxels draw only in carved cells (zone craters do not carve): elsewhere the
 							// sheet keeps its own ground (an opened hole there would show nothing)
@@ -1933,6 +7432,10 @@ class MUD_MudSheet
 								hit = true;
 								continue;
 							}
+							if (MUD_TestKit.TEST_KIT && m_mEase.Contains(PassKey(m_iX0 + i, m_iZ0 + k)))
+								MUD_CraterTrace.EaseHit();     // stage 2 B1 crater log
+							if (CRATER_EASE_DROP)
+								EaseDrop(m_iX0 + i, m_iZ0 + k);     // stage 2 B4 (O1c): EaseTick must not write the old floor back
 							m_F.m_aG[v] = ny;
 							if (dy > MOVED)
 							{
@@ -1951,8 +7454,8 @@ class MUD_MudSheet
 					continue;
 				}
 				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
-				if (!st || !st.m_Ent)
-					continue;
+				if (!st || (!st.m_Ent && !m_bLocal))
+					continue;     // SHEET LOCAL: a data-only store takes the new ground too
 				MUD_MudSheetTileData d = st.m_D;
 				int hi0 = TV;
 				int hi1 = -1;
@@ -1970,7 +7473,7 @@ class MUD_MudSheet
 							continue;
 						int l = lk * TV + li;
 						float ny2;
-						if (d.m_aGs[l] == 0 || !MUD_VoxelProbe.SurfaceAt(sx, sz, ny2))
+						if (d.m_aGs[l] == 0 || !DigSurf(sx, sz, ny2))
 							continue;
 						if (ONE_GRID && m_bOneHidden && !MUD_VoxelProbe.DrawsAt(sx, sz))
 							continue;
@@ -1990,6 +7493,8 @@ class MUD_MudSheet
 							hit = true;
 							continue;
 						}
+						if (CRATER_EASE_DROP)
+							EaseDrop(tx * TQ + li, tz * TQ + lk);     // stage 2 B4: no ease may carry the old floor into it
 						d.m_aG[l] = ny2;
 						if (dy2 > MOVED)
 						{
@@ -2015,10 +7520,32 @@ class MUD_MudSheet
 					done++;
 					continue;
 				}
+				if (!st.m_Ent)
+					continue;     // SHEET LOCAL: data only - its mesh comes on approach (CAMERA RADIUS)
+				if (m_bPreDig)
+				{
+					// stage 2 B5: ahead dig - built held over the next frames (TaperNow / FlushOneBuild from the front)
+					m_bQueueFront = true;
+					QueueTaperNeighbours(tx, tz, hi0, hi1, hk0, hk1);
+					QueueBuild(tx, tz);
+					m_bQueueFront = false;
+					done++;
+					continue;
+				}
+				m_iBuildWhy = BW_HOLE;
 				Resource res = BuildTile(st.m_Ent, d, tx, tz, false);
 				if (res)
 					st.m_Res = res;
+				if (MUD_TestKit.TEST_KIT && d.m_iLow != 0)
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_LOW, tx, tz, false);     // stage 2 B1 crater log
 				done++;
+				if (m_bLocal)
+				{
+					// SHEET LOCAL: its taper neighbours at the FRONT of the stored build queue (live ones build now)
+					m_bQueueFront = true;
+					QueueTaperNeighbours(tx, tz, hi0, hi1, hk0, hk1);
+					m_bQueueFront = false;
+				}
 			}
 		}
 		// BlastNow tiles outside the dig boxes (should not happen): build them too
@@ -2029,6 +7556,15 @@ class MUD_MudSheet
 				continue;
 			int ltx = lk2 / 20000;     // TrailKey back to the tile (tx, tz >= 0 on Arland)
 			int ltz = lk2 - ltx * 20000;
+			if (m_bPreDig)
+			{
+				m_bQueueFront = true;     // stage 2 B5: built held later
+				QueueBuild(ltx, ltz);
+				m_bQueueFront = false;
+				done++;
+				continue;
+			}
+			m_iBuildWhy = BW_HOLE;
 			Resource res2 = BuildTile(st2.m_Ent, st2.m_D, ltx, ltz, false);
 			if (res2)
 				st2.m_Res = res2;
@@ -2080,9 +7616,21 @@ class MUD_MudSheet
 					done++;
 					continue;
 				}
-				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (MUD_TestKit.TEST_KIT && !m_mTrail.Contains(TrailKey(tx, tz)) && m_mFar.Contains(TrailKey(tx, tz)))
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_FAR, tx, tz, false);     // stage 2 B1 crater log
+				MUD_MudSheetStore st = TrailGet(TrailKey(tx, tz));     // MUD LAB part D: a compact one comes back first
+				if (MUD_TestKit.TEST_KIT && st && st.m_Ent)
+					MUD_CraterTrace.Tile(MUD_CraterTrace.C_STORED, tx, tz, true);
 				if (!st || !st.m_Ent)
+				{
+					// CAMERA RADIUS: no mesh here - SYNC: the sync layer cleared it (Stage 4, MUD_MudSync.ClearOp), the
+					// tile is built bare on approach; without SYNC the blown cells go into a kept store
+					if (!SYNC && RadiusOn() && TileInZone(tx, tz))
+						BlastKept(st, tx, tz, wp, r);
+					if (MUD_TestKit.TEST_KIT && (st || TileInZone(tx, tz)))
+						MUD_CraterTrace.Tile(MUD_CraterTrace.C_DATA, tx, tz, false);     // stage 2 B1 crater log
 					continue;
+				}
 				MUD_MudSheetTileData d = st.m_D;
 				bool hit = false;
 				for (int lk = 0; lk < TV; lk++)
@@ -2113,6 +7661,63 @@ class MUD_MudSheet
 			}
 		}
 		return done;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! CAMERA RADIUS, SYNC off only (Stage 4: the sync layer clears craters and digs from the ops): a crater on zone
+	//! tile tx, tz with no mesh (st = its kept store, or null): the blown cells go into a kept store (data only).
+	protected void BlastKept(MUD_MudSheetStore kept, int tx, int tz, vector wp, float r)
+	{
+		ref MUD_MudSheetStore st = kept;     // a strong local: a new store made here must live until it is in m_mTrail
+		bool fresh = st == null;
+		if (fresh)
+		{
+			st = new MUD_MudSheetStore();
+			st.m_iTx = tx;
+			st.m_iTz = tz;
+		}
+		MUD_MudSheetTileData d = st.m_D;
+		bool hit = false;
+		float sd;
+		float sou;
+		float sov;
+		if (fresh && m_bLocal)
+		{
+			for (int fl = 0; fl < TV * TV; fl++)
+				d.m_aD[fl] = THICK;     // SHEET LOCAL: untouched mud (no sync layer to ask)
+		}
+		for (int lk = 0; lk < TV; lk++)
+		{
+			for (int li = 0; li < TV; li++)
+			{
+				float keep = BlastKeep((tx * TQ + li) * CELL, (tz * TQ + lk) * CELL, wp, r);
+				if (keep >= 1)
+					continue;
+				int l = lk * TV + li;
+				float was = d.m_aD[l];
+				if (d.m_aBare[l] == 0 && !m_bLocal)
+				{
+					int sb;
+					if (!MUD_MudSync.Get(tx * TQ + li, tz * TQ + lk, sd, sou, sov, sb))
+					{
+						sd = THICK;     // no sync tile there: untouched mud
+						sou = 0;
+						sov = 0;
+					}
+					was = sd;
+					d.m_aOu[l] = sou;
+					d.m_aOv[l] = sov;
+				}
+				d.m_aD[l] = was * keep;
+				d.m_aBare[l] = 1;
+				hit = true;
+			}
+		}
+		if (!hit || !fresh)
+			return;
+		int key = TrailKey(tx, tz);
+		m_mTrail.Set(key, st);
+		m_aTrailOrder.Insert(key);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2329,6 +7934,29 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Synced sheet Stage 1 (2026-10-18): ground under the mud on a hole cell. No voxel column there = our heightfield
+	//! + rut floor + ridges from the data (MUD_WorldGroundEntity.DugUndug, what the patches draw): right at once after a
+	//! rut op (the patch collider may still wait for FLOOR_SETTLE) and no trace. Voxel ground (crater, tunnel): OurY.
+	protected float HoleGround(float x, float z)
+	{
+		float hgDug;
+		float hgUndug;
+		if (!MUD_VoxelProbe.ColumnAt(x, z) && MUD_WorldGroundEntity.DugUndug(x, z, hgDug, hgUndug))
+		{
+			// H2: this machine's look rut guess (MUD_LookRuts, same cut rule as the server's op) - drawn at once,
+			// the server's cut lands at the same depth later
+			float look = MUD_LookRuts.SheetFloorAt(x, z, hgDug);
+			if (look < hgDug)
+				return look;
+			return hgDug;
+		}
+		float hgPre;
+		if (m_bPreWin && PreSurf(x, z, hgPre))
+			return hgPre;     // stage 2 B5: the old brick bodies are still in until the go-live - traces would miss the hole
+		return OurY(x, z);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! For others (trench ghosts): our ground top on a hole cell (ENTS-only, as OurY: the holed heightmap above a
 	//! dug voxel floor is skipped); false on kept terrain
 	static bool OurGroundY(float x, float z, out float y)
@@ -2340,7 +7968,7 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! MUD_GroundEntity.HideFromTraces: the native get in / out check sweeps a box at the feet against every
+	//! MUD_VehicleAccess.HideFromTraces: the native get in / out check sweeps a box at the feet against every
 	//! traceable entity (mud-gotchas 2026-10-08 13:2x); the mud collider is hidden while someone gets in / out
 	static void SetTraceHidden(bool hide)
 	{
@@ -2376,6 +8004,22 @@ class MUD_MudSheet
 		int k = Math.Round(z / CELL);
 		int tx = Math.Floor(i / TQ);
 		int tz = Math.Floor(k / TQ);
+		if (m_bLocal)
+		{
+			// SHEET LOCAL: mud only on born tiles, times the deposit band (unborn ground: none, never THICK)
+			if (!TileInZone(tx, tz))
+				return 0;
+			if (IsLive(tx, tz))
+			{
+				int lv = (k - m_iZ0) * N + (i - m_iX0);
+				return m_F.m_aD[lv] * m_F.m_aBand[lv];
+			}
+			MUD_MudSheetStore lst = m_mTrail.Get(TrailKey(tx, tz));
+			int ll = (k - tz * TQ) * TV + (i - tx * TQ);
+			if (!lst)
+				return FarMud(TrailKey(tx, tz), ll);     // MUD LAB part D: compact far data (read, not taken back)
+			return lst.m_D.m_aD[ll] * lst.m_D.m_aBand[ll];
+		}
 		if (IsLive(tx, tz))
 		{
 			if (!TileInZone(tx, tz))
@@ -2384,10 +8028,21 @@ class MUD_MudSheet
 			return m_F.m_aD[v];
 		}
 		MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
-		if (!st)
-			return 0;
 		int l = (k - tz * TQ) * TV + (i - tx * TQ);
-		return st.m_D.m_aD[l];
+		if (st && st.m_Ent)
+			return st.m_D.m_aD[l];
+		// CAMERA RADIUS: a zone tile with no mesh (yet) still has its mud - the sync layer's (THICK where untouched,
+		// cleared by craters / digs), a kept store's bare cells (SYNC off)
+		if (!TileInZone(tx, tz))
+			return 0;
+		if (st && st.m_D.m_aBare[l] != 0)
+			return st.m_D.m_aD[l];
+		float sd;
+		float sou;
+		float sov;
+		int sb;
+		MUD_MudSync.Get(i, k, sd, sou, sov, sb);
+		return sd;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2401,7 +8056,7 @@ class MUD_MudSheet
 			// it - user 2026-10-15) and a WORLD trace still hits the holed heightmap (mud-gotchas 19:58)
 			m_iStatHoles++;
 			m_iStatTraces++;
-			return OurY(x, z);
+			return HoleGround(x, z);
 		}
 		float top = sy + 8;
 		TraceParam p = new TraceParam();
@@ -2425,7 +8080,10 @@ class MUD_MudSheet
 		params.Transform[1] = vector.Up;
 		params.Transform[2] = vector.Forward;
 		params.Transform[3] = Vector(tx * TQ * CELL, y, tz * TQ * CELL);
-		return GetGame().SpawnEntity(MUD_MudTileEntity, GetGame().GetWorld(), params);
+		IEntity te = GetGame().SpawnEntity(MUD_MudTileEntity, GetGame().GetWorld(), params);
+		if (STORED_RENDERED_GATE && te)
+			te.SetFlags(EntityFlags.SET_RENDERED, false);     // A5: IsRendered works
+		return te;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2515,12 +8173,14 @@ class MUD_MudSheet
 			{
 				// built at load: its data and entity go into the window
 				Unpack(st.m_D, t % TILES, t / TILES);
+				m_aSlotUnlift[t] = st.m_D.m_iUnlift;
 				m_aTileEnt.Insert(st.m_Ent);
 				m_aTileRes.Insert(st.m_Res);
 				m_mTrail.Remove(key);
 				RemoveTrailKey(key);
 				continue;
 			}
+			FillSlot(t % TILES, t / TILES, tx, tz);
 			m_aTileEnt.Insert(SpawnTile(tx, tz, m_fEstY));
 			m_aTileRes.Insert(null);
 		}
@@ -2555,6 +8215,13 @@ class MUD_MudSheet
 			mv.m_iId = m_iNextVehId;
 			m_aVeh.Insert(mv);
 		}
+		WheelsSim(veh, sim, mv, time);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Wheels of veh (its sim and sheet entry found): stamps from each wheel's last contact to its new one
+	protected void WheelsSim(Vehicle veh, VehicleWheeledSimulation sim, MUD_MudSheetVeh mv, float time)
+	{
 		int count = sim.WheelCount();
 		while (mv.m_aLast.Count() < count)
 		{
@@ -2579,7 +8246,25 @@ class MUD_MudSheet
 					continue;   // keep the old point until the wheel has moved a whole cell
 				float dt = time - mv.m_aTime[w];
 				if (len < 3 && dt > 0 && ZoneAtWorld(cp[0], cp[2]))
-					Stamp(lp, cp, len / dt, time, mv.m_iId, TyreHalf(sim.WheelGetRadius(w)));
+				{
+					float half = TyreHalf(sim.WheelGetRadius(w));
+					Stamp(lp, cp, len / dt, time, mv.m_iId, half);
+					if (m_bLocal)
+						OwnMark(cp, time);     // MUD LAB part E: rut ops near it are this stamp again
+					// TEMP delay meter: first undrawn own stamp of the wheel's tile (cells >= 0 on Arland: int division ok)
+					int dlI = Math.Round(cp[0] / CELL);
+					int dlK = Math.Round(cp[2] / CELL);
+					int dlTx = dlI / TQ;
+					int dlTz = dlK / TQ;
+					int dlKey = dlTx * 20000 + dlTz;
+					if (!m_mDlStampT.Contains(dlKey))
+					{
+						m_mDlStampT.Set(dlKey, time);
+						m_mDlSpeed.Set(dlKey, len / dt);
+					}
+					if (SYNC)
+						AddPred(lp, cp, len / dt, time, mv.m_iId, half, veh);
+				}
 			}
 			mv.m_aLast[w] = cp;
 			mv.m_aTime[w] = time;
@@ -2731,6 +8416,387 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! SYNC: one own stamp (Wheels) kept until the op holding it comes (it is stamped again after each restore)
+	protected void AddPred(vector a, vector b, float speed, float time, int vehId, float half, Vehicle veh)
+	{
+		if (m_aPred.Count() >= PRED_CAP)
+		{
+			// the oldest tenth goes in one copy (not one RemoveOrdered per stamp); its mud stays drawn until the
+			// next restore there
+			int drop = PRED_CAP / 10;
+			array<ref MUD_MudSheetPred> kept = {};
+			for (int c = drop; c < m_aPred.Count(); c++)
+				kept.Insert(m_aPred[c]);
+			m_aPred = kept;
+			m_iStatExpired += drop;
+		}
+		MUD_MudSheetPred pr = new MUD_MudSheetPred();
+		pr.m_vA = a;
+		pr.m_vB = b;
+		pr.m_fSpeed = speed;
+		pr.m_fT = time;
+		pr.m_iVeh = vehId;
+		pr.m_fHalf = half;
+		pr.m_Veh = veh;
+		m_aPred.Insert(pr);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC Stage 5 (MUD_MudSync.LoadSnap, a late joiner): the sync layer was replaced in world cells gi0..gi1 x
+	//! gk0..gk1 - live window cells and built stored tiles take it again (as an op's restore; bare cells keep theirs).
+	//! Tiles not built yet read the layer when they build.
+	static void SyncReload(int gi0, int gi1, int gk0, int gk1)
+	{
+		if (!ENABLED || !SYNC || !s_Inst)
+			return;
+		s_Inst.RestoreBox(gi0, gi1, gk0, gk1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC (MUD_MudSync JOB_SHEET, after each rut op that reached a zone): the sync layer changed world cells
+	//! gi0..gi1 x gk0..gk1 for the op segments segA - segB. Own stamps those segments hold go, then the box is
+	//! restored from the sync layer. True = own stamps are left to stamp again inside it: SyncReplay does that a
+	//! REPLAY_CHUNK at a time (op split 2026-10-18), and the upload waits until it is done.
+	static bool SyncBegin(int gi0, int gi1, int gk0, int gk1, array<vector> segA, array<vector> segB)
+	{
+		if (!ENABLED || !SYNC || !s_Inst)
+			return false;     // no sheet yet: BuildZoneTile reads the sync layer
+		s_Inst.TakeCovered(gi0, gi1, gk0, gk1, segA, segB);
+		bool inWin = s_Inst.RestoreBox(gi0, gi1, gk0, gk1);
+		s_Inst.m_aReplay.Clear();
+		s_Inst.m_iReplayAt = 0;
+		if (inWin)
+			s_Inst.PickReplay(gi0, gi1, gk0, gk1, s_Inst.m_aReplay);
+		if (s_Inst.m_aReplay.IsEmpty())
+			return false;
+		s_Inst.m_iRpGi0 = gi0;
+		s_Inst.m_iRpGi1 = gi1;
+		s_Inst.m_iRpGk0 = gk0;
+		s_Inst.m_iRpGk1 = gk1;
+		s_Inst.m_bReplayHold = true;
+		s_Inst.m_iReplayHoldAt = System.GetTickCount();
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC (MUD_MudSync JOB_REPLAY): the next REPLAY_CHUNK own stamps of SyncBegin's box. True = more are left.
+	static bool SyncReplay()
+	{
+		if (!s_Inst || s_Inst.m_aReplay.IsEmpty())
+			return false;
+		int count = s_Inst.m_aReplay.Count();
+		int rFrom = s_Inst.m_iReplayAt;
+		int rTo = Math.Min(rFrom + REPLAY_CHUNK, count);
+		s_Inst.ReplayList(s_Inst.m_aReplay, rFrom, rTo, s_Inst.m_iRpGi0, s_Inst.m_iRpGi1, s_Inst.m_iRpGk0, s_Inst.m_iRpGk1);
+		s_Inst.m_iReplayAt = rTo;
+		if (rTo < count)
+			return true;
+		s_Inst.m_aReplay.Clear();
+		if (s_Inst.m_bReplayHold)
+			s_Inst.DlHoldEnd(false);     // TEMP delay meter
+		s_Inst.m_bReplayHold = false;
+		return false;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEMP delay meter: a replay hold ended (stuck = let go by REPLAY_HOLD_MS)
+	protected void DlHoldEnd(bool stuck)
+	{
+		int ms = System.GetTickCount(m_iReplayHoldAt);
+		m_iDlHolds++;
+		m_iDlHoldMs += ms;
+		if (ms > m_iDlHoldMax)
+			m_iDlHoldMax = ms;
+		if (stuck)
+			m_iDlStuck++;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC: own stamps whose middle lies within COVER_R (x z) of one of the op segments go (geometric: the op's
+	//! vehicle number is the server's, not ours). Stamps outside the op's cell box are not tested (cost: up to
+	//! PRED_CAP stamps x the op's segments, several ops a second).
+	protected void TakeCovered(int gi0, int gi1, int gk0, int gk1, array<vector> segA, array<vector> segB)
+	{
+		if (m_aPred.IsEmpty())
+			return;
+		float r2 = COVER_R * COVER_R;
+		float x0 = gi0 * CELL;
+		float x1 = gi1 * CELL;
+		float z0 = gk0 * CELL;
+		float z1 = gk1 * CELL;
+		array<ref MUD_MudSheetPred> kept = {};
+		foreach (MUD_MudSheetPred pr : m_aPred)
+		{
+			vector mid = (pr.m_vA + pr.m_vB) * 0.5;
+			bool covered = false;
+			if (mid[0] >= x0 && mid[0] <= x1 && mid[2] >= z0 && mid[2] <= z1)
+			{
+				for (int s = 0; s < segA.Count(); s++)
+				{
+					if (SegDistSq(mid, segA[s], segB[s]) < r2)
+					{
+						covered = true;
+						break;
+					}
+				}
+			}
+			if (covered)
+				m_iStatCovered++;
+			else
+				kept.Insert(pr);
+		}
+		m_aPred = kept;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Squared x z distance from p to segment a - b
+	protected static float SegDistSq(vector p, vector a, vector b)
+	{
+		float ax = b[0] - a[0];
+		float az = b[2] - a[2];
+		float l2 = ax * ax + az * az;
+		float t = 0;
+		if (l2 > 0.000001)
+			t = Math.Clamp(((p[0] - a[0]) * ax + (p[2] - a[2]) * az) / l2, 0, 1);
+		float dx = a[0] + ax * t - p[0];
+		float dz = a[2] + az * t - p[2];
+		return dx * dx + dz * dz;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC, every 0.5 s: own stamps no op took go after PRED_GONE_S once their vehicle is gone or PRED_FAR m away,
+	//! and after PRED_MAX_S in any case; their cells are restored (boxes of at most EXPIRE_BOX cells a side)
+	protected void ExpirePreds(float time)
+	{
+		m_fNextExpire = time + 0.5;
+		if (m_aPred.IsEmpty())
+			return;
+		float far2 = PRED_FAR * PRED_FAR;
+		array<ref MUD_MudSheetPred> gone = {};
+		array<ref MUD_MudSheetPred> kept = {};
+		foreach (MUD_MudSheetPred pr : m_aPred)
+		{
+			float age = time - pr.m_fT;
+			bool drop = false;
+			if (age > PRED_GONE_S)
+			{
+				drop = age > PRED_MAX_S || !pr.m_Veh;
+				if (!drop)
+				{
+					vector vo = pr.m_Veh.GetOrigin();
+					float dx = vo[0] - pr.m_vB[0];
+					float dz = vo[2] - pr.m_vB[2];
+					drop = dx * dx + dz * dz > far2;
+				}
+			}
+			if (drop)
+			{
+				pr.m_bGone = true;
+				gone.Insert(pr);
+			}
+			else
+			{
+				kept.Insert(pr);
+			}
+		}
+		if (gone.IsEmpty())
+			return;
+		m_aPred = kept;
+		m_iStatExpired += gone.Count();
+		// restore after all are out, so a restore does not stamp a going one again
+		int bi0 = 0;
+		int bi1 = -1;
+		int bk0 = 0;
+		int bk1 = -1;
+		foreach (MUD_MudSheetPred g : gone)
+		{
+			int i0 = Math.Floor((Math.Min(g.m_vA[0], g.m_vB[0]) - PRED_PAD) / CELL);
+			int i1 = Math.Ceil((Math.Max(g.m_vA[0], g.m_vB[0]) + PRED_PAD) / CELL);
+			int k0 = Math.Floor((Math.Min(g.m_vA[2], g.m_vB[2]) - PRED_PAD) / CELL);
+			int k1 = Math.Ceil((Math.Max(g.m_vA[2], g.m_vB[2]) + PRED_PAD) / CELL);
+			if (bi1 >= bi0)
+			{
+				int ni0 = Math.Min(bi0, i0);
+				int ni1 = Math.Max(bi1, i1);
+				int nk0 = Math.Min(bk0, k0);
+				int nk1 = Math.Max(bk1, k1);
+				if (ni1 - ni0 < EXPIRE_BOX && nk1 - nk0 < EXPIRE_BOX)
+				{
+					bi0 = ni0;
+					bi1 = ni1;
+					bk0 = nk0;
+					bk1 = nk1;
+					continue;
+				}
+				Resync(bi0, bi1, bk0, bk1);
+			}
+			bi0 = i0;
+			bi1 = i1;
+			bk0 = k0;
+			bk1 = k1;
+		}
+		if (bi1 >= bi0)
+			Resync(bi0, bi1, bk0, bk1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC: world cells gi0..gi1 x gk0..gk1 take the sync layer's mud again - live window cells and stored tiles;
+	//! bare cells (craters) keep theirs until Stage 4 clears them in op order - then the own stamps still held are
+	//! stamped again inside the window part of the box only (all at once: ExpirePreds)
+	protected void Resync(int gi0, int gi1, int gk0, int gk1)
+	{
+		if (!RestoreBox(gi0, gi1, gk0, gk1))
+			return;
+		array<ref MUD_MudSheetPred> list = {};
+		PickReplay(gi0, gi1, gk0, gk1, list);
+		ReplayList(list, 0, list.Count(), gi0, gi1, gk0, gk1);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC: world cells gi0..gi1 x gk0..gk1 take the sync layer's mud again (live window cells, stored tiles; bare
+	//! cells keep theirs; Stage 4: a cell the sync layer has bare goes bare). True = the box meets the placed window
+	//! (own stamps may need a replay there).
+	protected bool RestoreBox(int gi0, int gi1, int gk0, int gk1)
+	{
+		int t0 = System.GetTickCount();
+		m_iStatResync++;
+		float d;
+		float ou;
+		float ov;
+		int sb;
+		int i0 = gi0 - m_iX0;
+		int i1 = gi1 - m_iX0;
+		int k0 = gk0 - m_iZ0;
+		int k1 = gk1 - m_iZ0;
+		if (i0 < 0)
+			i0 = 0;
+		if (k0 < 0)
+			k0 = 0;
+		if (i1 > N - 1)
+			i1 = N - 1;
+		if (k1 > N - 1)
+			k1 = N - 1;
+		bool inWin = m_bPlaced && i0 <= i1 && k0 <= k1;
+		if (inWin)
+		{
+			for (int k = k0; k <= k1; k++)
+			{
+				for (int i = i0; i <= i1; i++)
+				{
+					int v = k * N + i;
+					if (m_F.m_aBare[v] != 0)
+						continue;
+					MUD_MudSync.Get(m_iX0 + i, m_iZ0 + k, d, ou, ov, sb);
+					m_F.m_aD[v] = d;
+					m_F.m_aOu[v] = ou;
+					m_F.m_aOv[v] = ov;
+					m_F.m_aBare[v] = sb;
+				}
+			}
+			MarkRect(i0, i1, k0, k1);
+			m_bDirty = true;
+		}
+		// stored tiles (TV x TV verts, edges shared: tile tx holds world cells tx * TQ .. tx * TQ + TQ)
+		int txa = (gi0 - 1) / TQ;
+		int txb = gi1 / TQ;
+		int tza = (gk0 - 1) / TQ;
+		int tzb = gk1 / TQ;
+		for (int tz = tza; tz <= tzb; tz++)
+		{
+			for (int tx = txa; tx <= txb; tx++)
+			{
+				if (IsLive(tx, tz))
+					continue;
+				MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+				if (!st || !st.m_Ent)
+					continue;
+				MUD_MudSheetTileData td = st.m_D;
+				bool hit = false;
+				for (int lk = 0; lk < TV; lk++)
+				{
+					int sgk = tz * TQ + lk;
+					if (sgk < gk0 || sgk > gk1)
+						continue;
+					for (int li = 0; li < TV; li++)
+					{
+						int sgi = tx * TQ + li;
+						if (sgi < gi0 || sgi > gi1)
+							continue;
+						int l = lk * TV + li;
+						if (td.m_aBare[l] != 0)
+							continue;
+						MUD_MudSync.Get(sgi, sgk, d, ou, ov, sb);
+						if (d == td.m_aD[l] && ou == td.m_aOu[l] && ov == td.m_aOv[l] && sb == 0)
+							continue;
+						td.m_aD[l] = d;
+						td.m_aOu[l] = ou;
+						td.m_aOv[l] = ov;
+						td.m_aBare[l] = sb;
+						hit = true;
+					}
+				}
+				if (!hit)
+					continue;
+				QueueBuild(tx, tz);
+				m_iStatStoredRe++;
+			}
+		}
+		m_iStatResyncMs += System.GetTickCount(t0);
+		return inWin;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC: the own stamps (oldest first) that reach world cells gi0..gi1 x gk0..gk1, into 'into'
+	protected void PickReplay(int gi0, int gi1, int gk0, int gk1, array<ref MUD_MudSheetPred> into)
+	{
+		float x0 = gi0 * CELL - PRED_PAD;
+		float x1 = gi1 * CELL + PRED_PAD;
+		float z0 = gk0 * CELL - PRED_PAD;
+		float z1 = gk1 * CELL + PRED_PAD;
+		foreach (MUD_MudSheetPred pr : m_aPred)
+		{
+			if (Math.Max(pr.m_vA[0], pr.m_vB[0]) < x0 || Math.Min(pr.m_vA[0], pr.m_vB[0]) > x1)
+				continue;
+			if (Math.Max(pr.m_vA[2], pr.m_vB[2]) < z0 || Math.Min(pr.m_vA[2], pr.m_vB[2]) > z1)
+				continue;
+			into.Insert(pr);
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! SYNC: own stamps list[rFrom..rTo) again, clipped to the window cells of world box gi0..gi1 x gk0..gk1 (a stamp
+	//! only ever wrote window cells; the clip is taken from the window as it is now - it may have moved since the
+	//! restore). Expired ones are skipped.
+	protected void ReplayList(array<ref MUD_MudSheetPred> list, int rFrom, int rTo, int gi0, int gi1, int gk0, int gk1)
+	{
+		if (!m_bPlaced || rFrom >= rTo)
+			return;
+		int i0 = Math.Max(gi0 - m_iX0, 0);
+		int i1 = Math.Min(gi1 - m_iX0, N - 1);
+		int k0 = Math.Max(gk0 - m_iZ0, 0);
+		int k1 = Math.Min(gk1 - m_iZ0, N - 1);
+		if (i0 > i1 || k0 > k1)
+			return;
+		int t0 = System.GetTickCount();
+		m_bClip = true;
+		m_iClipI0 = i0;
+		m_iClipI1 = i1;
+		m_iClipK0 = k0;
+		m_iClipK1 = k1;
+		for (int r = rFrom; r < rTo; r++)
+		{
+			MUD_MudSheetPred pr = list[r];
+			if (!pr || pr.m_bGone)
+				continue;
+			Stamp(pr.m_vA, pr.m_vB, pr.m_fSpeed, pr.m_fT, pr.m_iVeh, pr.m_fHalf);
+			m_iStatReplayed++;
+			m_iSt10Replay++;
+		}
+		m_bClip = false;
+		m_iStatResyncMs += System.GetTickCount(t0);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! One tyre step a -> b at speed (m/s): PRESS under the tyre, PUSH a ridge each side and a bow wave ahead
 	protected void Stamp(vector a, vector b, float speed, float time, int vehId, float half)
 	{
@@ -2777,9 +8843,23 @@ class MUD_MudSheet
 			i1 = N - 2;
 		if (k1 > N - 2)
 			k1 = N - 2;
+		if (m_bClip)
+		{
+			// SYNC replay (Resync): only inside the box just restored from the sync layer
+			if (i0 < m_iClipI0)
+				i0 = m_iClipI0;
+			if (i1 > m_iClipI1)
+				i1 = m_iClipI1;
+			if (k0 < m_iClipK0)
+				k0 = m_iClipK0;
+			if (k1 > m_iClipK1)
+				k1 = m_iClipK1;
+		}
 		if (i1 < i0 || k1 < k0)
 			return;
+		m_iMarkWhy = WHY_STAMP;
 		MarkRect(i0, i1, k0, k1);
+		m_iMarkWhy = WHY_OTHER;
 		// sink: the known ground just outside the ridge band against the tyre's contact height
 		float sideSum = 0;
 		int sideN = 0;
@@ -2828,6 +8908,19 @@ class MUD_MudSheet
 				else if (dist >= reach)
 					continue;
 				int v = k * N + i;
+				if (m_bLocal && m_F.m_aTouch[v] == 0)
+				{
+					m_F.m_aTouch[v] = 1;     // SHEET LOCAL: deposit band source
+					m_bTouchNew = true;
+					m_iTouchCells++;
+					if (BAND_INCR)
+					{
+						m_aNewGi.Insert(m_iX0 + i);     // stage 2 C1: BandIncr at the next upload
+						m_aNewGk.Insert(m_iZ0 + k);
+					}
+				}
+				if (LEV_L2_DRAG)
+					m_Drag.Add(v);     // L2: LimitDragCells at the next upload
 				float d0 = m_F.m_aD[v];     // mud depth when this vehicle's pass over the cell began
 				if (GRADUAL)
 				{
@@ -2927,9 +9020,16 @@ class MUD_MudSheet
 					Grow(i, k);
 			}
 		}
-		if (DRAG_LIM > 0)
+		if (DRAG_LIM > 0 && !LEV_L2_DRAG)
 			LimitDrag(i0, i1, k0, k1);
 		m_bDirty = true;
+		if (m_bTouchNew)
+		{
+			m_bTouchNew = false;
+			m_bIncrMark = BAND_INCR;     // stage 2 C1: live slots only get born (BandIncr dirties by band change)
+			BandMark(i0, i1, k0, k1);     // SHEET LOCAL: tiles born, bands due
+			m_bIncrMark = false;
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -2989,6 +9089,12 @@ class MUD_MudSheet
 	//------------------------------------------------------------------------------------------------
 	protected bool ZoneAtWorld(float x, float z)
 	{
+		if (m_bLocal)
+		{
+			int ltx = Math.Floor(x / TILE_M);
+			int ltz = Math.Floor(z / TILE_M);
+			return MUD_MudZoneEntity.TileCovered(ltx, ltz);     // SHEET LOCAL: holed offroad ground (the stamp bears the tile)
+		}
 		int i = Math.Round(x / CELL);
 		int k = Math.Round(z / CELL);
 		return ZoneAtCell(i - m_iX0, k - m_iZ0);
@@ -3009,6 +9115,8 @@ class MUD_MudSheet
 		m_iBoxI1 = Math.Min(N - 1, Math.Max(m_iBoxI1, i + 1));
 		m_iBoxK0 = Math.Max(0, Math.Min(m_iBoxK0, k - 1));
 		m_iBoxK1 = Math.Min(N - 1, Math.Max(m_iBoxK1, k + 1));
+		if (LEV_L3_SLUMP && i >= 0 && i < N && k >= 0 && k < N)
+			m_Chg.Add(k * N + i);     // L3: slump looks here next time
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3023,6 +9131,11 @@ class MUD_MudSheet
 	//! Mud flows to each lower 4-neighbour where its surface (ground + mud) is steeper than REPOSE; volume kept
 	protected void Slump()
 	{
+		if (LEV_L3_SLUMP)
+		{
+			SlumpCells();
+			return;
+		}
 		if (m_iBoxI1 < m_iBoxI0)
 			return;
 		m_iBoxI0 = Math.Max(0, m_iBoxI0);
@@ -3141,7 +9254,7 @@ class MUD_MudSheet
 				int k = v / N;
 				if (i % 2 != 0 || k % 2 != 0)
 					continue;   // filled when its traced neighbours are there
-				if (!ZoneAtCell(i, k))
+				if (!ZoneAtCellAny(i, k))
 					continue;   // no mud drawn there (PERF 2026-10-15)
 				Trace(i, k);
 				newLeft--;
@@ -3165,7 +9278,7 @@ class MUD_MudSheet
 			if (rk % 2 != 0)
 				rk--;
 			int rv = rk * N + ri;
-			if (m_F.m_aGs[rv] == 0 || !ZoneAtCell(ri, rk))
+			if (m_F.m_aGs[rv] == 0 || !ZoneAtCellAny(ri, rk))
 				continue;
 			Trace(ri, rk);
 			FillAround(ri, rk);
@@ -3241,7 +9354,7 @@ class MUD_MudSheet
 		{
 			// our ground: the plain trace below would stop on the holed heightmap above a crater floor (GroundDown)
 			m_iStatHoles++;
-			g = OurY(x, z);
+			g = HoleGround(x, z);
 		}
 		else
 		{
@@ -3277,7 +9390,15 @@ class MUD_MudSheet
 	//! Rebuild every live tile's mesh from the field
 	protected void Upload()
 	{
+		if (m_bLocal && BAND_INCR)
+		{
+			BandIncr();     // stage 2 C1: the band round the touches since the last upload
+			if (MUD_TestKit.TEST_KIT && !m_bBenchDone)
+				BandBench();
+		}
 		m_bDirty = false;
+		if (DRAG_LIM > 0 && !m_Drag.m_aList.IsEmpty())
+			LimitDragCells();     // L2 (cells stay listed only while it is on, or one last time after)
 		if (!m_Ent)
 			return;
 		m_iStatUploads++;
@@ -3285,30 +9406,313 @@ class MUD_MudSheet
 		m_iBuildQuads = 0;
 		int x0 = m_iX0 / TQ;
 		int z0 = m_iZ0 / TQ;
-		for (int tk = 0; tk < TILES; tk++)
+		UploadPick(x0, z0);
+		// stage 2 part A: co-build picks; pass 1 builds the live neighbours an earlier slot's build asked for (A3)
+		m_iCoStoredUp = 0;
+		m_bCoAny = false;
+		for (int c = 0; c < TILES * TILES; c++)
 		{
-			for (int ti = 0; ti < TILES; ti++)
+			m_aCoLive[c] = 0;
+			m_aCoSide[c] = 0;     // stage 3 A11
+		}
+		if (m_bLocal && (EDGE_COBUILD_PICK || EDGE_COBUILD))
+			CoPick();
+		m_bInUpload = true;
+		for (int pass = 0; pass < 2; pass++)
+		{
+			if (pass == 1 && !m_bCoAny)
+				break;
+			for (int tk = 0; tk < TILES; tk++)
 			{
+				for (int ti = 0; ti < TILES; ti++)
+				{
+					int t = tk * TILES + ti;
+					if (pass == 1 && m_aCoLive[t] == 0)
+						continue;
+					UploadSlot(t, ti, tk, x0, z0);
+				}
+			}
+		}
+		m_bInUpload = false;
+		m_iStatQuads = m_iBuildQuads;
+		if (MUD_TestKit.TEST_KIT && m_bLocal && m_bTurnBuilt)
+			TurnEdges(x0, z0);     // stage 3 Part 0 TURN METER: the edges right after this upload's builds
+		m_bTurnBuilt = false;
+		if (m_bLocal && !m_aBandQ.IsEmpty())
+			BandStored();
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Upload: live slot t (ti, tk) - built if dirty and picked
+	protected void UploadSlot(int t, int ti, int tk, int x0, int z0)
+	{
+		if (m_aSlotDirty[t] == 0)
+			return;
+		if (m_aPick[t] == 2)
+		{
+			m_iUpThrottled++;
+			m_bDirty = true;      // D1: built less than SLOT_MIN_S ago - next upload
+			return;
+		}
+		if (m_aPick[t] == 0)
+		{
+			m_aSlotWait[t] = m_aSlotWait[t] + 1;
+			m_iUpSkipped++;
+			m_bDirty = true;      // S1: next upload
+			return;
+		}
+		if (m_bLocal && m_aSlotZone[t] != 0 && !SlotTraced(t))
+		{
+			m_iBornWait++;
+			TurnNote(9, 1);       // stage 3 Part 0 TURN METER
+			m_bDirty = true;      // SHEET LOCAL: never built before every cell has its ground
+			return;
+		}
+		m_aSlotDirty[t] = 0;
+		m_aSlotWait[t] = 0;
+		if (m_aSlotZone[t] == 0)
+		{
+			if (m_aTileEnt[t])
+			{
+				m_aTileEnt[t].ClearFlags(EntityFlags.VISIBLE, false);    // no mud outside the zones
+				DropColl(m_aTileEnt[t]);
+			}
+			if (m_aSlotReady[t] != 0)
+				s_iCoverGen++;
+			m_aSlotReady[t] = 0;
+			m_aCoLive[t] = 0;
+			m_aCoSide[t] = 0;
+			return;
+		}
+		if (m_bLocal && m_aSlotBand[t] != 0)
+		{
+			m_aSlotBand[t] = 0;
+			if (!BAND_INCR || !DistOk(t))
+				BandTile(x0 + ti, z0 + tk, null, ti, tk);     // stage 2 C1: not when the kept distances are current
+		}
+		Pack(ti, tk, m_TD);
+		m_iBuildWhy = UploadWhy(t);
+		m_bCoBuilding = m_aCoLive[t] != 0;     // A3: a co-build asks for no co-builds itself
+		if (m_bCoBuilding)
+			m_iCoLive++;
+		m_aCoLive[t] = 0;
+		m_iCoSideMask = m_aCoSide[t];     // stage 3 A11
+		m_aCoSide[t] = 0;
+		Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
+		m_bTurnBuilt = true;
+		m_bCoBuilding = false;
+		m_iCoSideMask = 0;
+		m_aSlotWhy[t] = 0;
+		if (m_bLocal)
+			CopyLastY(ti, tk);
+		m_aSlotBuiltMs[t] = Math.Round(m_fLast * 1000);
+		if (r)
+			m_aTileRes[t] = r;    // keep the new mesh alive, drop the old one only now
+		int dlKey = (x0 + ti) * 20000 + z0 + tk;     // TEMP delay meter
+		if (r && m_mDlStampT.Contains(dlKey))
+		{
+			float dl = m_fLast - m_mDlStampT.Get(dlKey);
+			m_fDlSum += dl;
+			m_iDlN++;
+			if (dl > m_fDlMax)
+				m_fDlMax = dl;
+			m_fDlDist += dl * m_mDlSpeed.Get(dlKey);
+			m_mDlStampT.Remove(dlKey);
+			m_mDlSpeed.Remove(dlKey);
+		}
+		// LAZY RUT MESH: ready = a mesh drawn with every cell's ground
+		int ready = 0;
+		if (r)
+		{
+			ready = 1;
+			for (int gl = 0; gl < TV * TV; gl++)
+			{
+				if (m_TD.m_aGs[gl] == 0)
+				{
+					ready = 0;
+					break;
+				}
+			}
+		}
+		if (m_aSlotReady[t] != 0 && ready == 0)
+			s_iCoverGen++;
+		m_aSlotReady[t] = ready;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! S1: which dirty slots Upload builds now (m_aPick[t] 1). Always: non-zone slots (only hidden, cheap) and zone slots
+	//! without a mesh. Then up to UPLOAD_SLOTS zone slots: the longest-waiting one (no slot starves while the near
+	//! ones stay dirty), then the nearest to a vehicle (slot centre to vehicle origin, x z).
+	protected void UploadPick(int x0, int z0)
+	{
+		int nDirty = 0;
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			m_aPick[t] = 0;
+			m_aPickWhy[t] = -1;
+			if (m_aSlotDirty[t] == 0)
+				continue;
+			if (UPLOAD_SLOTS <= 0 || m_aSlotZone[t] == 0 || t >= m_aTileRes.Count() || !m_aTileRes[t])
+			{
+				m_aPick[t] = 1;
+				m_aPickWhy[t] = BW_MESHLESS;
+			}
+			else if (SLOT_MIN_S > 0 && m_fLast * 1000 - m_aSlotBuiltMs[t] < SLOT_MIN_S * 1000 && m_fLast * 1000 >= m_aSlotBuiltMs[t])
+				m_aPick[t] = 2;     // D1: has a mesh, built too recently (a time jump back never holds)
+			else
+				nDirty++;
+		}
+		if (SLOT_MIN_S > 0 && SLOT_MIN_WHEEL_FREE)
+			PickWheelSlots(true);     // D1 fix: held wheel slots build now (they use up UPLOAD_SLOTS below)
+		for (int wh = 0; wh < TILES * TILES; wh++)
+		{
+			if (m_aPick[wh] == 3)
+				m_aPickWhy[wh] = BW_WHEEL;
+		}
+		if (nDirty <= UPLOAD_SLOTS)
+		{
+			for (int a = 0; a < TILES * TILES; a++)
+			{
+				if (m_aSlotDirty[a] != 0 && m_aPick[a] == 0)
+				{
+					m_aPick[a] = 1;
+					m_aPickWhy[a] = BW_FIT;
+				}
+			}
+			return;
+		}
+		// WHEEL TILES FIRST: dirty zone slots under a wheel contact (they also use up UPLOAD_SLOTS)
+		int wheelPicked = PickWheelSlots(false);
+		for (int wp = 0; wp < TILES * TILES; wp++)
+		{
+			if (m_aPick[wp] == 3)
+			{
+				m_aPick[wp] = 1;     // D1 fix: released held wheel slot
+				wheelPicked++;
+			}
+		}
+		for (int wq = 0; wq < TILES * TILES; wq++)
+		{
+			if (m_aPick[wq] == 1 && m_aPickWhy[wq] < 0)
+				m_aPickWhy[wq] = BW_WHEEL;
+		}
+		// the longest-waiting dirty zone slot
+		int old = -1;
+		for (int o = 0; o < TILES * TILES; o++)
+		{
+			if (m_aSlotDirty[o] == 0 || m_aPick[o] != 0)
+				continue;
+			if (m_aSlotWait[o] > 0 && (old < 0 || m_aSlotWait[o] > m_aSlotWait[old]))
+				old = o;
+		}
+		int left = UPLOAD_SLOTS - wheelPicked;
+		if (old >= 0)
+		{
+			m_aPick[old] = 1;
+			m_aPickWhy[old] = BW_OLDEST;
+			left--;
+		}
+		// nearest to a vehicle: smallest distance first, left times
+		float dist[16];
+		for (int d = 0; d < TILES * TILES; d++)
+		{
+			dist[d] = 1000000000.0;
+			if (m_aSlotDirty[d] == 0 || m_aPick[d] != 0)
+				continue;
+			int dI = d % TILES;     // own int line: '%' inside a float expression does not compile (mud-gotchas)
+			int dK = d / TILES;
+			float cx = ((x0 + dI) * TQ + TQ / 2) * CELL;
+			float cz = ((z0 + dK) * TQ + TQ / 2) * CELL;
+			float best = 100000000.0;
+			array<Vehicle> pvs = MUD_Wheels.GetAll();
+			if (LEV_L8_VEH)
+				pvs = m_aNearVeh;     // L8: only the vehicles near the window
+			foreach (Vehicle v : pvs)
+			{
+				if (!v)
+					continue;
+				vector vo = v.GetOrigin();
+				float dx = vo[0] - cx;
+				float dz = vo[2] - cz;
+				best = Math.Min(best, dx * dx + dz * dz);
+			}
+			dist[d] = best;
+		}
+		for (int n = 0; n < left; n++)     // left <= 0: none
+		{
+			int at = -1;
+			for (int s = 0; s < TILES * TILES; s++)
+			{
+				if (dist[s] < 1000000000.0 && m_aPick[s] == 0 && (at < 0 || dist[s] < dist[at]))
+					at = s;
+			}
+			if (at < 0)
+				break;
+			m_aPick[at] = 1;
+			m_aPickWhy[at] = BW_NEAREST;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! WHEEL TILES FIRST (UploadPick): m_aPick 1 on every dirty zone slot (not yet picked) holding a wheel contact of a
+	//! vehicle, at most WHEEL_SLOTS_MAX. Returns how many it picked.
+	//! heldOnly (D1 fix): only slots held by SLOT_MIN_S (m_aPick 2) -> 3 (UploadPick turns them into 1)
+	protected int PickWheelSlots(bool heldOnly)
+	{
+		int picked = 0;
+		if (WHEEL_SLOTS_MAX <= 0)
+			return 0;
+		array<Vehicle> vs = MUD_Wheels.GetAll();
+		if (LEV_L8_VEH)
+			vs = m_aNearVeh;     // L8: near vehicles, their sims cached
+		foreach (int vi, Vehicle v : vs)
+		{
+			if (!v)
+				continue;
+			VehicleWheeledSimulation sim;
+			if (LEV_L8_VEH)
+				sim = m_aNearSim[vi];
+			else
+				sim = VehicleWheeledSimulation.Cast(v.FindComponent(VehicleWheeledSimulation));
+			if (!sim)
+				continue;
+			int count = sim.WheelCount();
+			for (int w = 0; w < count; w++)
+			{
+				if (!sim.WheelHasContact(w))
+					continue;
+				vector cp = sim.WheelGetContactPosition(w);
+				int i = Math.Round(cp[0] / CELL) - m_iX0;
+				int k = Math.Round(cp[2] / CELL) - m_iZ0;
+				if (i < 0 || i >= N || k < 0 || k >= N)
+					continue;
+				// ints first: Math.Min returns float (see DepthAt)
+				int ti = Math.Min(i / TQ, TILES - 1);
+				int tk = Math.Min(k / TQ, TILES - 1);
 				int t = tk * TILES + ti;
 				if (m_aSlotDirty[t] == 0)
 					continue;
-				m_aSlotDirty[t] = 0;
-				if (m_aSlotZone[t] == 0)
+				if (heldOnly)
 				{
-					if (m_aTileEnt[t])
+					if (m_aPick[t] == 2)
 					{
-						m_aTileEnt[t].ClearFlags(EntityFlags.VISIBLE, false);    // no mud outside the zones
-						DropColl(m_aTileEnt[t]);
+						m_aPick[t] = 3;
+						picked++;
 					}
+					if (picked >= WHEEL_SLOTS_MAX)
+						return picked;
 					continue;
 				}
-				Pack(ti, tk, m_TD);
-				Resource r = BuildTile(m_aTileEnt[t], m_TD, x0 + ti, z0 + tk, true);
-				if (r)
-					m_aTileRes[t] = r;    // keep the new mesh alive, drop the old one only now
+				if (m_aPick[t] != 0)
+					continue;
+				m_aPick[t] = 1;
+				picked++;
+				m_iDlWheelPicks++;     // TEMP delay meter
+				if (picked >= WHEEL_SLOTS_MAX)
+					return picked;
 			}
 		}
-		m_iStatQuads = m_iBuildQuads;
+		return picked;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -3357,6 +9761,10 @@ class MUD_MudSheet
 	//! (d) or a zone neighbour (live: m_F, else stored), over a TAPER_PAD padded field. False = no bare vertex in reach.
 	protected bool TaperField(MUD_MudSheetTileData d, int tx, int tz)
 	{
+		// Stage 3 trim: rut stamps make no bare cells, so most builds have none in reach - skip the scan (~1/3 of a
+		// stored build before)
+		if (!NearBareTile(tx, tz))
+			return false;
 		int tT = System.GetTickCount();
 		int w = TAPER_W;
 		float tp[1089];         // TAPER_W x TAPER_W, local (faster than the member array)
@@ -3478,6 +9886,91 @@ class MUD_MudSheet
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! PAPER TEST 1 bench (TEST KIT): every BENCH_EVERY_S, BENCH_N old-path + BENCH_N fast-path builds of one touched live
+	//! tile with a mesh, same data; 'same quads' checks that both paths draw the same quad count
+	protected void BenchTick(float time)
+	{
+		if (!MUD_TestKit.TEST_KIT || BENCH_EVERY_S <= 0 || !m_bPlaced || !m_Ent)
+			return;
+		if (m_fBenchAt < 0)
+		{
+			m_fBenchAt = time + BENCH_EVERY_S;
+			return;
+		}
+		if (time < m_fBenchAt)
+			return;
+		m_fBenchAt = time + BENCH_EVERY_S;
+		int pick = -1;
+		for (int t = 0; t < TILES * TILES; t++)
+		{
+			if (m_aSlotZone[t] == 0 || t >= m_aTileRes.Count() || !m_aTileRes[t] || !m_aTileEnt[t])
+				continue;
+			if (Touched(t % TILES, t / TILES))
+			{
+				pick = t;
+				break;
+			}
+		}
+		if (pick < 0)
+			return;
+		int ti = pick % TILES;
+		int tk = pick / TILES;
+		int x0 = m_iX0 / TQ;
+		int z0 = m_iZ0 / TQ;
+		Pack(ti, tk, m_TD);
+		bool was = s_bFastBuild;
+		Resource r;
+		s_bFastBuild = false;
+		int q0 = m_iBuildQuads;
+		int tA = System.GetTickCount();
+		for (int b = 0; b < BENCH_N; b++)
+			r = BuildTileMesh(m_aTileEnt[pick], m_TD, x0 + ti, z0 + tk, true, false);
+		int msOld = System.GetTickCount(tA);
+		int qOld = m_iBuildQuads - q0;
+		s_bFastBuild = true;
+		q0 = m_iBuildQuads;
+		tA = System.GetTickCount();
+		for (int b2 = 0; b2 < BENCH_N; b2++)
+			r = BuildTileMesh(m_aTileEnt[pick], m_TD, x0 + ti, z0 + tk, true, false);
+		int msFast = System.GetTickCount(tA);
+		int qFast = m_iBuildQuads - q0;
+		s_bFastBuild = was;
+		if (r)
+			m_aTileRes[pick] = r;
+		m_iBenchOldMs += msOld;
+		m_iBenchFastMs += msFast;
+		m_iBenchRuns++;
+		float avgOld = m_iBenchOldMs / (BENCH_N * m_iBenchRuns * 1.0);
+		float avgFast = m_iBenchFastMs / (BENCH_N * m_iBenchRuns * 1.0);
+		int qPer = qOld / BENCH_N;
+		Print(string.Format("MUD bench (PAPER TEST 1): %1 builds of tile %2 - old %3 ms, fast %4 ms, same quads %5 (%6) | all %7 runs: old %8 / fast %9 ms per build",
+			BENCH_N, TrailKey(x0 + ti, z0 + tk), msOld, msFast, qOld == qFast, qPer, m_iBenchRuns, avgOld.ToString(-1, 3), avgFast.ToString(-1, 3)), LogLevel.NORMAL);
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! PAPER TEST 2: low-detail stored tiles the camera came near -> full rebuild (FlushOneBuild, budgeted)
+	protected void LodUpgrade(vector cp)
+	{
+		if (!LOD_ON || m_iLowNow <= 0 || m_bLocal)
+			return;     // MUD LAB part D: SHEET LOCAL far-ring tiles are never upgraded on screen
+		float ur = LOD_M - LOD_BACK;
+		foreach (int key : m_aTrailOrder)
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(key);
+			if (!st || !st.m_Ent || st.m_D.m_iLow == 0)
+				continue;
+			float ux = (st.m_iTx + 0.5) * TILE_M - cp[0];
+			float uz = (st.m_iTz + 0.5) * TILE_M - cp[2];
+			if (ux * ux + uz * uz > ur * ur)
+				continue;
+			st.m_D.m_iLow = 0;      // queued once; BuildTile sets it again if still far
+			m_iLowNow--;
+			QueueBuild(st.m_iTx, st.m_iTz);
+			m_iLodUp++;
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! One tile's mesh (world tile tx, tz; entity origin at its corner): every quad whose 4 corners have a ground
 	//! height, vertex = ground + LIFT + d, faded under the ground near sides with no tile beyond; UV = world position
 	//! (repeats every UV_TILES tiles) - drag. Returns the new mesh, or null (nothing drawn: entity hidden).
@@ -3485,13 +9978,214 @@ class MUD_MudSheet
 	protected Resource BuildTile(IEntity te, MUD_MudSheetTileData d, int tx, int tz, bool live)
 	{
 		if (!te)
+		{
+			m_iBuildWhy = BW_RESTORE;
 			return null;
+		}
+		// Stage 3 log: builds and their ms (every tile mesh, live or stored, goes through here)
+		int tB = System.GetTickCount();
+		// PAPER TEST 2: stored tile far from the camera -> low-detail mesh
+		bool low = false;
+		if (LOD_ON && !m_bLocal && !live && m_bLodCam)
+		{
+			float lcx = (tx + 0.5) * TILE_M - m_vLodCam[0];
+			float lcz = (tz + 0.5) * TILE_M - m_vLodCam[2];
+			low = lcx * lcx + lcz * lcz > LOD_M * LOD_M;
+		}
+		if (m_bLocal && !live && m_bLodCam)
+		{
+			// MUD LAB part D: a stored tile past FAR_R from the camera is built at 11 x 11 (LodUpgrade never upgrades it)
+			float fcx = (tx + 0.5) * TILE_M - m_vLodCam[0];
+			float fcz = (tz + 0.5) * TILE_M - m_vLodCam[2];
+			low = fcx * fcx + fcz * fcz > FAR_R * FAR_R;
+		}
+		m_iLowWas = d.m_iLow;     // stage 2 C3
+		if (d.m_iLow != 0)
+			m_iLowNow--;
+		d.m_iLow = 0;
+		if (low)
+		{
+			d.m_iLow = 1;
+			m_iLodLow++;
+			m_iLowNow++;
+			if (m_bLocal)
+				m_iFarLow++;
+		}
+		Resource res = BuildTileMesh(te, d, tx, tz, live, low);
+		if (m_bSkipSame)
+		{
+			res = m_SkipRes;     // stage 2 C3: nothing moved 3 mm, same classes - the old mesh stays
+			m_bSkipSame = false;
+			m_SkipRes = null;
+			m_iSkipSame++;
+		}
+		if (BAND_STORED_HOLD && !live)
+			m_mStoredAt.Set(TrailKey(tx, tz), m_fLast);     // stage 2 C5
+		if (m_bLocal && (EDGE_AUDIT || EDGE_COBUILD || EDGE_MATCH))
+			EdgeRecord(d, tx, tz, res != null);
+		if (m_iBuildWhy >= 0 && m_iBuildWhy < BW_N)
+			m_aBuildsBy[m_iBuildWhy] = m_aBuildsBy[m_iBuildWhy] + 1;
+		if (MUD_TestKit.TEST_KIT)
+			MUD_CraterTrace.Built(tx, tz, m_iBuildWhy, res != null);     // stage 2 B1 crater log
+		m_iBuildWhy = BW_RESTORE;
+		int bms = System.GetTickCount(tB);
+		m_iSt10Builds++;
+		m_iSt10BuildMs += bms;
+		if (bms > m_iSt10BuildMax)
+			m_iSt10BuildMax = bms;
+		// LAZY RUT MESH: untraced cells draw no quad - such a mesh does not cover the ground patches under it
+		d.m_iDrawn = 0;
+		if (res)
+			d.m_iDrawn = 1;
+		for (int l = 0; l < TV * TV && d.m_iDrawn != 0; l++)
+		{
+			if (d.m_aGs[l] == 0)
+				d.m_iDrawn = 0;
+		}
+		if (LIFT_BY_DRAWN && PatchLiftOn())
+		{
+			int unNow = 0;
+			if (res)
+				unNow = 1;
+			int unOld = d.m_iUnlift;
+			int unSlot = -1;
+			if (live && IsLive(tx, tz))
+			{
+				unSlot = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+				unOld = m_aSlotUnlift[unSlot];
+				m_aSlotUnlift[unSlot] = unNow;
+			}
+			else
+				d.m_iUnlift = unNow;
+			if (unNow != unOld)
+			{
+				m_iLiftTold++;
+				MUD_WorldGroundEntity.SheetLiftDirty(tx * TILE_M, tz * TILE_M);
+			}
+		}
+		if (m_bLocal && EDGE_MATCH && !m_bCoBuilding && res)
+		{
+			// stage 2 A9: neighbours whose border ours moved away from are built now (they copy ours)
+			int mco[4];
+			for (int mq = 0; mq < 4; mq++)
+				mco[mq] = m_aMatchCo[mq];
+			for (int mb = 0; mb < 4; mb++)
+			{
+				if (mco[mb] == 0)
+					continue;
+				if (mb == 0)
+					CoBuild(tx, tz - 1, 1);
+				else if (mb == 1)
+					CoBuild(tx, tz + 1, 0);
+				else if (mb == 2)
+					CoBuild(tx - 1, tz, 3);
+				else
+					CoBuild(tx + 1, tz, 2);
+			}
+		}
+		if (m_bLocal && EDGE_MATCH && EDGE_CO_SIDE && m_bCoBuilding && res)
+			CoLater(tx, tz);     // stage 3 A11: sides this co-build kept - their neighbours build later, not now
+		if (m_bLocal && EDGE_COBUILD && !m_bCoBuilding)
+			CoCheck(tx, tz);     // stage 2 A3 (last: its builds are timed on their own)
+		return res;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! TEMP GAP PROBE: keep this tile's border heights (world y, from vy) and compare each border with the facing one of
+	//! the neighbour's last build (both traced) -> m_fGapEdgeMax / m_iGapEdgeOver
+	protected void GapEdges(array<float> mine, int tx, int tz)
+	{
+		m_mGapEdge.Set(TrailKey(tx, tz), mine);
+		float worst = 0;
+		worst = Math.Max(worst, GapCmp(mine, 0, TrailKey(tx, tz - 1), TV));          // my south vs its north
+		worst = Math.Max(worst, GapCmp(mine, TV, TrailKey(tx, tz + 1), 0));          // my north vs its south
+		worst = Math.Max(worst, GapCmp(mine, 2 * TV, TrailKey(tx - 1, tz), 3 * TV)); // my west vs its east
+		worst = Math.Max(worst, GapCmp(mine, 3 * TV, TrailKey(tx + 1, tz), 2 * TV)); // my east vs its west
+		if (worst > m_fGapEdgeMax)
+			m_fGapEdgeMax = worst;
+		if (worst > 0.02)
+			m_iGapEdgeOver++;
+	}
+
+	protected float GapCmp(array<float> mine, int mo, int nkey, int no)
+	{
+		array<float> other = m_mGapEdge.Get(nkey);
+		if (!other)
+			return 0;
+		float w = 0;
+		for (int j = 0; j < TV; j++)
+		{
+			if (mine[mo + j] < -9000 || other[no + j] < -9000)
+				continue;
+			w = Math.Max(w, Math.AbsFloat(mine[mo + j] - other[no + j]));
+		}
+		return w;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! low (PAPER TEST 2): every 2nd vertex, plain quads, own skirt (far stored tiles)
+	//! Stage 2 C3 BUILD_SKIP_SAME (from BuildTileMesh): signature of the per-vertex classes (bare / hole, traced,
+	//! band > 0, touched, untouched top), stored for the slot (live) or in d (stored). True = 'still' (no vert moved
+	//! WOULD_SKIP_M) and the last mesh had the same signature and LOD and is still on te: m_SkipRes = that mesh.
+	//! UV drag (m_aOu / m_aOv) is not compared except 'untouched top' (dirt UVs can lag up to one rebuild).
+	protected bool SkipSame(IEntity te, MUD_MudSheetTileData d, int tx, int tz, bool live, bool low, bool still)
+	{
+		int sg1 = 1;
+		int sg2 = 0;
+		for (int l = 0; l < TV * TV; l++)
+		{
+			int c = 2 * d.m_aBare[l] + 8 * d.m_aGs[l] + 32 * d.m_aTouch[l];
+			if (Bare(d, l))
+				c += 1;
+			if (d.m_aBand[l] > 0)
+				c += 16;
+			if (d.m_aD[l] == THICK && d.m_aOu[l] == 0 && d.m_aOv[l] == 0)
+				c += 64;
+			sg1 = sg1 * 31 + c;
+			sg2 = sg2 + c * (l + 7);
+		}
+		sg1 = sg1 | 1;     // never 0 (0 = unknown)
+		Resource old;
+		int was1 = d.m_iSig1;
+		int was2 = d.m_iSig2;
+		d.m_iSig1 = sg1;
+		d.m_iSig2 = sg2;
+		if (live && IsLive(tx, tz))
+		{
+			int slot = (tz - m_iZ0 / TQ) * TILES + tx - m_iX0 / TQ;
+			was1 = m_aSlotSig1[slot];
+			was2 = m_aSlotSig2[slot];
+			m_aSlotSig1[slot] = sg1;
+			m_aSlotSig2[slot] = sg2;
+			if (slot < m_aTileRes.Count() && m_aTileEnt[slot] == te)
+				old = m_aTileRes[slot];
+		}
+		else if (!live)
+		{
+			MUD_MudSheetStore st = m_mTrail.Get(TrailKey(tx, tz));
+			if (st && st.m_Ent == te)
+				old = st.m_Res;
+		}
+		int lowNow = 0;
+		if (low)
+			lowNow = 1;
+		if (!still || !old || was1 == 0 || was1 != sg1 || was2 != sg2 || lowNow != m_iLowWas)
+			return false;
+		m_bSkipSame = true;
+		m_SkipRes = old;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	protected Resource BuildTileMesh(IEntity te, MUD_MudSheetTileData d, int tx, int tz, bool live, bool low)
+	{
+		bool fast = s_bFastBuild;
 		bool fW = !HasTile(tx - 1, tz);
 		bool fE = !HasTile(tx + 1, tz);
 		bool fS = !HasTile(tx, tz - 1);
 		bool fN = !HasTile(tx, tz + 1);
-		float edgeCells = EDGE / CELL;
 		float orgY = te.GetOrigin()[1];
+		int tPart = System.GetTickCount();
 		int um = ((tx % UV_TILES) + UV_TILES) % UV_TILES;
 		int vm = ((tz % UV_TILES) + UV_TILES) % UV_TILES;
 		// one fresh mesh per tile every time: a flags-0 MeshObject never redraws later UpdateVerts (KB
@@ -3519,6 +10213,8 @@ class MUD_MudSheet
 		{
 			tmap[m] = -1;
 			// int parts first: '(int % int) * float' inside a float expression is refused ("Unknown operator '%'")
+			if (!COLLIDE)
+				continue;       // D2: no collider, no collider verts
 			int cmi = m % TV;
 			int cmk = m / TV;
 			cvv[m] = Vector(cmi * CELL, d.m_aG[m] - orgY, cmk * CELL);   // unused ones still sane (body bounds)
@@ -3538,21 +10234,34 @@ class MUD_MudSheet
 		}
 		// vertex heights (world y): mud on the ground, faded at open tile sides (EDGE) and toward bare cells (TAPER)
 		float vy[441];
+		int bareV[441];         // PAPER TEST 1: Bare() per vertex, read once
 		for (int yk = 0; yk < TV; yk++)
 		{
 			for (int yi = 0; yi < TV; yi++)
 			{
 				int yl = yk * TV + yi;
-				int e = 1000;
-				if (fW)
-					e = Math.Min(e, yi);
-				if (fE)
-					e = Math.Min(e, TQ - yi);
-				if (fS)
-					e = Math.Min(e, yk);
-				if (fN)
-					e = Math.Min(e, TQ - yk);
-				float fade = Math.Clamp(e / edgeCells, 0, 1);
+				bool yBare;
+				if (fast)
+					yBare = d.m_aBare[yl] != 0 && d.m_aD[yl] < EPS;     // Bare() inline
+				else
+					yBare = Bare(d, yl);
+				bareV[yl] = 0;
+				if (yBare)
+					bareV[yl] = 1;
+				float fade = 1;         // no open side: e stays 1000 -> fade 1
+				if (!fast || fW || fE || fS || fN)
+				{
+					int e = 1000;
+					if (fW)
+						e = Math.Min(e, yi);
+					if (fE)
+						e = Math.Min(e, TQ - yi);
+					if (fS)
+						e = Math.Min(e, yk);
+					if (fN)
+						e = Math.Min(e, TQ - yk);
+					fade = Math.Clamp(e * CELL / EDGE, 0, 1);
+				}
 				if (ONE_GRID)
 				{
 					// the sheet is the ground: bare = ground height; only the side toward ground not ours dips
@@ -3560,22 +10269,151 @@ class MUD_MudSheet
 					if (anyBare && TAPER > 0)
 						fadeB = Math.Min(fade, TaperFade(bd[yl]));
 					vy[yl] = d.m_aG[yl] - ONE_DIP * (1 - fade) + (LIFT + d.m_aD[yl]) * fadeB;
-					if (Bare(d, yl))
+					if (yBare)
 						vy[yl] = d.m_aG[yl] - ONE_DIP * (1 - fade);
 					continue;
 				}
 				if (anyBare && TAPER > 0)
 					fade = Math.Min(fade, TaperFade(bd[yl]));
+				if (m_bLocal)
+				{
+					// SHEET LOCAL deposit band: h = G + band * (m + LIFT) - (1 - band) * BAND_UNDER (no EDGE fade)
+					vy[yl] = d.m_aG[yl] - BAND_UNDER + (BAND_UNDER + LIFT + d.m_aD[yl]) * fade * d.m_aBand[yl];
+					if (yBare)
+						vy[yl] = d.m_aG[yl] - SINK;
+					continue;
+				}
 				vy[yl] = d.m_aG[yl] - SINK + (SINK + LIFT + d.m_aD[yl]) * fade;
-				if (Bare(d, yl))
+				if (yBare)
 					vy[yl] = d.m_aG[yl] - SINK;     // the mesh dips under the ground toward a blown-off patch
 			}
 		}
+		// stage 2 A9 EDGE_MATCH (sheet local): tile borders never show a step or a gap, whatever order tiles build in.
+		// A side beside a drawn tile: within EDGE_CO_STEP of its drawn border (or this is a co-build) -> copy that border
+		// exactly; else keep our own (the field) and co-build the neighbour now (BuildTile, it then copies ours). A side
+		// beside no drawn mesh (or where the neighbour draws nothing): our raised border goes down to the band-0 height.
+		// The change is ramped in over 4 vertex rows (1, 0.75, 0.5, 0.25). Corners stay ours. Own block (64 locals).
+		if (m_bLocal && EDGE_MATCH)
+		{
+			for (int ms = 0; ms < 4; ms++)
+			{
+				m_aMatchCo[ms] = 0;
+				array<float> mnb = EdgeNb(tx, tz, ms);
+				int mos = m_iMatchOs * TV;
+				bool mCopy = m_bCoBuilding && CoSideOk(ms);     // stage 3 A11: only the side(s) that asked (switch on)
+				if (mnb && !mCopy)
+				{
+					mCopy = true;
+					for (int mc = 1; mc < TQ && mCopy; mc++)
+					{
+						float mcy = mnb[mos + mc];
+						int mcl = EdgeL(ms, mc);
+						if (mcy < -9000)
+							mCopy = vy[mcl] - d.m_aG[mcl] < EDGE_RAISED;     // it draws nothing there: ok while we are flat
+						else
+							mCopy = Math.AbsFloat(vy[mcl] - mcy) < EDGE_CO_STEP;
+					}
+					if (!mCopy)
+					{
+						m_aMatchCo[ms] = 1;
+						m_iMatchMove++;
+						continue;     // our border stays the field's; the neighbour follows this frame
+					}
+				}
+				if (mnb)
+					m_iMatchCopy++;
+				else
+					m_iMatchFade++;
+				m_iMj0 = 1;
+				m_iMj1 = TQ;
+				if (EDGE_CORNER && mnb)
+				{
+					m_iMj0 = 0;     // stage 3 A12: a copied side takes the neighbour's corner verts too (W / E after S / N)
+					m_iMj1 = TV;
+				}
+				for (int mj = m_iMj0; mj < m_iMj1; mj++)
+				{
+					int ml = EdgeL(ms, mj);
+					float mT = d.m_aG[ml] - BAND_UNDER;     // beside nothing drawn: down to the band-0 height
+					if (mnb && mnb[mos + mj] > -9000)
+						mT = mnb[mos + mj];
+					else if (vy[ml] <= mT || mj == 0 || mj == TQ)
+						continue;     // A12: a corner the neighbour does not draw stays ours
+					float mDy = mT - vy[ml];
+					if (MUD_TestKit.TEST_KIT && m_bCoBuilding && mnb && mnb[mos + mj] > -9000 && Math.AbsFloat(mDy) > EDGE_CO_STEP)
+						m_bTurnCo = true;     // stage 3 Part 0: a co-build copies this side over a > 3 cm step (A-2)
+					for (int mr = 0; mr < RampRows(mj); mr++)
+						vy[EdgeIn(ms, mj, mr)] = vy[EdgeIn(ms, mj, mr)] + mDy * (1 - mr * 0.25);
+				}
+				if (m_bTurnCo)
+				{
+					TurnNote(8, 1);
+					m_bTurnCo = false;
+				}
+			}
+		}
+		// SHEET LOCAL 'would skip' meter: the biggest drawn height change since this tile's last build (own block:
+		// BuildTileMesh is near the 64-locals limit)
+		if (m_bLocal)
+		{
+			float lyMax = 0;
+			for (int lyl = 0; lyl < TV * TV; lyl++)
+			{
+				float lyd = Math.AbsFloat(vy[lyl] - d.m_aLastY[lyl]);
+				if (lyd > lyMax)
+					lyMax = lyd;
+				if (!BUILD_SKIP_SAME)
+					d.m_aLastY[lyl] = vy[lyl];
+			}
+			if (lyMax < WOULD_SKIP_M)
+				m_iWouldSkip++;
+			// stage 2 C3: same classes and no vert moved 3 mm -> the old mesh stays (BuildTile takes m_SkipRes)
+			if (BUILD_SKIP_SAME && SkipSame(te, d, tx, tz, live, low, lyMax < WOULD_SKIP_M))
+				return null;
+			if (BUILD_SKIP_SAME)
+			{
+				for (int lyw = 0; lyw < TV * TV; lyw++)
+					d.m_aLastY[lyw] = vy[lyw];     // drawn heights of the mesh built now
+			}
+		}
+		// TEMP GAP PROBE: border heights S N W E (world y; -10000 = untraced). Own block: BuildTileMesh is at the
+		// 64-locals limit (mud-gotchas 2026-10-18)
+		if (GAP_PROBE)
+		{
+			array<float> gapB = {};
+			gapB.Resize(4 * TV);
+			for (int gj = 0; gj < TV; gj++)
+			{
+				int gl0 = gj;
+				int gl1 = TQ * TV + gj;
+				int gl2 = gj * TV;
+				int gl3 = gj * TV + TQ;
+				gapB[gj] = -10000;
+				gapB[TV + gj] = -10000;
+				gapB[2 * TV + gj] = -10000;
+				gapB[3 * TV + gj] = -10000;
+				if (d.m_aGs[gl0] != 0)
+					gapB[gj] = vy[gl0];
+				if (d.m_aGs[gl1] != 0)
+					gapB[TV + gj] = vy[gl1];
+				if (d.m_aGs[gl2] != 0)
+					gapB[2 * TV + gj] = vy[gl2];
+				if (d.m_aGs[gl3] != 0)
+					gapB[3 * TV + gj] = vy[gl3];
+			}
+			GapEdges(gapB, tx, tz);
+		}
+		m_iGapUntNow = 0;
 		bool smooth = TOP_LOOK && SOFT && SMOOTH_EDGE;
 		if (smooth)
 		{
 			for (int ql = 0; ql < TV * TV; ql++)
 			{
+				if (fast && d.m_aD[ql] == THICK && d.m_aOu[ql] == 0 && d.m_aOv[ql] == 0 && d.m_aBare[ql] == 0)
+				{
+					bd[ql] = 0;     // PAPER TEST 1: untouched cell - the maths below gives 0 too
+					continue;
+				}
 				int qhs = (tx * TQ + ql % TV) * 73856093 + (tz * TQ + ql / TV) * 19349663;
 				qhs = qhs + qhs / 8192;
 				int qhm = qhs % 1024;
@@ -3591,18 +10429,185 @@ class MUD_MudSheet
 				bd[ql] = qs;
 			}
 		}
-		for (int qk = 0; qk < TQ; qk++)
+		MUD_Prof.Add(MUD_Prof.T_SETUP, System.GetTickCount(tPart));
+		tPart = System.GetTickCount();
+		if (low)
+		{
+			// PAPER TEST 2: 0.3 m quads over every 2nd vertex; dirt when any of the 3 x 3 vertices under it scores dirt
+			for (int lwk = 0; lwk < TQ; lwk += 2)
+			{
+				for (int lwi = 0; lwi < TQ; lwi += 2)
+				{
+					int lwa0 = lwk * TV + lwi;
+					int lwb0 = lwa0 + 2;
+					int lwc0 = lwa0 + 2 * TV;
+					int lwd0 = lwc0 + 2;
+					if (d.m_aGs[lwa0] == 0 || d.m_aGs[lwb0] == 0 || d.m_aGs[lwc0] == 0 || d.m_aGs[lwd0] == 0)
+						continue;
+					if (m_bLocal && d.m_aBand[lwa0] <= 0 && d.m_aBand[lwb0] <= 0 && d.m_aBand[lwc0] <= 0 && d.m_aBand[lwd0] <= 0)
+						continue;   // SHEET LOCAL: outside the deposit band (under the ground)
+					if (ONE_GRID && (d.m_aBare[lwa0] == BARE_VOX || d.m_aBare[lwb0] == BARE_VOX || d.m_aBare[lwc0] == BARE_VOX || d.m_aBare[lwd0] == BARE_VOX))
+						continue;
+					if (!ONE_GRID && bareV[lwa0] != 0 && bareV[lwb0] != 0 && bareV[lwc0] != 0 && bareV[lwd0] != 0)
+						continue;
+					if (!ONE_GRID && HOLE_SKIP > 0 && (bareV[lwa0] != 0 || bareV[lwb0] != 0 || bareV[lwc0] != 0 || bareV[lwd0] != 0))
+					{
+						float lwlo = Math.Min(Math.Min(vy[lwa0], vy[lwb0]), Math.Min(vy[lwc0], vy[lwd0]));
+						float lwhi = Math.Max(Math.Max(vy[lwa0], vy[lwb0]), Math.Max(vy[lwc0], vy[lwd0]));
+						if (lwhi - lwlo > HOLE_SKIP)
+							continue;
+					}
+					for (int lwn = 0; lwn < 4; lwn++)
+					{
+						int lwv = lwa0;
+						if (lwn == 1)
+							lwv = lwb0;
+						else if (lwn == 2)
+							lwv = lwc0;
+						else if (lwn == 3)
+							lwv = lwd0;
+						if (tmap[lwv] >= 0)
+							continue;
+						int lwci = lwv % TV;    // own int lines: '%' inside a float expression does not compile
+						int lwck = lwv / TV;
+						tmap[lwv] = nv;
+						tv[nv] = Vector(lwci * CELL, vy[lwv] - orgY, lwck * CELL);
+						tuv[nv * 2] = Math.Clamp(((um * TQ + lwci) * CELL - d.m_aOu[lwv]) / SIZE, 0, 1);
+						tuv[nv * 2 + 1] = 1 - Math.Clamp(((vm * TQ + lwck) * CELL - d.m_aOv[lwv]) / SIZE, 0, 1);
+						nv++;
+					}
+					bool lwDirt = false;
+					if (smooth)
+					{
+						for (int lwz = 0; lwz <= 2 && !lwDirt; lwz++)
+						{
+							for (int lwx = 0; lwx <= 2; lwx++)
+							{
+								if (bd[lwa0 + lwz * TV + lwx] > 1)
+								{
+									lwDirt = true;
+									break;
+								}
+							}
+						}
+					}
+					else
+						lwDirt = DirtQuad(d, lwa0, tx * TQ + lwi, tz * TQ + lwk);
+					int lwa = tmap[lwa0];
+					int lwb = tmap[lwb0];
+					int lwc = tmap[lwc0];
+					int lwd = tmap[lwd0];
+					if (TOP_LOOK && !lwDirt)
+					{
+						tixTop[niTop] = lwa;
+						tixTop[niTop + 1] = lwc;
+						tixTop[niTop + 2] = lwd;
+						tixTop[niTop + 3] = lwa;
+						tixTop[niTop + 4] = lwd;
+						tixTop[niTop + 5] = lwb;
+						niTop += 6;
+					}
+					else
+					{
+						tix[ni] = lwa;
+						tix[ni + 1] = lwc;
+						tix[ni + 2] = lwd;
+						tix[ni + 3] = lwa;
+						tix[ni + 4] = lwd;
+						tix[ni + 5] = lwb;
+						ni += 6;
+					}
+				}
+			}
+			// own skirt over the 2-vertex border steps (same faces as the full one below)
+			m_iSkirtFrom = nv;     // stage 2 A4
+			m_iSkirtTix = ni;      // stage 2 A7
+			if ((ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
+			{
+				for (int lsd = 0; lsd < 4; lsd++)
+				{
+					for (int lsq = 0; lsq < TQ; lsq += 2)
+					{
+						int ls0;
+						int ls1;
+						if (lsd == 0)
+						{
+							ls0 = lsq;
+							ls1 = lsq + 2;
+						}
+						else if (lsd == 1)
+						{
+							ls0 = TQ * TV + lsq + 2;
+							ls1 = TQ * TV + lsq;
+						}
+						else if (lsd == 2)
+						{
+							ls0 = (lsq + 2) * TV;
+							ls1 = lsq * TV;
+						}
+						else
+						{
+							ls0 = lsq * TV + TQ;
+							ls1 = (lsq + 2) * TV + TQ;
+						}
+						int lm0 = tmap[ls0];
+						int lm1 = tmap[ls1];
+						if (lm0 < 0 || lm1 < 0)
+							continue;
+						if (d.m_aBare[ls0] == BARE_VOX || d.m_aBare[ls1] == BARE_VOX)
+							continue;
+						if (nv + 4 > EDGE_VCAP || ni + 6 > 3360)
+							continue;
+						tv[nv] = tv[lm0];
+						tv[nv + 1] = tv[lm1];
+						tv[nv + 2] = tv[lm1] - Vector(0, ONE_SKIRT, 0);
+						tv[nv + 3] = tv[lm0] - Vector(0, ONE_SKIRT, 0);
+						for (int lsu = 0; lsu < 2; lsu++)
+						{
+							int lsm = lm0;
+							if (lsu == 1)
+								lsm = lm1;
+							tuv[(nv + lsu) * 2] = tuv[lsm * 2];
+							tuv[(nv + lsu) * 2 + 1] = tuv[lsm * 2 + 1];
+							tuv[(nv + 3 - lsu) * 2] = tuv[lsm * 2];
+							tuv[(nv + 3 - lsu) * 2 + 1] = tuv[lsm * 2 + 1];
+						}
+						tix[ni] = nv;
+						tix[ni + 1] = nv + 1;
+						tix[ni + 2] = nv + 2;
+						tix[ni + 3] = nv;
+						tix[ni + 4] = nv + 2;
+						tix[ni + 5] = nv + 3;
+						ni += 6;
+						nv += 4;
+					}
+				}
+			}
+		}
+		for (int qk = 0; qk < TQ && !low; qk++)
 		{
 			for (int qi = 0; qi < TQ; qi++)
 			{
 				int la = qk * TV + qi;
 				if (d.m_aGs[la] == 0 || d.m_aGs[la + 1] == 0 || d.m_aGs[la + TV] == 0 || d.m_aGs[la + TV + 1] == 0)
+				{
+					m_iGapUntNow++;     // TEMP GAP PROBE
 					continue;
+				}
+				if (m_bLocal && d.m_aBand[la] <= 0 && d.m_aBand[la + 1] <= 0 && d.m_aBand[la + TV] <= 0 && d.m_aBand[la + TV + 1] <= 0)
+					continue;   // SHEET LOCAL: outside the deposit band (under the ground)
 				if (ONE_GRID && (d.m_aBare[la] == BARE_VOX || d.m_aBare[la + 1] == BARE_VOX || d.m_aBare[la + TV] == BARE_VOX || d.m_aBare[la + TV + 1] == BARE_VOX))
 					continue;   // VOXEL HOLES: the voxel ground draws and collides here
-				if (!ONE_GRID && Bare(d, la) && Bare(d, la + 1) && Bare(d, la + TV) && Bare(d, la + TV + 1))
+				if (!ONE_GRID && !fast && Bare(d, la) && Bare(d, la + 1) && Bare(d, la + TV) && Bare(d, la + TV + 1))
 					continue;   // blown off: the voxel ground shows
-				if (!ONE_GRID && HOLE_SKIP > 0 && (Bare(d, la) || Bare(d, la + 1) || Bare(d, la + TV) || Bare(d, la + TV + 1)))
+				if (!ONE_GRID && fast && bareV[la] != 0 && bareV[la + 1] != 0 && bareV[la + TV] != 0 && bareV[la + TV + 1] != 0)
+					continue;   // same, PAPER TEST 1 flags
+				bool qAnyBare;
+				if (fast)
+					qAnyBare = bareV[la] != 0 || bareV[la + 1] != 0 || bareV[la + TV] != 0 || bareV[la + TV + 1] != 0;
+				else
+					qAnyBare = Bare(d, la) || Bare(d, la + 1) || Bare(d, la + TV) || Bare(d, la + TV + 1);
+				if (!ONE_GRID && HOLE_SKIP > 0 && qAnyBare)
 				{
 					float qlo = Math.Min(Math.Min(vy[la], vy[la + 1]), Math.Min(vy[la + TV], vy[la + TV + 1]));
 					float qhi = Math.Max(Math.Max(vy[la], vy[la + 1]), Math.Max(vy[la + TV], vy[la + TV + 1]));
@@ -3621,9 +10626,9 @@ class MUD_MudSheet
 					float y = vy[lv];
 					tmap[lv] = nv;
 					tv[nv] = Vector(ci * CELL, y - orgY, ck * CELL);
-					if (ONE_GRID)
+					if (COLLIDE && ONE_GRID)
 						cvv[lv] = Vector(ci * CELL, d.m_aG[lv] - orgY, ck * CELL);
-					else
+					else if (COLLIDE)
 						cvv[lv] = Vector(ci * CELL, y - orgY, ck * CELL);
 					// texture drag: the vertex shows the texture from where its mud came from (UVs clamp to 0..1)
 					tuv[nv * 2] = Math.Clamp(((um * TQ + ci) * CELL - d.m_aOu[lv]) / SIZE, 0, 1);
@@ -3636,16 +10641,22 @@ class MUD_MudSheet
 				int c = tmap[(qk + 1) * TV + qi];
 				int d2 = tmap[(qk + 1) * TV + qi + 1];
 				// a c d / a d b: upward (as MUD_VoxelProbe.Quad + Tri)
-				cix[nc] = la;           // by tile vertex (cvv), not by mesh vertex
-				cix[nc + 1] = la + TV;
-				cix[nc + 2] = la + TV + 1;
-				cix[nc + 3] = la;
-				cix[nc + 4] = la + TV + 1;
-				cix[nc + 5] = la + 1;
-				nc += 6;
-				bool clean = !Changed(d, la) && !Changed(d, la + 1) && !Changed(d, la + TV) && !Changed(d, la + TV + 1);
-				if (SOFT)
+				if (COLLIDE)
+				{
+					cix[nc] = la;           // by tile vertex (cvv), not by mesh vertex
+					cix[nc + 1] = la + TV;
+					cix[nc + 2] = la + TV + 1;
+					cix[nc + 3] = la;
+					cix[nc + 4] = la + TV + 1;
+					cix[nc + 5] = la + 1;
+					nc += 6;
+				}
+				// D2: smooth sets clean from bd below - the per-quad Changed / DirtQuad calls were thrown away then
+				bool clean = false;
+				if (!smooth && SOFT)
 					clean = !DirtQuad(d, la, tx * TQ + qi, tz * TQ + qk);
+				else if (!smooth)
+					clean = !Changed(d, la) && !Changed(d, la + 1) && !Changed(d, la + TV) && !Changed(d, la + TV + 1);
 				if (smooth)
 				{
 					int dc = 0;
@@ -3772,9 +10783,25 @@ class MUD_MudSheet
 				ni += 6;
 			}
 		}
+		if (live)
+		{
+			m_iGapLiveBuilds++;
+			if (m_iGapUntNow > 0)
+				m_iGapBuildsUnt++;
+			m_iGapUntraced += m_iGapUntNow;
+			if (m_iGapUntNow > m_iGapUntracedMax)
+				m_iGapUntracedMax = m_iGapUntNow;
+		}
+		MUD_Prof.Add(MUD_Prof.T_QUADS, System.GetTickCount(tPart));
+		tPart = System.GetTickCount();
 		int nvColl = nv;        // collider: tile verts / indices only, not the skirt
 		int niColl = ni;
-		if (ONE_GRID && ONE_SKIRT > 0 && ni + niTop > 0)
+		if (!low)
+		{
+			m_iSkirtFrom = nv;     // stage 2 A4
+			m_iSkirtTix = ni;      // stage 2 A7
+		}
+		if (!low && (ONE_GRID || SKIRT_ALL) && ONE_SKIRT > 0 && ni + niTop > 0)
 		{
 			// side 0 south (k 0), 1 north (k TQ), 2 west (i 0), 3 east (i TQ); T0 -> T1 runs so that the quad faces
 			// out ((T1 - T0) x down = outward, as the up quads' a c d order)
@@ -3839,15 +10866,101 @@ class MUD_MudSheet
 				}
 			}
 		}
+		m_iApFrom = m_iSkirtFrom;     // A4 / A10 range (members: BuildTileMesh is at the 64-locals limit)
+		m_iApTo = -1;
+		if (m_bLocal && SKIRT_APRON && !EDGE_DRAPE)
+			m_iApTo = nv;
+		// stage 2 A7 EDGE_DRAPE (sheet local, user idea 2026-10-20): each skirt quad (top0, top1, bottom1, bottom0) becomes
+		// a quarter round of radius R = top height over G - BAND_UNDER - 0.02: it leaves the top flat, a middle ring at
+		// 45 deg (R * 0.707 out, R * 0.293 down; 2 new verts) and ends straight down R out. Two quads instead of one;
+		// stops at the vert / index caps (m_iDrapeCut). Own block: BuildTileMesh is at the 64-locals limit.
+		// stage 3 A10 EDGE_DRAPE_FIT: the quads a cut leaves get the A4 apron below (no new verts / indices: no stripes)
+		if (m_bLocal && EDGE_DRAPE)
+		{
+			int dn = (nv - m_iSkirtFrom) / 4;
+			for (int dq = 0; dq < dn; dq++)
+			{
+				if (nv + 2 > EDGE_VCAP || ni + 6 > 3360)
+				{
+					m_iDrapeCut++;
+					TurnNote(6, 1);     // stage 3 Part 0 TURN METER: + the skirt quads this cut left undraped
+					TurnNote(7, dn - dq);
+					if (EDGE_DRAPE_FIT)
+					{
+						m_iApFrom = m_iSkirtFrom + dq * 4;     // stage 3 A10: the quads left get the A4 apron
+						m_iApTo = m_iSkirtFrom + dn * 4;
+					}
+					break;
+				}
+				int db = m_iSkirtFrom + dq * 4;
+				// outward = (T1 - T0) turned to the right (as A4)
+				vector dOut = Vector(tv[db + 1][2] - tv[db][2], 0, tv[db][0] - tv[db + 1][0]);
+				dOut = dOut * (1 / dOut.Length());
+				for (int du = 0; du < 2; du++)
+				{
+					vector dTop = tv[db + du];
+					int dl = Math.Round(dTop[2] / CELL) * TV + Math.Round(dTop[0] / CELL);
+					float dR = Math.Max(0, dTop[1] - (d.m_aG[dl] - BAND_UNDER - 0.02 - orgY));
+					tv[nv + du] = Vector(dTop[0] + dOut[0] * dR * 0.7071, dTop[1] - dR * 0.2929, dTop[2] + dOut[2] * dR * 0.7071);
+					tv[db + 3 - du] = Vector(dTop[0] + dOut[0] * dR, dTop[1] - dR, dTop[2] + dOut[2] * dR);
+					tuv[(nv + du) * 2] = Math.Clamp(tuv[(db + du) * 2] + dOut[0] * dR * 0.7071 / SIZE, 0, 1);
+					tuv[(nv + du) * 2 + 1] = Math.Clamp(tuv[(db + du) * 2 + 1] - dOut[2] * dR * 0.7071 / SIZE, 0, 1);
+					tuv[(db + 3 - du) * 2] = Math.Clamp(tuv[(db + du) * 2] + dOut[0] * dR / SIZE, 0, 1);
+					tuv[(db + 3 - du) * 2 + 1] = Math.Clamp(tuv[(db + du) * 2 + 1] - dOut[2] * dR / SIZE, 0, 1);
+				}
+				// upper quad top0 top1 mid1 mid0 over the old skirt tris, lower quad mid0 mid1 bottom1 bottom0 appended
+				tix[m_iSkirtTix + dq * 6 + 2] = nv + 1;
+				tix[m_iSkirtTix + dq * 6 + 4] = nv + 1;
+				tix[m_iSkirtTix + dq * 6 + 5] = nv;
+				tix[ni] = nv;
+				tix[ni + 1] = nv + 1;
+				tix[ni + 2] = db + 2;
+				tix[ni + 3] = nv;
+				tix[ni + 4] = db + 2;
+				tix[ni + 5] = db + 3;
+				ni += 6;
+				nv += 2;
+			}
+		}
+		// stage 2 A4 SKIRT_APRON (sheet local): each skirt quad (top0, top1, bottom1, bottom0 from m_iSkirtFrom) gets its
+		// bottom verts moved out from the tile side by the drop (~45 deg) and down to G - BAND_UNDER - 0.02, so the
+		// curtain lies on the ground instead of standing as a wall. Their dirt UVs come from their own position (the top
+		// vert's UV + the offset / SIZE, same frame, its drag kept); TOP_UV64 recomputes all from xz anyway. Own block:
+		// BuildTileMesh is at the 64-locals limit. Stage 3 A10: also the skirt quads a drape cut left (m_iApFrom..m_iApTo).
+		if (m_iApTo >= 0)
+		{
+			for (int ab = m_iApFrom; ab + 3 < m_iApTo; ab += 4)
+			{
+				// outward = (T1 - T0) turned to the right: south -z, north +z, west -x, east +x (see the skirt side order)
+				vector aOut = Vector(tv[ab + 1][2] - tv[ab][2], 0, tv[ab][0] - tv[ab + 1][0]);
+				aOut = aOut * (1 / aOut.Length());
+				for (int au = 0; au < 2; au++)
+				{
+					vector aTop = tv[ab + au];
+					int al = Math.Round(aTop[2] / CELL) * TV + Math.Round(aTop[0] / CELL);
+					float aBy = d.m_aG[al] - BAND_UNDER - 0.02 - orgY;
+					float aDrop = Math.Max(0, aTop[1] - aBy);
+					tv[ab + 3 - au] = Vector(aTop[0] + aOut[0] * aDrop, aBy, aTop[2] + aOut[2] * aDrop);
+					tuv[(ab + 3 - au) * 2] = Math.Clamp(tuv[(ab + au) * 2] + aOut[0] * aDrop / SIZE, 0, 1);
+					tuv[(ab + 3 - au) * 2 + 1] = Math.Clamp(tuv[(ab + au) * 2 + 1] - aOut[2] * aDrop / SIZE, 0, 1);
+				}
+			}
+		}
+		MUD_Prof.Add(MUD_Prof.T_SKIRT, System.GetTickCount(tPart));
+		tPart = System.GetTickCount();
 		if (ni + niTop == 0)
 		{
 			// nothing to draw: hide (no SetObject(null) - the 21:42 crash came right after 16 of those; inference)
-			te.ClearFlags(EntityFlags.VISIBLE, false);
+			if (PreHeld(tx, tz))
+				PreKeep(te, null, tx, tz);     // stage 2 B5: hidden at the go-live
+			else
+				te.ClearFlags(EntityFlags.VISIBLE, false);
 			DropColl(te);
 			return null;
 		}
 		m_iBuildQuads += (ni + niTop) / 6;
-		te.SetFlags(EntityFlags.VISIBLE, false);
+		if (!PreHeld(tx, tz))
+			te.SetFlags(EntityFlags.VISIBLE, false);
 		// counts built at the call, as MUD_VoxelProbe (bricks draw). IDA 2026-10-14: the old 'int nvs[1]' filled
 		// earlier reached Create as 6 vertices while the indices went to 440 -> UpdateVerts' normal pass smashed its
 		// stack buffer (mud-gotchas)
@@ -3875,11 +10988,57 @@ class MUD_MudSheet
 			return null;
 		}
 		MeshObject mesh = res.GetResource().ToMeshObject();
+		// SHEET LOCAL TOP_UV64: the MAT_TOP section takes the 64 m skin chunk UV frame (as voxel tops,
+		// MUD_VoxelProbe.KindAB kind 0), chunk picked by the tile middle; the dirt UVs wait in cix (unused: COLLIDE off)
+		bool uv64 = m_bLocal && TOP_UV64 && !COLLIDE && niTop > 0;
+		if (uv64 && !UV64_FAST)
+		{
+			for (int us = 0; us < nv * 2; us++)
+				cix[us] = Math.Round(tuv[us] * 1000000);
+			float ux0;
+			float uz0;
+			MUD_VoxelProbe.LookOrigin(ux0, uz0);
+			float ucx = ux0 + Math.Floor(((tx + 0.5) * TILE_M - ux0) / TOP_UV_M) * TOP_UV_M;
+			float ucz = uz0 + Math.Floor(((tz + 0.5) * TILE_M - uz0) / TOP_UV_M) * TOP_UV_M;
+			for (int un = 0; un < nv; un++)
+			{
+				vector upv = tv[un];
+				tuv[un * 2] = Math.Clamp((tx * TILE_M + upv[0] - ucx) / TOP_UV_M, 0, 1);
+				tuv[un * 2 + 1] = 1 - Math.Clamp((tz * TILE_M + upv[2] - ucz) / TOP_UV_M, 0, 1);
+			}
+		}
+		if (uv64 && UV64_FAST)
+		{
+			// stage 2 C4 UV64_FAST: dirt section first with its own (dragged) UVs, then the top UVs over tuv in place
+			if (ni > 0)
+			{
+				mesh.UpdateIndices(1, tix);
+				mesh.UpdateVerts(1, tv, tuv);     // its own (dragged) UVs
+			}
+			float fx0;
+			float fz0;
+			MUD_VoxelProbe.LookOrigin(fx0, fz0);
+			float fox = tx * TILE_M - fx0 - Math.Floor(((tx + 0.5) * TILE_M - fx0) / TOP_UV_M) * TOP_UV_M;
+			float foz = tz * TILE_M - fz0 - Math.Floor(((tz + 0.5) * TILE_M - fz0) / TOP_UV_M) * TOP_UV_M;
+			for (int fn = 0; fn < nv; fn++)
+			{
+				vector fpv = tv[fn];
+				tuv[fn * 2] = Math.Clamp((fox + fpv[0]) / TOP_UV_M, 0, 1);
+				tuv[fn * 2 + 1] = 1 - Math.Clamp((foz + fpv[2]) / TOP_UV_M, 0, 1);
+			}
+			mesh.UpdateIndices(0, tixTop);
+			mesh.UpdateVerts(0, tv, tuv);
+		}
 		// indices first: UpdateVerts rebuilds normals from the triangle list
-		if (ni > 0 && niTop > 0)
+		else if (ni > 0 && niTop > 0)
 		{
 			mesh.UpdateIndices(0, tixTop);
 			mesh.UpdateVerts(0, tv, tuv);
+			if (uv64)
+			{
+				for (int ur = 0; ur < nv * 2; ur++)
+					tuv[ur] = cix[ur] / 1000000.0;     // the dirt section keeps its own (dragged) UVs
+			}
 			mesh.UpdateIndices(1, tix);
 			mesh.UpdateVerts(1, tv, tuv);
 		}
@@ -3893,8 +11052,14 @@ class MUD_MudSheet
 			mesh.UpdateIndices(0, tix);
 			mesh.UpdateVerts(0, tv, tuv);
 		}
-		te.SetObject(mesh, "");
-		te.Update();
+		if (PreHeld(tx, tz))
+			PreKeep(te, res, tx, tz);     // stage 2 B5: shown at the go-live (PreClose)
+		else
+		{
+			te.SetObject(mesh, "");
+			te.Update();
+		}
+		MUD_Prof.Add(MUD_Prof.T_ENGINE, System.GetTickCount(tPart));
 		if (!COLLIDE)
 			return res;
 		// soldier-only static body from the same verts (both sections in one trimesh); inline, not a helper:
@@ -3992,6 +11157,63 @@ class MUD_MudTileEntity : GenericEntity
 {
 }
 
+//! EASE DROP: one sliding sheet ground cell (world cell index, heights, start time)
+class MUD_MudSheetEase
+{
+	int m_iGi;
+	int m_iGk;
+	float m_fFrom;
+	float m_fTo;
+	float m_fT0;
+}
+
+//! MUD LAB part C (L2 / L3): a set of window cells (index k * N + i), listed once each; m_aGen = scratch marks
+class MUD_MudSheetCells
+{
+	int m_aIn[6561];
+	int m_aGen[6561];
+	ref array<int> m_aList = {};
+
+	void Add(int v)
+	{
+		if (m_aIn[v] != 0)
+			return;
+		m_aIn[v] = 1;
+		m_aList.Insert(v);
+	}
+
+	void Clear()
+	{
+		foreach (int v : m_aList)
+			m_aIn[v] = 0;
+		m_aList.Clear();
+	}
+
+	//! Follow moved the field by si, sk cells: cells that stay move with it, the rest go (scratch marks reset)
+	void Shift(int si, int sk)
+	{
+		if (m_aList.IsEmpty())
+			return;
+		int n = MUD_MudSheet.N;
+		array<int> keep = {};
+		foreach (int v : m_aList)
+		{
+			m_aIn[v] = 0;
+			int i = v % n;
+			int k = v / n;
+			int ni = i - si;
+			int nk = k - sk;
+			if (ni >= 0 && ni < n && nk >= 0 && nk < n)
+				keep.Insert(nk * n + ni);
+		}
+		m_aList.Clear();
+		foreach (int kv : keep)
+			Add(kv);
+		for (int g = 0; g < n * n; g++)
+			m_aGen[g] = 0;
+	}
+}
+
 class MUD_MudSheetVeh
 {
 	Vehicle m_Veh;
@@ -4002,6 +11224,20 @@ class MUD_MudSheetVeh
 	float m_fEff0 = -1;             // gearbox efficiency before the mud (-1: not read yet)
 	float m_fEffSet = 1;            // factor last set on it
 	int m_iId;                      // GRADUAL: which vehicle made a pass
+	VehicleWheeledSimulation m_Sim; // L8: cached
+}
+
+//! SYNC: one own stamp (prediction) waiting for the rut op that holds it
+class MUD_MudSheetPred
+{
+	vector m_vA;
+	vector m_vB;
+	float m_fSpeed;
+	float m_fT;                     // sheet time of the stamp
+	int m_iVeh;                     // MUD_MudSheetVeh.m_iId (GRADUAL passes)
+	float m_fHalf;                  // TyreHalf before WIDEN
+	Vehicle m_Veh;                  // weak: gone = expire sooner
+	bool m_bGone;                   // expired: a replay still holding it skips it
 }
 
 //! Static arrays (MeshObject takes them); a class holds at most 256 KB (mud-gotchas)
@@ -4020,6 +11256,47 @@ class MUD_MudSheetTileData
 	float m_aOu[441];
 	float m_aOv[441];
 	int m_aBare[441];
+	int m_aTouch[441];      // SHEET LOCAL (MUD LAB): 1 = a stamp wrote this cell (deposit band source)
+	float m_aBand[441];     // SHEET LOCAL: deposit band 0..1
+	float m_aLastY[441];    // SHEET LOCAL: drawn height at the last build ('would skip' meter)
+	int m_iUnlift;          // LIFT BY DRAWN: 1 = patches were told this (stored) tile's mesh is on screen
+	int m_iDrawn;           // LAZY RUT MESH: 1 = every cell was traced at its last mesh build (that mesh has no hole)
+	int m_iLow;             // PAPER TEST 2: 1 = its last mesh was the low-detail one (far from the camera)
+	ref MUD_MudSheetTileDist m_Dist;     // stage 2 C1 BAND_INCR: its kept distances (null: none)
+	int m_iSig1;            // stage 2 C3 BUILD_SKIP_SAME: class signature of its last mesh (0 = unknown)
+	int m_iSig2;
+}
+
+//! Stage 2 C1 BAND_INCR: a stored tile's distances (cells) to the nearest touched cell, as BandTile last made them
+class MUD_MudSheetTileDist
+{
+	float m_aDist[441];
+	int m_iGen = -1;        // MUD_MudSheet.s_iDistGen when made (another = stale)
+}
+
+//! Stage 2 C1 BAND_INCR: the window's distances - own class, MUD_MudSheetField is near the 256 KB limit
+class MUD_MudSheetDist
+{
+	float m_aDist[6561];    // chamfer distance (cells) to the nearest touched cell, capped at BandMargin + 1
+	int m_aChg[6561];       // 1 = lowered in the running BandIncr
+}
+
+//! Stage 2 C1 TEST_KIT bench: the window state it puts back
+class MUD_MudSheetBench
+{
+	int m_aTouch[6561];
+	float m_aBand[6561];
+	float m_aDist[6561];
+	int m_aSlot[64];
+}
+
+//! SHEET LOCAL far data (MUD LAB part D): one int a cell = 1 byte each for height, drag u, drag v, class (bit 0 bare,
+//! bit 1 touched, bits 2-6 deposit band): 441 x 4 bytes
+class MUD_MudSheetFar
+{
+	int m_iTx;
+	int m_iTz;
+	int m_aC[441];
 }
 
 //! A frozen trail tile: its data, entity (origin at the tile corner) and the mesh it draws
@@ -4041,7 +11318,7 @@ class MUD_MudSheetTile
 	int m_aI[2400];
 }
 
-//! 6 x 6561 x 4 bytes = 157 KB
+//! 9 x 6561 x 4 bytes = 236 KB (a class holds at most 256 KB)
 class MUD_MudSheetField
 {
 	float m_aD[6561];       // mud height over the ground (m)
@@ -4050,4 +11327,7 @@ class MUD_MudSheetField
 	float m_aOu[6561];      // texture drag x / z (m)
 	float m_aOv[6561];
 	int m_aBare[6561];      // 1 = mud blown off here (crater): thin mud is not drawn, the ground shows
+	int m_aTouch[6561];     // SHEET LOCAL (MUD LAB): 1 = a stamp wrote this cell
+	float m_aBand[6561];    // SHEET LOCAL: deposit band 0..1 (distance to the nearest touched cell)
+	float m_aLastY[6561];   // SHEET LOCAL: drawn height at the last build ('would skip' meter)
 }

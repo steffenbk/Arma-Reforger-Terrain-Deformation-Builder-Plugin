@@ -13,6 +13,10 @@ Close the world in Workbench before writing.
                                         --backup <dir> --bk <blender-mcp-BK> [--margin 1] [--pins <pins.txt>]
                                         [--install experimental]
     python -I Tools/mud_holes.py verify <census.txt> <mask.txt> [--margin 1] [--pins <pins.txt>]
+    python -I Tools/mud_holes.py area   <new mask> <old mask> --pins <new pins> --old-pins <old pins>
+                                        --rect <x0,z0,x1,z1 world m> --out-mask <f> --out-pins <f>
+                                        (test area, 2026-10-17: new mask + pins inside the rect, old outside;
+                                        feed the two files to plan / write)
     python -I Tools/mud_holes.py fit    <console.log with MUD bake sample lines> --data <DATA> --out <fit.json>
     python -I Tools/mud_holes.py bake   --data <DATA> --fit <fit.json> --out <addon>/Data/Mud/mud_heights.c
                                         (binary, named .c: game FileIO opens only .c/.conf/.et-type files)
@@ -174,6 +178,74 @@ def dilate(keep, nx, nz, margin):
     return out
 
 
+def box_origin(text, box_re):
+    """(x0, z0) world metres of the last block's box line."""
+    lines, start = _last_block(text, box_re)
+    if start is None:
+        raise ValueError('no box line')
+    m = re.search(r'box (\S+) (\S+) cells', lines[start])
+    return float(m[1]), float(m[2])
+
+
+def rect_cells(rect, x0, z0, cell, nx, nz):
+    """World rect (x0, z0, x1, z1) -> cells (cx0, cz0, cx1, cz1), end exclusive, every cell the rect touches."""
+    import math
+    a = max(0, int(math.floor((rect[0] - x0) / cell)))
+    c = max(0, int(math.floor((rect[1] - z0) / cell)))
+    b = min(nx, int(math.ceil((rect[2] - x0) / cell)))
+    d = min(nz, int(math.ceil((rect[3] - z0) / cell)))
+    if a >= b or c >= d:
+        raise ValueError('rect %s holds no cell' % (rect,))
+    return a, c, b, d
+
+
+def merge_area(new_mask, old_mask, new_pins, old_pins, cells):
+    """New mask + pins inside cells (cx0, cz0, cx1, cz1, end exclusive), old ones outside -> (mask, pins)."""
+    nx, nz = old_mask['nx'], old_mask['nz']
+    for name, d in (('new mask', new_mask), ('new pins', new_pins), ('old pins', old_pins)):
+        if (d['nx'], d['nz']) != (nx, nz):
+            raise ValueError('size: %s %d x %d, old mask %d x %d' % (name, d['nx'], d['nz'], nx, nz))
+    cx0, cz0, cx1, cz1 = cells
+    keep = bytearray(old_mask['keep'])
+    for z in range(cz0, cz1):
+        keep[z * nx + cx0:z * nx + cx1] = new_mask['keep'][z * nx + cx0:z * nx + cx1]
+
+    def inside(i):
+        return cz0 <= i // nx < cz1 and cx0 <= i % nx < cx1
+    pins = {i for i in old_pins['cells'] if not inside(i)} | {i for i in new_pins['cells'] if inside(i)}
+    return ({'nx': nx, 'nz': nz, 'cell': old_mask['cell'], 'keep': keep},
+            {'nx': nx, 'nz': nz, 'cell': old_mask['cell'], 'cells': pins})
+
+
+def mask_text_of(mask, x0, z0):
+    """Mask dict -> MUD_HoleMask text (parse_mask reads it back)."""
+    nx, nz, keep = mask['nx'], mask['nz'], mask['keep']
+    out = ['MUD mask 1', 'MUD mask box %g %g cells %d %d cell %g' % (x0, z0, nx, nz, mask['cell'])]
+    runs = 0
+    for z in range(nz):
+        x = 0
+        while x < nx:
+            if keep[z * nx + x]:
+                a = x
+                while x < nx and keep[z * nx + x]:
+                    x += 1
+                out.append('MUD mask keep z %d x %d %d' % (z, a, x - 1))
+                runs += 1
+            else:
+                x += 1
+    out.append('MUD mask done keep %d runs %d road 0 water 0 box 0 ms 0' % (sum(keep), runs))
+    return '\n'.join(out) + '\n'
+
+
+def pins_text_of(pins, x0, z0):
+    """Pins dict -> MUD_RelYPins text (parse_pins reads it back)."""
+    nx = pins['nx']
+    out = ['MUD pins box %g %g cells %d %d cell %g' % (x0, z0, nx, pins['nz'], pins['cell'])]
+    out += ['MUD pin z %d x %d' % (i // nx, i % nx) for i in sorted(pins['cells'])]
+    out.append('MUD pins done pins %d roots %d' % (len(pins['cells']), len(pins['cells'])))
+    return '\n'.join(out) + '\n'
+
+
 def full_blocks(keep, nx, nz):
     """[(bx, bz)] of every block whose 32 x 32 cells are all holes (nothing kept)."""
     out = []
@@ -219,12 +291,26 @@ def hole_blocks(keep, nx, nz):
     return out
 
 
-def owner_tile(bx, bz, tile_blocks=4, tiles_x=16):
+def owner_tile(bx, bz, tile_blocks=None, tiles_x=None):
     """Tile index of the .ttile that owns block (bx, bz): x-fastest (measured, Arland Exp 192624)."""
+    tile_blocks = TILE_BLOCKS if tile_blocks is None else tile_blocks
+    tiles_x = TILES_X if tiles_x is None else tiles_x
     return (bz // tile_blocks) * tiles_x + bx // tile_blocks
 
 
+# Tile layout. Arland (Exp 192624): 16 x 16 tiles of 129 x 129 vertices = 4 x 4 hole blocks each. Another map:
+# set_layout (Tools/mud_build.py reads the vertex count from a tile's HGHT and gets tiles_x from the World Editor).
 TILE_VERTS = 129
+TILE_BLOCKS = 4
+TILES_X = 16
+
+
+def set_layout(tile_verts, tiles_x):
+    """Use another map's tile layout: tile_verts per tile side (32 * n + 1), tiles_x tiles per row."""
+    global TILE_VERTS, TILE_BLOCKS, TILES_X
+    if tile_verts < BLOCK + 1 or (tile_verts - 1) % BLOCK:
+        raise ValueError('tile has %d vertices a side, want 32 * n + 1' % tile_verts)
+    TILE_VERTS, TILE_BLOCKS, TILES_X = tile_verts, (tile_verts - 1) // BLOCK, tiles_x
 # (swap x/z, flip x, flip z, signed 16-bit): how a tile's HGHT is laid out, picked by fit()
 ORIENTS = [(s, fx, fz, sg) for sg in (0, 1) for s in (0, 1) for fx in (0, 1) for fz in (0, 1)]
 SAMPLE = re.compile(r'MUD bake sample (\d+) (\d+) (\d+) (-?\d+)\s*$')
@@ -250,7 +336,7 @@ def hght_values(tile_bytes, signed):
 
 def vertex_local(bx, bz, v):
     """Tile-local vertex of skin chunk / hole block (bx, bz), chunk vertex v (33 x 33, x fastest)."""
-    return (bx % 4) * BLOCK + v % (BLOCK + 1), (bz % 4) * BLOCK + v // (BLOCK + 1)
+    return (bx % TILE_BLOCKS) * BLOCK + v % (BLOCK + 1), (bz % TILE_BLOCKS) * BLOCK + v // (BLOCK + 1)
 
 
 def parse_samples(text):
@@ -355,7 +441,83 @@ def merge_tile(data, blocks, allow_full=(), refuse_full=False):
     return out
 
 
-def write_tiles(blocks, out_dir, backup_dir, load_vanilla, tile_blocks=4, tiles_x=16, allow_full=(), refuse_full=False):
+def hole_cells(data):
+    """Hole cells in .ttile bytes (0 without a HOLE chunk)."""
+    parts = dict(tt.chunks(data))
+    if b'HOLE' not in parts:
+        return 0
+    return sum(bin(r).count('1') for rows in tt.decode(parts[b'HOLE']).values() for r in rows)
+
+
+def reset_holes(cur, pristine):
+    """Current .ttile bytes with the HOLE chunk of the pristine copy (none there = no HOLE chunk). Heights, paint
+    and every other chunk stay as they are now, so map edits made after Build survive Unbuild / a re-Build."""
+    for name, d in (('current', cur), ('pristine', pristine)):
+        if d[:4] != b'FORM' or d[8:12] != b'TERR':
+            raise ValueError('%s tile is not a FORM/TERR file' % name)
+    parts = tt.chunks(cur)
+    if tt.build(parts) != cur:
+        raise ValueError('round trip failed - unknown layout, not writing')
+    old = dict(tt.chunks(pristine)).get(b'HOLE')
+    tags = [t for t, _ in parts]
+    if old is None:
+        parts = [(t, d) for t, d in parts if t != b'HOLE']
+    elif b'HOLE' in tags:
+        parts = [(t, old if t == b'HOLE' else d) for t, d in parts]
+    else:  # chunk order of saved tiles: VERS HGHT BERR HOLE ... -> after BERR
+        parts.insert(tags.index(b'BERR') + 1, (b'HOLE', old))
+    return tt.build(parts)
+
+
+def tile_names(d):
+    """{tile index: file name} of the Terrain_<n>.ttile files in folder d."""
+    out = {}
+    if os.path.isdir(d):
+        for name in os.listdir(d):
+            m = re.fullmatch(r'Terrain_(\d+)\.ttile', name)
+            if m:
+                out[int(m[1])] = name
+    return out
+
+
+def snapshot(tiles_dir, backup_dir):
+    """Copy every tile of tiles_dir that backup_dir does not hold yet (the first copy = the pre-tool state).
+    Returns (copied, total in backup)."""
+    os.makedirs(backup_dir, exist_ok=True)
+    have = tile_names(backup_dir)
+    copied = 0
+    for t, name in sorted(tile_names(tiles_dir).items()):
+        if t not in have:
+            shutil.copyfile(os.path.join(tiles_dir, name), os.path.join(backup_dir, name))
+            copied += 1
+    return copied, len(tile_names(backup_dir))
+
+
+def restore(tiles_dir, backup_dir):
+    """Put the pristine HOLE chunk (backup_dir) back into every current tile (reset_holes). Returns
+    [(tile, hole cells before, after)]; a backup tile with no current tile is copied back whole (after = -1)."""
+    cur = tile_names(tiles_dir)
+    report = []
+    for t, name in sorted(tile_names(backup_dir).items()):
+        with open(os.path.join(backup_dir, name), 'rb') as f:
+            pristine = f.read()
+        path = os.path.join(tiles_dir, 'Terrain_%d.ttile' % t)
+        if t not in cur:
+            with open(path, 'wb') as f:
+                f.write(pristine)
+            report.append((t, 0, -1))
+            continue
+        with open(path, 'rb') as f:
+            now = f.read()
+        out = reset_holes(now, pristine)
+        if out != now:
+            with open(path, 'wb') as f:
+                f.write(out)
+        report.append((t, hole_cells(now), hole_cells(out)))
+    return report
+
+
+def write_tiles(blocks, out_dir, backup_dir, load_vanilla, tile_blocks=None, tiles_x=None, allow_full=(), refuse_full=False):
     """Write every tile that gets blocks or already exists in out_dir. Returns [(tile, blocks, cells)]."""
     out_dir, backup_dir = str(out_dir), str(backup_dir)
     per_tile = {}
@@ -446,7 +608,7 @@ def verify(census_text, mask_text, margin, pins_text=None, control=(), keep_full
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['plan', 'write', 'verify', 'fit', 'bake'])
+    ap.add_argument('cmd', choices=['plan', 'write', 'verify', 'fit', 'bake', 'area'])
     ap.add_argument('files', nargs='*')
     ap.add_argument('--margin', type=int, default=1)
     ap.add_argument('--out')
@@ -456,6 +618,10 @@ def main(argv):
     ap.add_argument('--pins')
     ap.add_argument('--data')
     ap.add_argument('--fit')
+    ap.add_argument('--old-pins')
+    ap.add_argument('--rect', help='area: x0,z0,x1,z1 world metres')
+    ap.add_argument('--out-mask')
+    ap.add_argument('--out-pins')
     ap.add_argument('--no-pins', action='store_true', help='write without pins (buries RELATIVE_Y entities on holes)')
     ap.add_argument('--control', action='append', default=[], metavar='BX,BZ',
                     help='TEST ONLY: leave this all-hole block full (stays bald) as a control')
@@ -493,6 +659,28 @@ def main(argv):
 
     if not a.files:
         ap.error('%s needs its input file(s)' % a.cmd)
+
+    if a.cmd == 'area':
+        if len(a.files) != 2 or not (a.pins and a.old_pins and a.rect and a.out_mask and a.out_pins):
+            ap.error('area needs <new mask> <old mask> --pins --old-pins --rect --out-mask --out-pins')
+        new_text, old_text = read(a.files[0]), read(a.files[1])
+        new_m, old_m = parse_mask(new_text), parse_mask(old_text)
+        x0, z0 = box_origin(old_text, BOX)
+        if box_origin(new_text, BOX) != (x0, z0):
+            ap.error('the two masks have different box corners')
+        new_p, old_p = parse_pins(read(a.pins)), parse_pins(read(a.old_pins))
+        cells = rect_cells([float(v) for v in a.rect.split(',')], x0, z0, old_m['cell'], old_m['nx'], old_m['nz'])
+        m, p = merge_area(new_m, old_m, new_p, old_p, cells)
+        n_in = (cells[2] - cells[0]) * (cells[3] - cells[1])
+        k_old = sum(sum(old_m['keep'][z * old_m['nx'] + cells[0]:z * old_m['nx'] + cells[2]]) for z in range(cells[1], cells[3]))
+        k_new = sum(sum(m['keep'][z * m['nx'] + cells[0]:z * m['nx'] + cells[2]]) for z in range(cells[1], cells[3]))
+        print('area cells x %d-%d z %d-%d (%d cells): mask keep old %d -> new %d; pins %d -> %d (whole map)'
+              % (cells[0], cells[2] - 1, cells[1], cells[3] - 1, n_in, k_old, k_new, len(old_p['cells']), len(p['cells'])))
+        with open(a.out_mask, 'w', newline='\n') as f:
+            f.write(mask_text_of(m, x0, z0))
+        with open(a.out_pins, 'w', newline='\n') as f:
+            f.write(pins_text_of(p, x0, z0))
+        return 0
 
     if a.cmd == 'verify':
         r = verify(read(a.files[0]), read(a.files[1]), a.margin, read(a.pins) if a.pins else None, control, keep_full=True)

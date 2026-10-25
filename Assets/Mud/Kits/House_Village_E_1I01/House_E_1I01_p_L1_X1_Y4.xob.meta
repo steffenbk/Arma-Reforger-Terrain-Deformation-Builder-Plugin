@@ -1,0 +1,77 @@
+MetaFileClass {
+ Name "{71AF2394A51E0357}Assets/Mud/Kits/House_Village_E_1I01/House_E_1I01_p_L1_X1_Y4.xob"
+ Configurations {
+  FBXResourceClass PC {
+   MaterialAssigns {
+    MaterialAssignClass "{6AB0D33629ECA8B2}" {
+     SourceMaterial "House_E_1I01_exterior"
+     AssignedMaterial "{DA9FB2E88BDD0174}Assets/Structures/Houses/Village/House_Village_E_1I01/Data/House_E_1I01_exterior.emat"
+    }
+    MaterialAssignClass "{6AB0D33629ECA8BB}" {
+     SourceMaterial "House_E_1I01_exterior_2"
+     AssignedMaterial "{D9F71131F1127527}Assets/Structures/Houses/Village/House_Village_E_1I01/Data/House_E_1I01_exterior_2.emat"
+    }
+    MaterialAssignClass "{6AB0D33629ECA8B8}" {
+     SourceMaterial "House_E_1I01_interior"
+     AssignedMaterial "{B95D56E95855D9F9}Assets/Structures/Houses/Village/House_Village_E_1I01/Data/House_E_1I01_interior.emat"
+    }
+   }
+   MeshParams {
+    MeshParam House_E_1I01_p_L1_X1_Y4 {
+    }
+   }
+   GeometryParams {
+    GeometryParam UTM_BV_House_E_1I01_p_L1_X1_Y4 {
+     LayerPreset "BuildingView"
+     SurfaceProperties {
+      "{B393F062AAE9EB74}Common/Materials/Game/brick.gamemat"
+      "{F4BD13BAE53EB63A}Common/Materials/Game/carpet.gamemat"
+      "{075A6208C03D9D6E}Common/Materials/Game/tiles_roof.gamemat"
+      "{EA270CE454C419FD}Common/Materials/Game/wood.gamemat"
+      "{0C63AA54AFA9CC2C}Common/Materials/Game/tiles.gamemat"
+     }
+     Mass 0
+     Margin 0
+    }
+    GeometryParam UTM_FG_House_E_1I01_p_L1_X1_Y4 {
+     LayerPreset "FireGeo"
+     SurfaceProperties {
+      "{B393F062AAE9EB74}Common/Materials/Game/brick.gamemat"
+      "{F4BD13BAE53EB63A}Common/Materials/Game/carpet.gamemat"
+      "{CE9253778DD8FBDE}Common/Materials/Game/metal.gamemat"
+      "{A8AAC604353B1D18}Common/Materials/Game/tiles_ceramic.gamemat"
+      "{075A6208C03D9D6E}Common/Materials/Game/tiles_roof.gamemat"
+      "{EA270CE454C419FD}Common/Materials/Game/wood.gamemat"
+     }
+     Mass 0
+     Margin 0
+    }
+   }
+   Common TXOCommonClass "{6AB0D336253939D7}" : "{0877E7C4BB2B2C9A}Configs/System/ResourceTypes/PC/MeshObjectCommon.conf" {
+   }
+   ApplicationVendor "Blender Foundation"
+   ApplicationName "Blender (stable FBX IO)"
+   ApplicationVersion "4.2.23 LTS"
+  }
+  FBXResourceClass XBOX_ONE : PC {
+   Common TXOCommonClass "{6AB0D33625393876}" : "{9D5B6207F7628CE2}Configs/System/ResourceTypes/XBOX_ONE/MeshObjectCommon.conf" {
+   }
+  }
+  FBXResourceClass XBOX_SERIES : PC {
+   Common TXOCommonClass "{6AB0D3362539386A}" : "{DD9F02115C764647}Configs/System/ResourceTypes/XBOX_SERIES/MeshObjectCommon.conf" {
+   }
+  }
+  FBXResourceClass PS4 : PC {
+   Common TXOCommonClass "{6AB0D33625393843}" : "{53EC476BC921D99A}Configs/System/ResourceTypes/PS4/MeshObjectCommon.conf" {
+   }
+  }
+  FBXResourceClass PS5 : PC {
+   Common TXOCommonClass "{6AB0D336253938B1}" : "{F62AA8E7B8EA9D26}Configs/System/ResourceTypes/PS5/MeshObjectCommon.conf" {
+   }
+  }
+  FBXResourceClass HEADLESS : PC {
+   Common TXOCommonClass "{6AB0D336253938AD}" : "{3A5B3356978039E8}Configs/System/ResourceTypes/HEADLESS/MeshObjectCommon.conf" {
+   }
+  }
+ }
+}

@@ -71,8 +71,10 @@ class MUD_CoarseSkinEntity : GenericEntity
 	static const int CELL_TLBR = 16;    // bit 4: shared edge tl-br (else bl-tr)
 	static const int CELL_COVER = 32;   // bit 5: a fine patch covers the cell (plan 3)
 	static const int CELL_SLEEP = 64;   // bit 6: the covering patch sleeps (no collider): mesh still hidden, skin collider on
-	static const int CELL_VOX = 128;    // bit 7: TEMP probe 2026-10-13 (MUD_VoxelProbe overlay): a live voxel tile carries the
+	static const int CELL_VOX = 128;    // bit 7: probe 2026-10-13 (MUD_VoxelProbe overlay): a live voxel tile carries the
 	                                    // cell - no skin mesh, no skin collider, whatever COVER / SLEEP say
+	static const float BUILDING_GROW = 1;   // LOOK LIFT buildings: m a building's box grows before its skin vertices stop lifting
+	                                        // (user 2026-10-23: lifted ground showed through floors inside; outside was fine)
 
 	[Attribute("2", UIWidgets.EditBox, "Heightmap cell size (m). A chunk is 32 x 32 cells.", category: "Skin")]
 	protected float m_fCell;
@@ -89,7 +91,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 	[Attribute("1", UIWidgets.CheckBox, "Build the whole skin in EOnInit, before the first physics step: one freeze at load, nothing placed falls through. Off = spread over frames (Budget).", category: "Build")]
 	protected bool m_bBuildAtInit;
 
-	[Attribute("$Testingplanvechmsh:Data/Mud/mud_heights.c", UIWidgets.EditBox, "Baked heights file from Tools/mud_holes.py bake. ARLAND ONLY: blocks are keyed by chunk, another map would load wrong heights. Binary, but named .c: game FileIO opens only some extensions (.c .conf .et yes; .bin .json .txt .ttile .ent no; probe 2026-10-10 Exp 192624). Empty = trace every vertex.", category: "Build")]
+	[Attribute("Data/Mud/mud_heights.c", UIWidgets.EditBox, "Baked heights file from Tools/mud_holes.py bake. A plain path is tried as is, then under the dev and the published addon IDs (audit D2: the '$Testingplanvechmsh:' path failed in retail 10 / 10). ARLAND ONLY: blocks are keyed by chunk, another map would load wrong heights. Binary, but named .c: game FileIO opens only some extensions (.c .conf .et yes; .bin .json .txt .ttile .ent no; probe 2026-10-10 Exp 192624). Empty = trace every vertex.", category: "Build")]
 	protected string m_sBaked;
 
 	[Attribute("8", UIWidgets.EditBox, "Spread build: work per frame (ms), at least one chunk per frame", category: "Build")]
@@ -109,6 +111,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 	protected static MUD_CoarseSkinEntity s_Inst;
 	protected ref TraceParam m_Trace;
 	protected bool m_bRender;
+	protected ref set<int> m_NoLift = new set<int>();   // LOOK LIFT buildings: global skin vertices (sz * (m_iNCX + 1) + sx) that never lift
 	protected bool m_bStarted;
 	protected bool m_bDone;
 	protected float m_fSinceDone;
@@ -322,10 +325,27 @@ class MUD_CoarseSkinEntity : GenericEntity
 		if (m_sBaked.IsEmpty())
 			return;
 		int t0 = System.GetTickCount();
-		FileHandle f = FileIO.OpenFile(m_sBaked, FileMode.READ);
+		// audit D2: plain path first, then under each addon ID (dev folder, published Workshop item)
+		array<string> paths = {m_sBaked};
+		if (!m_sBaked.StartsWith("$"))
+		{
+			paths.Insert("$Testingplanvechmsh:" + m_sBaked);     // lint-ok: fallback after the plain path
+			paths.Insert("$Terraindeformation:" + m_sBaked);     // lint-ok: fallback after the plain path
+		}
+		FileHandle f;
+		foreach (string path : paths)
+		{
+			f = FileIO.OpenFile(path, FileMode.READ);
+			if (f)
+			{
+				m_sBaked = path;    // the prints below name the path that opened
+				break;
+			}
+		}
 		if (!f)
 		{
-			Print(string.Format("MUD coarse: baked heights '%1' did not open - tracing", m_sBaked), LogLevel.ERROR);
+			Print(string.Format("MUD coarse: baked heights '%1' did not open (tried %2 paths) - tracing", m_sBaked, paths.Count()), LogLevel.ERROR);
+			MUD_Release.Baked(false, m_sBaked);
 			return;
 		}
 		int magic;
@@ -395,6 +415,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 			return;
 		}
 		m_mBaked = baked;
+		MUD_Release.Baked(true, m_sBaked);
 		Print(string.Format("MUD coarse: baked heights %1 blocks from '%2' (%3 ms), spot check %4 vertices worst %5 m",
 			n, m_sBaked, System.GetTickCount(t0), spots, worst));
 	}
@@ -491,7 +512,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 	//------------------------------------------------------------------------------------------------
 	protected void BuildChunk(vector o)
 	{
-		// TEMP probe 2026-10-13 (bricks): a chunk sampled anew loses its CELL_VOX bits (voxel cells would show twice)
+		// probe 2026-10-13 (bricks): a chunk sampled anew loses its CELL_VOX bits (voxel cells would show twice)
 		if (MUD_VoxelProbe.Started())
 			Print(string.Format("MUD skin: chunk at %1 built after the voxel probe started - its voxel cells are lost", o), LogLevel.WARNING);
 		MUD_SkinChunk rec = SampleChunk(o);
@@ -614,6 +635,140 @@ class MUD_CoarseSkinEntity : GenericEntity
 	//------------------------------------------------------------------------------------------------
 	//! Mesh and collider of one chunk: its hole cells that no fine patch covers. Spawns the chunk entity
 	//! on first use; on a rebuild the old body is destroyed and the new one made in this same call.
+	//! LOOK LIFT (MUD_LookLift.ENABLED): on = m_Buf.m_aVerts of rec drawn MUD_LookLift.LiftM() higher where every
+	//! cell around the vertex (inside this chunk) is a hole cell and not a voxel cell; off = back to rec.m_aH
+	protected void LookLift(MUD_SkinChunk rec, bool on)
+	{
+		// SEAM FIX 2026-10-23: a border vertex also asks the neighbour chunk's cells (LiftsVertex) - before, cells
+		// outside this chunk were skipped, so two chunks could lift their shared vertex differently (open crack)
+		int ox = Math.Round((rec.m_vOrigin[0] - m_fX0) / m_fCell);
+		int oz = Math.Round((rec.m_vOrigin[2] - m_fZ0) / m_fCell);
+		if (MUD_LookLift.LiftOff())
+			on = false;     // TEST_KIT numpad . mode 'lift off'
+		for (int vz = 0; vz < VERTS; vz++)
+		{
+			for (int vx = 0; vx < VERTS; vx++)
+			{
+				int v = vz * VERTS + vx;
+				float y = rec.m_aH[v];
+				if (on)
+				{
+					bool lifts = true;
+					if (vx == 0 || vz == 0 || vx == VERTS - 1 || vz == VERTS - 1)
+					{
+						lifts = LiftsVertex(ox + vx, oz + vz);
+					}
+					else if (!m_NoLift.IsEmpty() && m_NoLift.Contains((oz + vz) * (m_iNCX + 1) + ox + vx))
+					{
+						lifts = false;     // inside a building (MarkBuildings)
+					}
+					else
+					{
+						for (int cz = vz - 1; cz <= vz; cz++)
+						{
+							for (int cx = vx - 1; cx <= vx; cx++)
+							{
+								int cell = rec.m_aCell[cz * CELLS + cx];
+								if (cell < 0 || (cell & CELL_VOX) != 0)
+									lifts = false;
+							}
+						}
+					}
+					if (lifts)
+						y += MUD_LookLift.VertexLift(ox + vx, oz + vz);     // base (numpad 0) + GROW, as the patches
+				}
+				m_Buf.m_aVerts[v] = Vector(vx * m_fCell, y, vz * m_fCell);
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LOOK LIFT (MUD_LookLift numpad .): rebuild every built chunk within r m of world c (the lift went on /
+	//! off there). Mesh and collider - one hitch on a key press. Returns chunks rebuilt.
+	static int RedrawNear(vector c, float r)
+	{
+		if (!s_Inst || !s_Inst.m_bRender)
+			return 0;
+		float half = s_Inst.m_fChunk * 0.5;
+		int n;
+		foreach (MUD_SkinChunk rec : s_Inst.m_aRec)
+		{
+			if (!rec || !rec.m_Ent)
+				continue;
+			vector o = rec.m_vOrigin;
+			if (Math.AbsFloat(o[0] + half - c[0]) > r + half || Math.AbsFloat(o[2] + half - c[2]) > r + half)
+				continue;
+			s_Inst.BuildGeometry(rec);
+			n++;
+		}
+		return n;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LOOK LIFT GROW (MUD_LookLift.GrowBox): skin vertex (sx, sz) got a new lift - re-build the chunks of its 4 cells,
+	//! but only if one of them is a hole cell the skin still draws (not covered by a fine patch: the patch draws it).
+	//! Returns 1 if anything was re-built.
+	static int GrowRedraw(int sx, int sz)
+	{
+		if (!s_Inst || !s_Inst.m_bRender)
+			return 0;
+		bool draws;
+		array<MUD_SkinChunk> touched = {};
+		for (int cz = sz - 1; cz <= sz; cz++)
+		{
+			for (int cx = sx - 1; cx <= sx; cx++)
+			{
+				if (cx < 0 || cz < 0 || cx >= s_Inst.m_iNCX || cz >= s_Inst.m_iNCZ)
+					continue;
+				int c;
+				MUD_SkinChunk rec = s_Inst.RecOf(cx, cz, c);
+				if (!rec || !rec.m_Ent)
+					continue;
+				if (!touched.Contains(rec))
+					touched.Insert(rec);
+				if (rec.m_aCell[c] >= 0 && (rec.m_aCell[c] & CELL_COVER) == 0)
+					draws = true;
+			}
+		}
+		if (!draws)
+			return 0;
+		foreach (MUD_SkinChunk t : touched)
+			s_Inst.BuildGeometry(t);
+		return 1;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LOOK LIFT: global skin vertex (sx, sz) is drawn MUD_LookLift.LiftM() higher - all 4 cells round it are hole cells
+	//! and not voxel cells (the map edge never lifts). Patches use it too (MUD_WorldGround.LookLiftSetup), so skin and
+	//! patch lift every shared point the same. A cell whose chunk has no record asks the world as SampleChunk does
+	//! (a chunk not built yet at load, or one with no holes: then the answer is 'kept' anyway).
+	bool LiftsVertex(int sx, int sz)
+	{
+		if (!m_NoLift.IsEmpty() && m_NoLift.Contains(sz * (m_iNCX + 1) + sx))
+			return false;     // inside a building (MarkBuildings)
+		BaseWorld world = GetWorld();
+		for (int cz = sz - 1; cz <= sz; cz++)
+		{
+			for (int cx = sx - 1; cx <= sx; cx++)
+			{
+				if (cx < 0 || cz < 0 || cx >= m_iNCX || cz >= m_iNCZ)
+					return false;
+				int c;
+				MUD_SkinChunk rec = RecOf(cx, cz, c);
+				if (rec)
+				{
+					if (rec.m_aCell[c] < 0 || (rec.m_aCell[c] & CELL_VOX) != 0)
+						return false;
+					continue;
+				}
+				if (world.GetSurfaceY(m_fX0 + (cx + 0.5) * m_fCell, m_fZ0 + (cz + 0.5) * m_fCell) >= -255)
+					return false;
+			}
+		}
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	protected void BuildGeometry(MUD_SkinChunk rec)
 	{
 		if (!rec.m_Ent)
@@ -704,14 +859,18 @@ class MUD_CoarseSkinEntity : GenericEntity
 			int t1 = System.GetTickCount();
 			int numVerts[] = {1089};
 			int numIndices[] = {6144};
-			string materials[] = {m_Material};
+			string materials[] = {MUD_LookLift.SurfaceMat(m_Material, rec.m_vOrigin[2])};     // SNOW zone: white
 			Resource res = MeshObject.Create(1, numVerts, numIndices, materials, 0);
 			if (res && res.GetResource())
 			{
 				MeshObject mesh = res.GetResource().ToMeshObject();
 				// indices first: UpdateVerts rebuilds normals + tangents from the triangle list
 				mesh.UpdateIndices(0, m_Buf.m_aIndices);
+				if (MUD_LookLift.ENABLED)
+					LookLift(rec, true);     // look lift: mesh only, put back before the collider
 				mesh.UpdateVerts(0, m_Buf.m_aVerts, m_Buf.m_aUVs);
+				if (MUD_LookLift.ENABLED)
+					LookLift(rec, false);
 				rec.m_Ent.SetObject(mesh, "");
 				rec.m_MeshRes = res;
 			}
@@ -819,6 +978,96 @@ class MUD_CoarseSkinEntity : GenericEntity
 		z0 = m_fZ0;
 		ncx = m_iNCX;
 		ncz = m_iNCZ;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! LOOK LIFT buildings (2026-10-23, user: lifted ground showed through the floors inside buildings): every skin vertex
+	//! inside a building's box grown by BUILDING_GROW never lifts. Patches read the same vertices (LiftsVertex in
+	//! MUD_WorldGround.LookLiftSetup), so skin and patch ramp down to 0 together over one 2 m cell - no crack. The
+	//! keep scan keeps real terrain only under a building's origin, so most of a building stands on hole cells.
+	//! Render machines only (the DS draws no lift). Chunks that hold a marked vertex are built again (mesh + collider,
+	//! once at load). Returns vertices marked.
+	int MarkBuildings(array<IEntity> blds)
+	{
+		if (!m_bRender || !blds)
+			return 0;
+		int t0 = System.GetTickCount();
+		int marked;
+		set<int> touched = new set<int>();     // chunk index (iz * m_iChunksX + ix)
+		foreach (IEntity e : blds)
+		{
+			if (!e)
+				continue;
+			vector bmin;
+			vector bmax;
+			e.GetBounds(bmin, bmax);
+			bmin[0] = bmin[0] - BUILDING_GROW;
+			bmin[2] = bmin[2] - BUILDING_GROW;
+			bmax[0] = bmax[0] + BUILDING_GROW;
+			bmax[2] = bmax[2] + BUILDING_GROW;
+			// world XZ box of the turned box (its 4 corners), then each skin vertex in it tested in the building's frame
+			float wx0 = 1e9;
+			float wx1 = -1e9;
+			float wz0 = 1e9;
+			float wz1 = -1e9;
+			for (int k = 0; k < 4; k++)
+			{
+				float lx = bmin[0];
+				if (k == 1 || k == 2)
+					lx = bmax[0];
+				float lz = bmin[2];
+				if (k >= 2)
+					lz = bmax[2];
+				vector w = e.CoordToParent(Vector(lx, 0, lz));
+				wx0 = Math.Min(wx0, w[0]);
+				wx1 = Math.Max(wx1, w[0]);
+				wz0 = Math.Min(wz0, w[2]);
+				wz1 = Math.Max(wz1, w[2]);
+			}
+			int sx0 = Math.Max(0, Math.Ceil((wx0 - m_fX0) / m_fCell));
+			int sx1 = Math.Min(m_iNCX, Math.Floor((wx1 - m_fX0) / m_fCell));
+			int sz0 = Math.Max(0, Math.Ceil((wz0 - m_fZ0) / m_fCell));
+			int sz1 = Math.Min(m_iNCZ, Math.Floor((wz1 - m_fZ0) / m_fCell));
+			vector eo = e.GetOrigin();
+			float y = eo[1];
+			for (int sz = sz0; sz <= sz1; sz++)
+			{
+				for (int sx = sx0; sx <= sx1; sx++)
+				{
+					vector lp = e.CoordToLocal(Vector(m_fX0 + sx * m_fCell, y, m_fZ0 + sz * m_fCell));
+					if (lp[0] < bmin[0] || lp[0] > bmax[0] || lp[2] < bmin[2] || lp[2] > bmax[2])
+						continue;
+					int key = sz * (m_iNCX + 1) + sx;
+					if (m_NoLift.Contains(key))
+						continue;
+					m_NoLift.Insert(key);
+					marked++;
+					// the chunks drawing this vertex: those of the 4 cells round it
+					for (int cz = sz - 1; cz <= sz; cz++)
+					{
+						for (int cx = sx - 1; cx <= sx; cx++)
+						{
+							if (cx < 0 || cz < 0 || cx >= m_iNCX || cz >= m_iNCZ)
+								continue;
+							touched.Insert((cz / CELLS) * m_iChunksX + cx / CELLS);
+						}
+					}
+				}
+			}
+		}
+		int t1 = System.GetTickCount();
+		int rebuilt;
+		foreach (int ci : touched)
+		{
+			MUD_SkinChunk tr = m_aRec[ci];
+			if (!tr || !tr.m_Ent)
+				continue;     // no holes there, or not built (it reads m_NoLift when it builds)
+			BuildGeometry(tr);
+			rebuilt++;
+		}
+		Print(string.Format("MUD look lift: buildings %1 -> skin vertices kept unlifted %2, chunks re-built %3 (mark %4 ms, build %5 ms)",
+			blds.Count(), marked, rebuilt, t1 - t0, System.GetTickCount(t1)), LogLevel.NORMAL);
+		return marked;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -933,7 +1182,32 @@ class MUD_CoarseSkinEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! TEMP probe 2026-10-13 (MUD_VoxelProbe ground test): cover / uncover each listed hole cell (cxs[n], czs[n]) as
+	//! CRATER HOLD (MUD_WorldGround.HoldRelease): cover each listed hole cell (cxs[n], czs[n]); every touched chunk is
+	//! rebuilt once, now (SetCovered per patch rebuilds a chunk per patch). Int lists only (array<bool> untested,
+	//! mud-gotchas). Returns the number of cells that changed.
+	int CoverCells(array<int> cxs, array<int> czs)
+	{
+		array<MUD_SkinChunk> touched = {};
+		int changed;
+		for (int n = 0; n < cxs.Count(); n++)
+		{
+			int c;
+			MUD_SkinChunk rec = RecOf(cxs[n], czs[n], c);
+			if (!rec || rec.m_aCell[c] < 0 || (rec.m_aCell[c] & CELL_COVER) != 0)
+				continue;
+			rec.m_aCell[c] = rec.m_aCell[c] | CELL_COVER;
+			rec.m_iCovered++;
+			changed++;
+			if (!touched.Contains(rec))
+				touched.Insert(rec);
+		}
+		foreach (MUD_SkinChunk t : touched)
+			BuildGeometry(t);
+		return changed;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! probe 2026-10-13 (MUD_VoxelProbe ground test): cover / uncover each listed hole cell (cxs[n], czs[n]) as
 	//! covered[n]; every touched chunk is rebuilt once, now. Returns the number of cells that changed.
 	int SetCoveredCells(array<int> cxs, array<int> czs, array<bool> covered)
 	{
@@ -969,7 +1243,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! TEMP probe 2026-10-13 (MUD_VoxelProbe overlay): a live voxel tile carries hole cell (cx, cz)
+	//! probe 2026-10-13 (MUD_VoxelProbe overlay): a live voxel tile carries hole cell (cx, cz)
 	bool IsVoxCell(int cx, int cz)
 	{
 		int c;
@@ -978,7 +1252,7 @@ class MUD_CoarseSkinEntity : GenericEntity
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! TEMP probe 2026-10-13 (MUD_VoxelProbe overlay): set / clear CELL_VOX of each listed hole cell (cxs[n], czs[n]) as
+	//! probe 2026-10-13 (MUD_VoxelProbe overlay): set / clear CELL_VOX of each listed hole cell (cxs[n], czs[n]) as
 	//! vox[n]; every touched chunk is rebuilt once, now. Returns the number of cells that changed.
 	int SetVoxCells(array<int> cxs, array<int> czs, array<bool> vox)
 	{
@@ -1000,6 +1274,20 @@ class MUD_CoarseSkinEntity : GenericEntity
 			changed++;
 			if (!touched.Contains(rec))
 				touched.Insert(rec);
+			if (!MUD_LookLift.ENABLED || !m_bRender)
+				continue;
+			// LOOK LIFT (seam fix 2026-10-23): a voxel cell drops the lift of its 4 corners - a corner on a chunk
+			// border is also drawn by the neighbour chunk, rebuild that one too
+			for (int nz = -1; nz <= 1; nz++)
+			{
+				for (int nx = -1; nx <= 1; nx++)
+				{
+					int nc;
+					MUD_SkinChunk nrec = RecOf(cxs[n] + nx, czs[n] + nz, nc);
+					if (nrec && !touched.Contains(nrec))
+						touched.Insert(nrec);
+				}
+			}
 		}
 		foreach (MUD_SkinChunk t : touched)
 			BuildGeometry(t);

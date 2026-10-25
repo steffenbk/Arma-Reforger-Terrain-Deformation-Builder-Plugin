@@ -14,6 +14,7 @@ class MUD_Dig
 	static const ResourceName HELPER = "{01EE55B2D1E71522}Prefabs/Mud/MudDigHelper.et";
 	static const float REACH = 1.0;         // dig this far in front of the soldier's feet (m)
 	static const float MIN_GAP_MS = 1000;   // server: at most one swing per player this often
+	static const float SHOVEL_TUNNEL_MS = 1000; // server: at most one TUNNEL swing per player this often (U1 stage 2; tune in 1-WB)
 	// free dig square: one trench section, 1 x 1 m (user 2026-10-10 00:30; the sloped walls reach past
 	// it), middle FREE_REACH in front, snapped to the 0.25 m grid, turned in 45 deg steps, so squares
 	// dug next to each other line up (user 00:21)
@@ -24,12 +25,16 @@ class MUD_Dig
 
 	// shovel modes, R cycles them (user 2026-10-10 00:30, like the sandbag mode): OFF = no ghost, no
 	// free dig; DIG = green square, 'Dig' sinks it a layer; FILL = square, 'Fill' raises it a layer
-	// (user 00:45, was all at once); PLAN = trench plan mode (MUD_TrenchPlanner)
+	// (user 00:45, was all at once); TUNNEL = each swing digs one tunnel capsule where the player looks (U1 stage 2,
+	// user 2026-10-16: tunnels need a shovel; MUD_VoxelProbe.TunnelAim); PLAN = trench plan mode (MUD_TrenchPlanner);
+	// STAKE = trench builder build areas (MUD_BuildStake, F4 2026-10-24: stake 4 corners, F opens the manager)
 	static const int MODE_OFF = 0;
 	static const int MODE_DIG = 1;
 	static const int MODE_FILL = 2;
-	static const int MODE_PLAN = 3;
-	static const int MODE_COUNT = 4;
+	static const int MODE_TUNNEL = 3;
+	static const int MODE_PLAN = 4;
+	static const int MODE_STAKE = 5;
+	static const int MODE_COUNT = 6;
 	protected static int s_iMode;
 
 	protected static IEntity s_Helper;
@@ -43,7 +48,7 @@ class MUD_Dig
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Local: R with the shovel in hand: off -> Dig -> Fill -> Plan -> off
+	//! Local: R with the shovel in hand: off -> Dig -> Fill -> Tunnel -> Plan -> Stake -> off
 	static void NextMode()
 	{
 		SetMode((s_iMode + 1) % MODE_COUNT);
@@ -61,6 +66,18 @@ class MUD_Dig
 		// leaving Plan: the planner stops (it calls SetMode(OFF) itself when F / no shovel ends it)
 		if (was == MODE_PLAN && pc)
 			pc.MUD_StopTrenchPlanning();
+		// leaving Stake: the stake mode stops (it calls SetMode(OFF) itself when the shovel goes / the manager opens)
+		if (was == MODE_STAKE && pc)
+			pc.MUD_StopStake();
+		if (mode == MODE_STAKE)
+		{
+			RemoveHelper();
+			if (pc)
+				pc.MUD_StartStake();
+			if (!pc || !pc.MUD_IsStaking())
+				s_iMode = MODE_OFF;
+			return;
+		}
 		if (mode == MODE_PLAN)
 		{
 			RemoveHelper();
@@ -73,7 +90,9 @@ class MUD_Dig
 		if (mode == MODE_DIG)
 			SCR_HintManagerComponent.ShowCustomHint("Shovel: DIG\nThe green square sinks 0.25 m per swing (max 2.5 m).\nR: fill mode", "Free dig", 4, true);
 		else if (mode == MODE_FILL)
-			SCR_HintManagerComponent.ShowCustomHint("Shovel: FILL\nThe square rises 0.25 m per swing.\nR: plan a trench", "Free dig", 4, true);
+			SCR_HintManagerComponent.ShowCustomHint("Shovel: FILL\nThe square rises 0.25 m per swing.\nR: tunnel mode", "Free dig", 4, true);
+		else if (mode == MODE_TUNNEL)
+			SCR_HintManagerComponent.ShowCustomHint("Shovel: TUNNEL\nEach swing digs ahead where you look (look down / up for a ramp).\nSlope " + MUD_VoxelProbe.TunnelSteepText() + "\nX: change slope. R: plan a trench", "Free dig", 5, true);
 		else
 			SCR_HintManagerComponent.ShowCustomHint("Shovel: off\nR: dig mode", "Free dig", 2, true);
 	}
@@ -117,7 +136,7 @@ class MUD_Dig
 		vector dp = DigPoint(c);
 		MUD_TrenchSiteComponent site;
 		int piece;
-		if (s_iMode == MODE_OFF || s_iMode == MODE_PLAN || !MUD_WorldGroundEntity.IsOver(dp) || MUD_TrenchSiteComponent.FindPiece(dp, site, piece))
+		if (s_iMode == MODE_OFF || s_iMode == MODE_PLAN || s_iMode == MODE_STAKE || s_iMode == MODE_TUNNEL || !MUD_WorldGroundEntity.IsOver(dp) || MUD_TrenchSiteComponent.FindPiece(dp, site, piece) || OverBuildPiece(c, dp))
 		{
 			HideFreeGhost();
 			return;
@@ -141,6 +160,17 @@ class MUD_Dig
 		array<int> states = {state};
 		s_FreeGhost.Draw(lay, states);
 		s_sFreeShown = packed;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Trench builder F4: an unfinished builder piece is in front of c (a trench piece at dp, or a capsule it can dig)
+	static bool OverBuildPiece(notnull IEntity c, vector dp)
+	{
+		MUD_BuildPartComponent part;
+		int piece;
+		if (MUD_BuildPartComponent.FindTrenchPiece(dp, part, piece))
+			return true;
+		return MUD_BuildPartComponent.FindCapsule(c.GetOrigin(), dp, part, piece);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -190,20 +220,21 @@ class MUD_Dig
 			return;
 		}
 
-		// plan mode: no helper (F confirms the plan there)
-		if (s_iMode == MODE_PLAN)
+		// plan / stake mode / builder manager open: no helper (F confirms the plan / stakes the area / saves there)
+		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
+		if (s_iMode == MODE_PLAN || s_iMode == MODE_STAKE || (pc && pc.MUD_IsManaging()))
 		{
 			RemoveHelper();
 			return;
 		}
 
 		vector wp = DigPoint(c);
-		bool wanted = MUD_GroundEntity.IsOnAnyGround(wp);
+		bool wanted = false;
 		if (!wanted && MUD_WorldGroundEntity.IsOver(wp))
 		{
 			MUD_TrenchSiteComponent site;
 			int piece;
-			if (MUD_TrenchSiteComponent.FindPiece(wp, site, piece))
+			if (MUD_TrenchSiteComponent.FindPiece(wp, site, piece) || (s_iMode != MODE_TUNNEL && OverBuildPiece(c, wp)))
 				wanted = s_iMode != MODE_FILL;
 			else
 				wanted = s_iMode != MODE_OFF;
@@ -268,14 +299,36 @@ class MUD_DigAction : SCR_ScriptedUserAction
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Over an unfinished trench piece: 'Dig trench (layers dug / layers)'; fill mode: 'Fill'
+	//! Tunnel mode: 'Dig tunnel' (anywhere); over an unfinished trench piece: 'Dig trench (layers dug / layers)';
+	//! fill mode: 'Fill'
 	override bool GetActionNameScript(out string outName)
 	{
+		if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+		{
+			outName = "Dig tunnel";
+			return true;
+		}
 		MUD_TrenchSiteComponent site;
 		int piece;
 		if (MUD_TrenchSiteComponent.FindPiece(GetOwner().GetOrigin(), site, piece))
 		{
 			outName = string.Format("Dig trench (%1 / %2)", site.Digit(piece), site.Layers());
+			return true;
+		}
+		// trench builder F4: a planned trench / step piece, or the next capsule of a tunnel / roof / dugout
+		MUD_BuildPartComponent part;
+		if (MUD_Dig.Mode() != MUD_Dig.MODE_FILL && MUD_BuildPartComponent.FindTrenchPiece(GetOwner().GetOrigin(), part, piece))
+		{
+			outName = string.Format("Dig %1 (%2 / %3)", MUD_Build.KindName(part.Kind()), part.Digit(piece), part.Layers());
+			return true;
+		}
+		IEntity me = SCR_PlayerController.GetLocalControlledEntity();
+		if (me && MUD_Dig.Mode() != MUD_Dig.MODE_FILL && MUD_BuildPartComponent.FindCapsule(me.GetOrigin(), GetOwner().GetOrigin(), part, piece))
+		{
+			int mine;
+			int done;
+			part.Counts(mine, done);
+			outName = string.Format("Dig %1 (%2 / %3)", MUD_Build.KindName(part.Kind()), done, mine);
 			return true;
 		}
 		if (MUD_Dig.Mode() == MUD_Dig.MODE_FILL)
@@ -323,6 +376,14 @@ class MUD_DigAction : SCR_ScriptedUserAction
 			return;
 
 		SCR_PlayerController pc = SCR_PlayerController.Cast(GetGame().GetPlayerController());
+		// tunnel mode (U1 stage 2): one capsule where the player looks, the server checks the tool and the aim
+		if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+		{
+			vector mid;
+			if (pc && MUD_VoxelProbe.TunnelAimLocal(pUserEntity, mid))
+				pc.MUD_RequestShovelTunnel(mid);
+			return;
+		}
 		if (pc)
 			pc.MUD_RequestDig(MUD_Dig.FreePlan(pUserEntity), MUD_Dig.Mode() == MUD_Dig.MODE_FILL);
 		// the ground under the ghost just changed: lay it on the new floor
@@ -380,6 +441,8 @@ modded class SCR_CampaignBuildingGadgetToolComponent
 		if (MUD_Dig.HoldsShovel(m_CharacterOwner, true))
 		{
 			MUD_Dig.UpdateHelper(m_CharacterOwner);
+			if (MUD_Dig.Mode() == MUD_Dig.MODE_TUNNEL)
+				MUD_VoxelProbe.TunnelSteepInput();
 		}
 		else
 		{
@@ -402,7 +465,7 @@ modded class SCR_CampaignBuildingGadgetToolComponent
 
 	//------------------------------------------------------------------------------------------------
 	//! R (vanilla "GadgetActivate", as CSK_BuildingGadgetTool.c): cycles the shovel modes off -> Dig ->
-	//! Fill -> Plan -> off (user 2026-10-10 00:30). Vanilla deployable placement keeps the key while it is on,
+	//! Fill -> Tunnel (U1 2026-10-17) -> Plan -> off (user 2026-10-10 00:30). Vanilla deployable placement keeps the key while it is on,
 	//! or when the player carries something it can place. (CSK mods the same method for its wall plan
 	//! mode: with both mods loaded the one loaded last wins.)
 	override protected void ActivateAction()
@@ -449,6 +512,7 @@ modded class SCR_PlayerController
 		if (!MUD_Dig.HoldsShovel(c, false))
 		{
 			Print("MUD dig: refused, server sees no entrenching tool in hand", LogLevel.WARNING);
+			MUD_Tell("Dig: hold an entrenching tool");
 			return;
 		}
 
@@ -462,11 +526,48 @@ modded class SCR_PlayerController
 		{
 			// the site counts its layers: filling under it would leave it out of step
 			if (fill)
+			{
 				Print(string.Format("MUD fill: refused at %1, unfinished trench piece there", dp));
+				MUD_Tell("Fill: not on an unfinished trench - finish or leave it");
+			}
 			else if (!MUD_WorldGroundEntity.AtGround(dp))
+			{
 				Print(string.Format("MUD trench dig: refused at %1, soldier not on the ground there", dp));
+				MUD_Tell("Dig: stand on the ground to dig");
+			}
 			else if (!site.DigPiece(piece))
 				Print(string.Format("MUD trench dig: swing not counted at %1 (patch building)", dp));
+			return;
+		}
+
+		// trench builder F4: a planned trench / step piece there, or the next capsule of a tunnel / roof / dugout
+		MUD_BuildPartComponent part;
+		if (MUD_BuildPartComponent.FindTrenchPiece(dp, part, piece))
+		{
+			if (fill)
+			{
+				Print(string.Format("MUD fill: refused at %1, unfinished builder piece there", dp));
+				MUD_Tell("Fill: not on an unfinished planned trench - finish it or delete it in the manager");
+			}
+			else if (!MUD_WorldGroundEntity.AtGround(dp))
+			{
+				Print(string.Format("MUD build dig: refused at %1, soldier not on the ground there", dp));
+				MUD_Tell("Dig: stand on the ground to dig");
+			}
+			else if (!part.DigPiece(piece))
+				Print(string.Format("MUD build dig: swing not counted at %1 (patch building)", dp));
+			return;
+		}
+		vector feet = c.GetOrigin();
+		if (!fill && MUD_BuildPartComponent.FindCapsule(feet, dp, part, piece))
+		{
+			if (!MUD_WorldGroundEntity.AtGround(feet))
+			{
+				Print(string.Format("MUD build dig: capsule refused, player at %1 not on the ground", feet));
+				MUD_Tell("Dig: stand on the ground to dig");
+			}
+			else if (!part.DigPiece(piece))
+				Print(string.Format("MUD build dig: capsule swing not counted at %1", dp));
 			return;
 		}
 
@@ -477,11 +578,17 @@ modded class SCR_PlayerController
 			return;
 		}
 
-		// old per-area mud ground (MUD_GroundEntity) keeps its round hole, no fill there
+		// (the old per-area MUD_GroundEntity round hole is archived, audit C6 2026-10-22)
 		if (fill)
+		{
 			Print(string.Format("MUD fill: nothing to fill at %1 (not on the world ground)", dp));
-		else if (!MUD_GroundEntity.DigAt(dp))
-			Print(string.Format("MUD dig: nothing dug at %1 (not mud, hard ground, locked or patch not ready)", dp));
+			MUD_Tell("Fill: nothing to fill here");
+		}
+		else
+		{
+			Print(string.Format("MUD dig: nothing dug at %1 (not on the world ground)", dp));
+			MUD_Tell("Dig: this ground can not be dug");
+		}
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -503,12 +610,14 @@ modded class SCR_PlayerController
 		if (vector.DistanceSqXZ(mid, feet) > MUD_Dig.FREE_RANGE * MUD_Dig.FREE_RANGE)
 		{
 			Print(string.Format("MUD free dig: refused, square at %1 too far from the player %2", mid, feet), LogLevel.WARNING);
+			MUD_Tell("Dig: too far away");
 			return;
 		}
 		mid[1] = feet[1];
 		if (!MUD_WorldGroundEntity.AtGround(mid))
 		{
 			Print(string.Format("MUD free dig: refused at %1, soldier not on the ground there", mid));
+			MUD_Tell("Dig: stand on the ground to dig");
 			return;
 		}
 
@@ -518,7 +627,10 @@ modded class SCR_PlayerController
 			if (f == -1)
 				Print(string.Format("MUD fill: swing not counted at %1 (patch building)", mid));
 			else if (f == -2)
+			{
 				Print(string.Format("MUD fill: nothing to fill at %1 (not dug)", mid));
+				MUD_Tell("Fill: nothing dug here");
+			}
 			return;
 		}
 
@@ -526,8 +638,14 @@ modded class SCR_PlayerController
 		if (r == -1)
 			Print(string.Format("MUD free dig: swing not counted at %1 (patch building)", mid));
 		else if (r == -2)
+		{
 			Print(string.Format("MUD free dig: nothing diggable at %1 (hard / locked ground)", mid));
+			MUD_Tell("Dig: hard ground (road, rock, building)");
+		}
 		else if (r == -3)
+		{
 			Print(string.Format("MUD free dig: at %1 already %2 m deep", mid, MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER));
+			MUD_Tell(string.Format("Dig: already %1 m deep (the most)", MUD_TrenchPlan.MAX_LAYERS * MUD_TrenchPlan.LAYER));
+		}
 	}
 }

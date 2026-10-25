@@ -1,0 +1,30 @@
+FrameWidgetClass {
+ Name "rootFrame"
+ Slot FrameWidgetSlot "{4D554442504C5401}" {
+  Anchor 0 0 1 1
+  OffsetLeft 0
+  OffsetTop 0
+  OffsetRight 0
+  OffsetBottom 0
+ }
+ {
+  CanvasWidgetClass "{4D554442504C5402}" {
+   Name "Canvas"
+   Slot FrameWidgetSlot "{4D554442504C5403}" {
+    Anchor 0 0 1 1
+    OffsetLeft 0
+    OffsetTop 0
+    OffsetRight 0
+    OffsetBottom 0
+   }
+   Color 1 1 1 1
+   Clear 1
+   ClearColor 0 0 0 0
+   FontProperties {
+    FontProperties "{4D554442504C5404}" {
+     Font "{3E7733BAC8C831F6}UI/Fonts/RobotoCondensed/RobotoCondensed_Regular.fnt"
+    }
+   }
+  }
+ }
+}

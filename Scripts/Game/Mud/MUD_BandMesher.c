@@ -78,6 +78,14 @@ class MUD_BandMesher
 	int m_iFastV;           // verts / y quads done on the FAST path (stats)
 	int m_iFastQ;
 	bool m_bOverflow;
+	// REBUILD 5 option 4 (2026-10-19, v240 = before): collider only - a 2 x 2 block of FAST y quads whose 9 cells are
+	// single-vertex on cells of one skin cell, whose 16 samples are untouched (m_aTouch 0) and whose 5 inner vertices lie
+	// within m_fMergeTol of the block's 2 big triangles is drawn as ONE quad (MergeMask / EmitMerged). Mesh builds: off.
+	bool m_bMerge;
+	float m_fMergeTol = 0.01;
+	int m_aTouch[1089];     // caller (collider): 1 = sample moved off the plain ground (rut, ridge, hold) - never merged
+	int m_iMerged;          // blocks merged in the last Build (6 tris less each)
+	protected int m_aMergeB[256];     // block (bz * 16 + bx): 1 = merged
 
 	// cell table, cells -1 .. 32, c = (z + 1) * CW + x + 1. Kind / faces / slots depend only on m_aSkin (Layout).
 	protected int m_aKind[1156];    // 0 off, 1 on, 2 ghost
@@ -93,6 +101,19 @@ class MUD_BandMesher
 	protected int m_aJ[1089];       // layer of each sample: ceil(Y / 0.5) - 1
 	protected int m_aLastSkin[16];  // m_aSkin the cell table was made for
 	protected bool m_bLayout;
+	// REBUILD 6 LAYOUT_SPLIT (2026-10-19, research/2026-10-19-rebuild-and-bugs-research.md 2.2): kinds / faces / corners
+	// depend only on which skin cells are on - a new m_aSkin with the same on-mask refreshes only m_aCSlot.
+	static bool s_bLayoutSplit = true;     // A/B switch (MUD_StutterRobot sets it per robot run on the client)
+	static const bool LAYOUT_CHECK = true;  // TEMP: every LAYOUT_CHECK_EVERY-th slot refresh also makes the full table, compares
+	static const int LAYOUT_CHECK_EVERY = 10;
+	protected int m_iLastOnMask = -1;
+	protected int m_aCSlotChk[1156];
+	int m_iLayoutFull;       // log (MUD_WorldGround 'MUD rebuild 6'): full tables made
+	int m_iLayoutSlots;      //   slot refreshes only
+	int m_iLayoutHits;       //   nothing changed
+	int m_iLayoutChecks;     //   LAYOUT_CHECK compares
+	int m_iLayoutBad;        //   cells whose slot differed from the full table (must be 0)
+	protected int m_iSlotRuns;
 
 	protected float m_fFine;
 	// Vertex accumulators (Vert / Hor)
@@ -106,6 +127,9 @@ class MUD_BandMesher
 
 	//------------------------------------------------------------------------------------------------
 	//! Mesh of m_aY / m_aD / m_aSkin. skirt <= 0: no skirts. False = overflow (buffers too small) or no triangle.
+	//! REBUILD 5 option 5 (2026-10-19, v240 = before): BuildRef's code with the output buffers and counters in locals on
+	//! the FAST paths, split in Verts / Quads (64 locals per method) - same floats in the same order (Bench compares).
+	//! Option 4: m_bMerge (collider) merges flat untouched blocks (MergeMask).
 	bool Build(float fine, float skirt)
 	{
 		m_fFine = fine;
@@ -119,6 +143,7 @@ class MUD_BandMesher
 		m_iRim = 0;
 		m_iFastV = 0;
 		m_iFastQ = 0;
+		m_iMerged = 0;
 		m_bOverflow = false;
 
 		// 1. cell kinds (only when the skin cells changed)
@@ -131,12 +156,35 @@ class MUD_BandMesher
 			m_aJ[s] = cj - 1;
 		}
 
-		// 3. vertices, column by column, band only
+		// 3. vertices, 4. quads
+		if (!Verts(fine))
+			return false;
+		if (!Quads())
+			return false;
+		m_iVAll = m_iV;
+		if (skirt > 0)
+			Skirts(skirt);
+		if (m_bOverflow)
+			return false;
+		return m_iI > 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build step 3: vertices, column by column, band only (BuildRef's loop; FAST path on locals)
+	protected bool Verts(float fine)
+	{
+		MUD_BandVerts vb = m_Vb;
+		MUD_BandVertInfo info = m_Info;
+		int iv = 0;
+		int cells = 0;
+		int fastV = 0;
 		for (int vz = -1; vz <= NC; vz++)
 		{
+			float fz = (vz + 0.5) * fine;
+			int rowC = (vz + 1) * CW + 1;
 			for (int vx = -1; vx <= NC; vx++)
 			{
-				int vc = (vz + 1) * CW + vx + 1;
+				int vc = rowC + vx;
 				int kind = m_aKind[vc];
 				if (kind == 0)
 					continue;
@@ -152,24 +200,25 @@ class MUD_BandMesher
 					if (ja == jb && ja == jc && ja == jd)
 					{
 						// FAST: 4 vertical crossings in layer ja, no horizontal one -> corner mean at the cell centre
-						m_iCells++;
-						if (m_iV >= MAX_V)
+						cells++;
+						if (iv >= MAX_V)
 						{
+							m_iV = iv;
+							m_iCells = cells;
 							m_bOverflow = true;
 							return false;
 						}
-						int fv = m_iV;
 						float py = (m_aY[s00] + m_aY[s00 + 1] + m_aY[s00 + NV] + m_aY[s00 + NV + 1]) * 0.25;
-						m_Vb.m_aV[fv] = Vector((vx + 0.5) * m_fFine, py, (vz + 0.5) * m_fFine);
-						m_Info.m_aVy[fv] = py;
-						m_Info.m_aD[fv] = (m_aD[s00] + m_aD[s00 + 1] + m_aD[s00 + NV] + m_aD[s00 + NV + 1]) * 0.25;
-						m_Info.m_aGhost[fv] = 0;
+						vb.m_aV[iv] = Vector((vx + 0.5) * fine, py, fz);
+						info.m_aVy[iv] = py;
+						info.m_aD[iv] = (m_aD[s00] + m_aD[s00 + 1] + m_aD[s00 + NV] + m_aD[s00 + NV + 1]) * 0.25;
+						info.m_aGhost[iv] = 0;
 						m_aJlo[vc] = ja;
 						m_aJn[vc] = 1;
-						m_aV0[vc] = fv;
-						m_aSingle[vc] = fv;
-						m_iV++;
-						m_iFastV++;
+						m_aV0[vc] = iv;
+						m_aSingle[vc] = iv;
+						iv++;
+						fastV++;
 						continue;
 					}
 					m_aSingle[vc] = -1;
@@ -198,7 +247,10 @@ class MUD_BandMesher
 				}
 				m_aJlo[vc] = j0;
 				m_aJn[vc] = 0;
-				m_aV0[vc] = m_iV;
+				m_aV0[vc] = iv;
+				// general path: Vertex / VertexOn use the members
+				m_iV = iv;
+				m_iCells = cells;
 				for (int j = j0; j <= j1; j++)
 				{
 					m_iCells++;
@@ -216,62 +268,101 @@ class MUD_BandMesher
 						break;
 					m_aJn[vc] = m_aJn[vc] + 1;
 				}
+				iv = m_iV;
+				cells = m_iCells;
 			}
 		}
+		m_iV = iv;
+		m_iCells = cells;
+		m_iFastV = fastV;
+		return true;
+	}
 
-		// 4. quads: y edges at every grid point, x / z edges on every plane they cross
+	//------------------------------------------------------------------------------------------------
+	//! Build step 4: y edges at every grid point, x / z edges on every plane they cross (BuildRef's loop; FAST quad on
+	//! locals; merged blocks when m_bMerge)
+	protected bool Quads()
+	{
 		vector airX = Vector(1, 0, 0);
 		vector airZ = Vector(0, 0, 1);
+		MUD_BandIdx ib = m_Ib;
+		MUD_BandTriSlot sl = m_Slot;
+		MUD_BandVertInfo info = m_Info;
+		int ii = m_iI;
+		int fastQ = 0;
+		if (m_bMerge)
+			MergeMask();
 		for (int gz = 0; gz < NV; gz++)
 		{
 			for (int gx = 0; gx < NV; gx++)
 			{
 				int g = gz * NV + gx;
 				int jy = m_aJ[g];
+				bool yDone = false;
+				if (m_bMerge && gx > 0 && gz > 0)
+				{
+					int mbx = (gx - 1) / 2;
+					int mbz = (gz - 1) / 2;
+					if (m_aMergeB[mbz * 16 + mbx] != 0)
+					{
+						yDone = true;     // inside a merged block: its anchor point draws the one quad
+						if (gx - 1 == mbx * 2 && gz - 1 == mbz * 2)
+						{
+							if (ii + 6 > MAX_I)
+							{
+								m_iI = ii;
+								m_bOverflow = true;
+								return false;
+							}
+							ii = EmitMerged(mbx, mbz, ii);
+						}
+					}
+				}
 				// cells round the y edge: (gx-1, gz-1), (gx, gz-1), (gx, gz), (gx-1, gz)
 				int ca = gz * CW + gx;
 				int qa = m_aSingle[ca];
 				int qb = m_aSingle[ca + 1];
 				int qc = m_aSingle[ca + CW + 1];
 				int qd = m_aSingle[ca + CW];
-				if (qa >= 0 && qb >= 0 && qc >= 0 && qd >= 0)
+				if (!yDone && qa >= 0 && qb >= 0 && qc >= 0 && qd >= 0)
 				{
-					// FAST: 4 single-vertex on cells (their layer is jy) = a square in x / z. The general Quad flips it
-					// to a d c b (normal -y otherwise) and splits on the shorter diagonal: x / z parts are equal.
-					if (m_iI + 6 > MAX_I)
+					// FAST: 4 single-vertex on cells (their layer is jy) = a square in x / z (see BuildRef)
+					if (ii + 6 > MAX_I)
 					{
+						m_iI = ii;
 						m_bOverflow = true;
 						return false;
 					}
-					float dac = m_Info.m_aVy[qa] - m_Info.m_aVy[qc];
-					float dbd = m_Info.m_aVy[qb] - m_Info.m_aVy[qd];
-					int ti = m_iI;
-					m_Ib.m_aI[ti] = qa;
-					m_Ib.m_aI[ti + 1] = qd;
+					float dac = info.m_aVy[qa] - info.m_aVy[qc];
+					float dbd = info.m_aVy[qb] - info.m_aVy[qd];
+					ib.m_aI[ii] = qa;
+					ib.m_aI[ii + 1] = qd;
 					if (dac * dac <= dbd * dbd)
 					{
-						m_Ib.m_aI[ti + 2] = qc;
-						m_Ib.m_aI[ti + 3] = qa;
-						m_Ib.m_aI[ti + 4] = qc;
-						m_Ib.m_aI[ti + 5] = qb;
+						ib.m_aI[ii + 2] = qc;
+						ib.m_aI[ii + 3] = qa;
+						ib.m_aI[ii + 4] = qc;
+						ib.m_aI[ii + 5] = qb;
 					}
 					else
 					{
-						m_Ib.m_aI[ti + 2] = qb;
-						m_Ib.m_aI[ti + 3] = qd;
-						m_Ib.m_aI[ti + 4] = qc;
-						m_Ib.m_aI[ti + 5] = qb;
+						ib.m_aI[ii + 2] = qb;
+						ib.m_aI[ii + 3] = qd;
+						ib.m_aI[ii + 4] = qc;
+						ib.m_aI[ii + 5] = qb;
 					}
 					int fs = m_aCSlot[ca];
-					int tt = ti / 3;
-					m_Slot.m_aS[tt] = fs;
-					m_Slot.m_aS[tt + 1] = fs;
-					m_iI += 6;
-					m_iFastQ++;
+					int tt = ii / 3;
+					sl.m_aS[tt] = fs;
+					sl.m_aS[tt + 1] = fs;
+					ii += 6;
+					fastQ++;
 				}
-				else
+				else if (!yDone)
 				{
+					m_iI = ii;
 					Quad(gx - 1, gz - 1, jy, gx, gz - 1, jy, gx, gz, jy, gx - 1, gz, jy, vector.Up);
+					ii = m_iI;
 				}
 				if (gx < NC)
 				{
@@ -288,8 +379,10 @@ class MUD_BandMesher
 							p0 = jr + 1;
 							p1 = jy + 1;
 						}
+						m_iI = ii;
 						for (int jp = p0; jp < p1; jp++)
 							Quad(gx, gz - 1, jp - 1, gx, gz, jp - 1, gx, gz, jp, gx, gz - 1, jp, ax);
+						ii = m_iI;
 					}
 				}
 				if (gz < NC)
@@ -307,44 +400,181 @@ class MUD_BandMesher
 							q0 = ju + 1;
 							q1 = jy + 1;
 						}
+						m_iI = ii;
 						for (int jq = q0; jq < q1; jq++)
 							Quad(gx - 1, gz, jq - 1, gx, gz, jq - 1, gx, gz, jq, gx - 1, gz, jq, az);
+						ii = m_iI;
 					}
 				}
 				if (m_bOverflow)
+				{
+					m_iI = ii;
 					return false;
+				}
 			}
 		}
-		m_iVAll = m_iV;
-		if (skirt > 0)
-			Skirts(skirt);
-		if (m_bOverflow)
-			return false;
-		return m_iI > 0;
+		m_iI = ii;
+		m_iFastQ = fastQ;
+		return true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Option 4: m_aMergeB from the cells made by Verts. Block (bx, bz) = cells 2bx .. 2bx + 2, 2bz .. 2bz + 2 (the 4 y
+	//! quads at grid points 2bx + 1 .. 2bx + 2). A block that would straddle a skin cell (bx or bz % 4 == 3) never merges
+	//! (slot + rut mud are per skin cell).
+	protected void MergeMask()
+	{
+		float tol = m_fMergeTol;
+		for (int bz = 0; bz < 16; bz++)
+		{
+			for (int bx = 0; bx < 16; bx++)
+			{
+				int b = bz * 16 + bx;
+				m_aMergeB[b] = 0;
+				if (bx - (bx / 4) * 4 == 3 || bz - (bz / 4) * 4 == 3)
+					continue;
+				int c0 = (2 * bz + 1) * CW + 2 * bx + 1;     // cell (2bx, 2bz)
+				int slot = m_aCSlot[c0];
+				if (slot < 0)
+					continue;
+				bool ok = true;
+				for (int k = 0; k < 9 && ok; k++)
+				{
+					int kz = k / 3;
+					int ck = c0 + kz * CW + k - kz * 3;
+					if (m_aSingle[ck] < 0 || m_aCSlot[ck] != slot)
+						ok = false;
+				}
+				for (int t = 0; t < 16 && ok; t++)
+				{
+					int tz = t / 4;
+					if (m_aTouch[(2 * bz + tz) * NV + 2 * bx + t - tz * 4] != 0)
+						ok = false;
+				}
+				if (!ok)
+					continue;
+				// vertex y by cell offset (x, z) in the block
+				float y00 = m_Info.m_aVy[m_aSingle[c0]];
+				float y10 = m_Info.m_aVy[m_aSingle[c0 + 1]];
+				float y20 = m_Info.m_aVy[m_aSingle[c0 + 2]];
+				float y01 = m_Info.m_aVy[m_aSingle[c0 + CW]];
+				float y11 = m_Info.m_aVy[m_aSingle[c0 + CW + 1]];
+				float y21 = m_Info.m_aVy[m_aSingle[c0 + CW + 2]];
+				float y02 = m_Info.m_aVy[m_aSingle[c0 + 2 * CW]];
+				float y12 = m_Info.m_aVy[m_aSingle[c0 + 2 * CW + 1]];
+				float y22 = m_Info.m_aVy[m_aSingle[c0 + 2 * CW + 2]];
+				// edge middles on the big edges, the centre on the diagonal EmitMerged splits on
+				if (Math.AbsFloat(y10 - (y00 + y20) * 0.5) > tol || Math.AbsFloat(y12 - (y02 + y22) * 0.5) > tol)
+					continue;
+				if (Math.AbsFloat(y01 - (y00 + y02) * 0.5) > tol || Math.AbsFloat(y21 - (y20 + y22) * 0.5) > tol)
+					continue;
+				float dac = y00 - y22;
+				float dbd = y20 - y02;
+				float yc = (y00 + y22) * 0.5;
+				if (dac * dac > dbd * dbd)
+					yc = (y20 + y02) * 0.5;
+				if (Math.AbsFloat(y11 - yc) > tol)
+					continue;
+				m_aMergeB[b] = 1;
+			}
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Option 4: the merged block's quad from its corner cells, wound and split as the FAST quad; returns the next index
+	protected int EmitMerged(int bx, int bz, int ii)
+	{
+		int c0 = (2 * bz + 1) * CW + 2 * bx + 1;
+		int a = m_aSingle[c0];
+		int b = m_aSingle[c0 + 2];
+		int c = m_aSingle[c0 + 2 * CW + 2];
+		int d = m_aSingle[c0 + 2 * CW];
+		float dac = m_Info.m_aVy[a] - m_Info.m_aVy[c];
+		float dbd = m_Info.m_aVy[b] - m_Info.m_aVy[d];
+		m_Ib.m_aI[ii] = a;
+		m_Ib.m_aI[ii + 1] = d;
+		if (dac * dac <= dbd * dbd)
+		{
+			m_Ib.m_aI[ii + 2] = c;
+			m_Ib.m_aI[ii + 3] = a;
+			m_Ib.m_aI[ii + 4] = c;
+			m_Ib.m_aI[ii + 5] = b;
+		}
+		else
+		{
+			m_Ib.m_aI[ii + 2] = b;
+			m_Ib.m_aI[ii + 3] = d;
+			m_Ib.m_aI[ii + 4] = c;
+			m_Ib.m_aI[ii + 5] = b;
+		}
+		int fs = m_aCSlot[c0];
+		int tt = ii / 3;
+		m_Slot.m_aS[tt] = fs;
+		m_Slot.m_aS[tt + 1] = fs;
+		m_iMerged++;
+		return ii + 6;
 	}
 
 	//------------------------------------------------------------------------------------------------
 	//! Cell kinds, ghost faces / corners and slots from m_aSkin; kept while m_aSkin does not change
 	protected void Layout()
 	{
-		if (m_bLayout)
+		int onMask = 0;
+		bool same = m_bLayout;
+		for (int k = 0; k < 16; k++)
 		{
-			bool same = true;
-			for (int k = 0; k < 16; k++)
-			{
-				if (m_aLastSkin[k] != m_aSkin[k])
-				{
-					same = false;
-					break;
-				}
-			}
-			if (same)
-				return;
+			if (m_aSkin[k] >= 0)
+				onMask = onMask | (1 << k);
+			if (m_aLastSkin[k] != m_aSkin[k])
+				same = false;
+		}
+		if (same)
+		{
+			m_iLayoutHits++;
+			return;
 		}
 		for (int k2 = 0; k2 < 16; k2++)
 			m_aLastSkin[k2] = m_aSkin[k2];
-		m_bLayout = true;
+		if (s_bLayoutSplit && m_bLayout && onMask == m_iLastOnMask)
+		{
+			// LAYOUT_SPLIT: same on cells - kinds / faces / corners stay, only the on cells' slots change (off cells keep -1)
+			for (int sz = 0; sz < NC; sz++)
+			{
+				int sRow = (sz / SKIN_FINE) * 4;
+				int cRow = (sz + 1) * CW + 1;
+				for (int sx = 0; sx < NC; sx++)
+				{
+					if (m_aKind[cRow + sx] == 1)
+						m_aCSlot[cRow + sx] = m_aSkin[sRow + sx / SKIN_FINE];
+				}
+			}
+			m_iLayoutSlots++;
+			m_iSlotRuns++;
+			if (!LAYOUT_CHECK || m_iSlotRuns < LAYOUT_CHECK_EVERY)
+				return;
+			// TEMP LAYOUT_CHECK: the full table must give the same slots
+			m_iSlotRuns = 0;
+			m_iLayoutChecks++;
+			for (int q = 0; q < CW * CW; q++)
+				m_aCSlotChk[q] = m_aCSlot[q];
+			LayoutFull();
+			for (int q2 = 0; q2 < CW * CW; q2++)
+			{
+				if (m_aCSlotChk[q2] != m_aCSlot[q2])
+					m_iLayoutBad++;
+			}
+			return;
+		}
+		m_iLastOnMask = onMask;
+		m_iLayoutFull++;
+		LayoutFull();
+	}
 
+	//------------------------------------------------------------------------------------------------
+	//! The whole cell table from m_aSkin (Layout's cache miss)
+	protected void LayoutFull()
+	{
+		m_bLayout = true;
 		for (int z = -1; z <= NC; z++)
 		{
 			for (int x = -1; x <= NC; x++)

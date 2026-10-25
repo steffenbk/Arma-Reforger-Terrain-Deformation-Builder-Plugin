@@ -4,9 +4,10 @@
 //! Curve math copied from CSK_SandbagWallLayout (FrameAt, OnPiece, CurvatureOf, ArcLength).
 
 //------------------------------------------------------------------------------------------------
-//! What the player planned. Travels as int-centimetre text "w,l;x,z,b;x,z,b;..." (Pack / Unpack):
-//! w = width index (WidthOf), l = layers of LAYER m, then per point x, z and the bend (sagitta) of
-//! the segment that starts there (the last point's bend is always 0).
+//! What the player planned. Travels as int-centimetre text "w,l[,a];x,z,b;x,z,b;..." (Pack / Unpack):
+//! w = width index (WidthOf), l = layers of LAYER m, a = wall index (WallDegOf, only written when not
+//! DEFAULT_WALL), then per point x, z and the bend (sagitta) of the segment that starts there (the last
+//! point's bend is always 0).
 class MUD_TrenchPlan
 {
 	static const int MAX_POINTS = 10;
@@ -19,9 +20,14 @@ class MUD_TrenchPlan
 	static const int MAX_LAYERS = 10;         // 2.5 m (user 2026-10-13; was 6 = 1.5 m). Shovel free dig goes as deep.
 	static const int DEFAULT_LAYERS = 6;      // a new plan starts at 1.5 m; the mouse wheel goes to MAX_LAYERS
 	static const int WIDTHS = 4;
-	static const float SLOPE_RUN = 0.58;      // m the wall leans out per m of depth (~60 deg; user 2026-10-10 00:21)
+	// Wall angle per trench (user 2026-10-23: "the trench degree option should be in the trench tool"): C in the
+	// planner cycles WallDegOf 45 / 60 / 75 / 90. It travels in the plan text, so every machine carves the same wall.
+	static const int WALLS = 4;
+	static const int DEFAULT_WALL = 1;        // 60 deg = run 0.58 (user 2026-10-10 00:21), also every shovel hole
+	static const float MIN_RUN = 0.02;        // 90 deg: as steep as the 0.25 m ground grid draws (one step); the carve divides by the run
 
 	int m_iWidth = 1;                         // WidthOf: 0.5 / 1.0 / 1.5 / 2.0 m (floor width)
+	int m_iWall = DEFAULT_WALL;               // WallDegOf
 	int m_iLayers = DEFAULT_LAYERS;
 	ref array<vector> m_aPoints = {};
 	ref array<float> m_aBends = {};           // one per point; the last one is unused (0)
@@ -47,6 +53,38 @@ class MUD_TrenchPlan
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! Wall angle in degrees from flat: 45 = 1:1 slope, 90 = straight down
+	static int WallDegOf(int index)
+	{
+		if (index == 0)
+			return 45;
+		if (index == 2)
+			return 75;
+		if (index == 3)
+			return 90;
+		return 60;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! m the wall leans out per m of depth
+	static float WallRunOf(int index)
+	{
+		if (index == 0)
+			return 1.0;
+		if (index == 2)
+			return 1.0 / Math.Tan(75 * Math.DEG2RAD);     // 0.268
+		if (index == 3)
+			return MIN_RUN;
+		return 0.58;     // the old SLOPE_RUN exactly: 60 deg trenches dig as before
+	}
+
+	//------------------------------------------------------------------------------------------------
+	float WallRun()
+	{
+		return WallRunOf(m_iWall);
+	}
+
+	//------------------------------------------------------------------------------------------------
 	void AddPoint(vector p, float bend = 0)
 	{
 		m_aPoints.Insert(p);
@@ -57,6 +95,8 @@ class MUD_TrenchPlan
 	string Pack()
 	{
 		string s = string.Format("%1,%2", m_iWidth, m_iLayers);
+		if (m_iWall != DEFAULT_WALL)
+			s += string.Format(",%1", m_iWall);     // only when not 60 deg: older plan text stays the same
 		int n = m_aPoints.Count();
 		for (int i = 0; i < n; i++)
 		{
@@ -81,13 +121,21 @@ class MUD_TrenchPlan
 			return null;
 
 		array<int> head = {};
-		if (!Ints(parts[0], head) || head.Count() != 2)
+		if (!Ints(parts[0], head) || head.Count() < 2 || head.Count() > 3)
 			return null;
 		if (head[0] < 0 || head[0] >= WIDTHS || head[1] < MIN_LAYERS || head[1] > MAX_LAYERS)
 			return null;
+		int wall = DEFAULT_WALL;
+		if (head.Count() == 3)
+		{
+			wall = head[2];
+			if (wall < 0 || wall >= WALLS || wall == DEFAULT_WALL)
+				return null;     // the default is never written: one plan = one text (ops key their layouts by it)
+		}
 
 		MUD_TrenchPlan plan = new MUD_TrenchPlan();
 		plan.m_iWidth = head[0];
+		plan.m_iWall = wall;
 		plan.m_iLayers = head[1];
 		for (int i = 1; i < parts.Count(); i++)
 		{
@@ -172,10 +220,11 @@ class MUD_TrenchLayout
 	static const float SIDE_EPS = 0.002;      // m of float slack at the side walls
 
 	string m_sError;                          // why Build failed
-	string m_sPlan;                           // Pack text of the plan Build got (voxel ground ops carry it, TEMP 2026-10-13)
+	string m_sPlan;                           // Pack text of the plan Build got (voxel ground ops carry it, 2026-10-13)
 	protected ref array<ref MUD_TrenchSeg> m_aSegs = {};
 	protected ref array<ref MUD_TrenchPiece> m_aPieces = {};
 	protected float m_fHalf;
+	protected float m_fRun;                   // MUD_TrenchPlan.WallRun of the plan
 	protected int m_iLayers;
 
 	//------------------------------------------------------------------------------------------------
@@ -196,6 +245,7 @@ class MUD_TrenchLayout
 
 		m_sPlan = plan.Pack();
 		m_fHalf = plan.Width() * 0.5;
+		m_fRun = plan.WallRun();
 		m_iLayers = plan.m_iLayers;
 		for (int i = 0; i < n - 1; i++)
 		{
@@ -281,6 +331,13 @@ class MUD_TrenchLayout
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! m the sloped wall leans out per m of depth (the plan's wall angle)
+	float Run()
+	{
+		return m_fRun;
+	}
+
+	//------------------------------------------------------------------------------------------------
 	int SegCount()
 	{
 		return m_aSegs.Count();
@@ -296,6 +353,62 @@ class MUD_TrenchLayout
 	int SegPieces(int s)
 	{
 		return m_aSegs[s].m_iCount;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Trench builder (F4): length of the whole centre line
+	float ChainLength()
+	{
+		float total = 0;
+		foreach (MUD_TrenchSeg seg : m_aSegs)
+		{
+			total += seg.m_fLength;
+		}
+		return total;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Trench builder (F4): distance along the whole centre line to its point nearest (px, pz); dist = how far off it
+	float ChainPos(float px, float pz, out float dist)
+	{
+		dist = 1000000000;
+		float best = 0;
+		float before = 0;
+		foreach (MUD_TrenchSeg seg : m_aSegs)
+		{
+			float x;
+			float side;
+			OnSeg(seg, px, pz, x, side);
+			float half = seg.m_fLength * 0.5;
+			x = Math.Clamp(x, -half, half);
+			vector p = PointAt(seg, x, 0);
+			float d = Math.Sqrt((p[0] - px) * (p[0] - px) + (p[2] - pz) * (p[2] - pz));
+			if (d < dist)
+			{
+				dist = d;
+				best = before + x + half;
+			}
+			before += seg.m_fLength;
+		}
+		return best;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Trench builder (F4): centre-line point at distance s along the whole chain (clamped to it, y 0)
+	vector ChainPoint(float s)
+	{
+		int n = m_aSegs.Count();
+		if (n == 0)
+			return vector.Zero;
+		float left = Math.Max(0, s);
+		for (int i = 0; i < n; i++)
+		{
+			MUD_TrenchSeg seg = m_aSegs[i];
+			if (left <= seg.m_fLength || i == n - 1)
+				return PointAt(seg, Math.Min(left, seg.m_fLength) - seg.m_fLength * 0.5, 0);
+			left -= seg.m_fLength;
+		}
+		return vector.Zero;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -375,6 +488,31 @@ class MUD_TrenchLayout
 			if (dd < 0)
 				dd = 0;
 			if (dd < d)
+				d = dd;
+		}
+		return d;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Build 3 Stage 6 (parapet, 2026-10-17): how far world (x, z) lies outside piece index's SIDE wall, -1 when it
+	//! is not beside the piece (along the centre line past its span - past the chain's ends, or beside another piece).
+	//! A segment's last piece before a corner also takes its corner disc, so a bend's outer side has no gap.
+	float SideDist(int index, float px, float pz)
+	{
+		MUD_TrenchPiece piece = m_aPieces[index];
+		MUD_TrenchSeg seg = m_aSegs[piece.m_iSeg];
+		float x;
+		float side;
+		OnSeg(seg, px, pz, x, side);
+		float d = -1;
+		if (x >= piece.m_fX0 && x <= piece.m_fX1)
+			d = Math.Max(0, Math.AbsFloat(side) - m_fHalf);
+		if (HasDisc(index))
+		{
+			float ex = px - seg.m_vEnd[0];
+			float ez = pz - seg.m_vEnd[2];
+			float dd = Math.Max(0, Math.Sqrt(ex * ex + ez * ez) - m_fHalf);
+			if (d < 0 || dd < d)
 				d = dd;
 		}
 		return d;
@@ -531,6 +669,7 @@ class MUD_TrenchSelfTest
 		s_bRan = true;
 		MUD_TrenchSelfTest t = new MUD_TrenchSelfTest();
 		t.All();
+		MUD_BuildSelfTest.Run();     // trench builder F4 math (MUD_BuildData.c)
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -541,6 +680,7 @@ class MUD_TrenchSelfTest
 		Corner();
 		Curve();
 		Packing();
+		WallPacking();
 		Refusals();
 		Grid();
 		if (m_iFails == 0)
@@ -673,6 +813,32 @@ class MUD_TrenchSelfTest
 
 		array<string> garbage = {"", "1,6", "1,6;0,0,0", "x,6;0,0,0;100,0,0", "1,11;0,0,0;100,0,0", "4,6;0,0,0;100,0,0",
 			"1,6;0,0;100,0,0", "1,6;0,0,0;1e3,0,0", "1,6;0,0,0;100,0,0;200,0,0;300,0,0;400,0,0;500,0,0;600,0,0;700,0,0;800,0,0;900,0,0;1000,0,0"};
+		foreach (string g : garbage)
+		{
+			Check(MUD_TrenchPlan.Unpack(g) == null, "unpack should refuse '" + g + "'");
+		}
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Wall angle (2026-10-23): written only when not the default, round trip, layout run, bad indexes refused
+	protected void WallPacking()
+	{
+		MUD_TrenchPlan plan = new MUD_TrenchPlan();
+		plan.m_iWall = 3;
+		plan.AddPoint(Vector(0, 0, 0));
+		plan.AddPoint(Vector(4, 0, 0));
+		string packed = plan.Pack();
+		Check(packed == "1,6,3;0,0,0;400,0,0", "wall pack: " + packed);
+		MUD_TrenchPlan back = MUD_TrenchPlan.Unpack(packed);
+		Check(back != null && back.m_iWall == 3, "wall pack: unpack of own text");
+		MUD_TrenchLayout lay = Make(packed, "wall");
+		if (lay)
+			Check(Math.AbsFloat(lay.Run() - MUD_TrenchPlan.MIN_RUN) < 0.0001, string.Format("wall: run %1, want %2", lay.Run(), MUD_TrenchPlan.MIN_RUN));
+		lay = Make("1,6;0,0,0;400,0,0", "wall default");
+		if (lay)
+			Check(Math.AbsFloat(lay.Run() - 0.58) < 0.0001, string.Format("wall default: run %1, want 0.58", lay.Run()));
+
+		array<string> garbage = {"1,6,1;0,0,0;100,0,0", "1,6,4;0,0,0;100,0,0", "1,6,-1;0,0,0;100,0,0", "1,6,0,0;0,0,0;100,0,0"};
 		foreach (string g : garbage)
 		{
 			Check(MUD_TrenchPlan.Unpack(g) == null, "unpack should refuse '" + g + "'");

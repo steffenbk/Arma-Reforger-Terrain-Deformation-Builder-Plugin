@@ -6,7 +6,7 @@ MetaFileClass {
    MaterialAssigns {
     MaterialAssignClass "{6A8F47B55BFA87D9}" {
      SourceMaterial "Mud"
-     AssignedMaterial "{A29AE750B3F1E371}Assets/Mud/Data/Mud.emat"
+     AssignedMaterial "{6EBF7ADA9FD582F7}Assets/Structures/Military/Fortifications/DirtMounds/Data/DirtCover_01.emat"
     }
    }
    MeshParams {

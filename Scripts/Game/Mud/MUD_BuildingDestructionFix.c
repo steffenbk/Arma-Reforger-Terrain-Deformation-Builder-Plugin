@@ -7,7 +7,7 @@ modded class SCR_DestructibleBuildingComponent
 	//------------------------------------------------------------------------------------------------
 	override protected bool QueryFilterCallback(notnull IEntity entity)
 	{
-		if (MUD_GroundEntity.IsMudPatch(entity) || MUD_CoarseChunkEntity.Cast(entity) || MUD_FinePatchEntity.Cast(entity) || MUD_VoxelSubEntity.Cast(entity))
+		if (MUD_CoarseChunkEntity.Cast(entity) || MUD_FinePatchEntity.Cast(entity) || MUD_VoxelSubEntity.Cast(entity))
 			return false;
 		return super.QueryFilterCallback(entity);
 	}

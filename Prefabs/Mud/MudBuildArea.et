@@ -1,0 +1,9 @@
+GenericEntity {
+ ID "4D55444255494C31"
+ components {
+  MUD_BuildAreaComponent "{4D55444255494C32}" {
+  }
+  RplComponent "{4D55444255494C33}" {
+  }
+ }
+}

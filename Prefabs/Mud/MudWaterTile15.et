@@ -1,0 +1,18 @@
+GenericEntity {
+ ID "4D55445741543015"
+ components {
+  MeshObject "{4D55445741561015}" {
+   Object "{4D5544424F4E4515}Assets/Mud/BoneTile15.xob"
+   Materials {
+    MaterialAssignClass "{4D55445741563015}" {
+     SourceMaterial "Mud"
+     AssignedMaterial "{202B614D7E81B3C5}Terrains/Common/Water/Pond/PondSurface_01.emat"
+    }
+   }
+   BoundingBox AABBBoundingVolume "{4D55445741562015}" {
+    Mins -2.05 -1.5 -2.05
+    Maxs 2.05 1.5 2.05
+   }
+  }
+ }
+}

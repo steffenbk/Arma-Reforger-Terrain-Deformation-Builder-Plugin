@@ -39,7 +39,7 @@ class MUD_Surface
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Our ground entities: skin chunks (and fine patches, Task 4; voxel bricks, TEMP probe 2026-10-13)
+	//! Our ground entities: skin chunks (and fine patches, Task 4; voxel bricks, probe 2026-10-13)
 	static bool IsOurs(IEntity e)
 	{
 		return MUD_CoarseChunkEntity.Cast(e) != null || MUD_FinePatchEntity.Cast(e) != null || MUD_VoxelSubEntity.Cast(e) != null;

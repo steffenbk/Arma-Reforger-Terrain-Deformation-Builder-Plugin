@@ -1,0 +1,17 @@
+MetaFileClass {
+ Name "{55DF64D51C3239D9}Assets/Mud/BoneCol9.fbx.export.json"
+ Configurations {
+  JSONResourceClass PC {
+  }
+  JSONResourceClass XBOX_ONE : PC {
+  }
+  JSONResourceClass XBOX_SERIES : PC {
+  }
+  JSONResourceClass PS4 : PC {
+  }
+  JSONResourceClass PS5 : PC {
+  }
+  JSONResourceClass HEADLESS : PC {
+  }
+ }
+}

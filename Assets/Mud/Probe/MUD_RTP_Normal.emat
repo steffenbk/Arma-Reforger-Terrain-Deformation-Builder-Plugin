@@ -1,0 +1,5 @@
+MatPBRBasic {
+ Color 0.62 0.56 0.5 1
+ BCRMap "{AE37874A11911124}Assets/_SharedData/Dirt/ST_Mud_01_BCR.edds"
+ NMOMap "$rendertarget"
+}

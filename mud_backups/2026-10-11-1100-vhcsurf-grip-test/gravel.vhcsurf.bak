@@ -1,7 +1,0 @@
-ContactSurface {
- NoiseSteer 0
- NoiseFrequency 0.2
- Roughness 0
- FrictionNonTread 1
- FrictionTread 0.95
-}

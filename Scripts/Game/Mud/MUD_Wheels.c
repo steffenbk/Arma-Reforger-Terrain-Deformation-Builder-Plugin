@@ -21,6 +21,7 @@ class MUD_Wheels
 	//------------------------------------------------------------------------------------------------
 	static void Register(Vehicle v)
 	{
+		MUD_HeliGround.Register(v);     // F2 / F3 2026-10-24: helis have no VehicleWheeledSimulation
 		if (!v || s_aAll.Contains(v) || !v.FindComponent(VehicleWheeledSimulation))
 			return;
 		Prune();
@@ -28,16 +29,27 @@ class MUD_Wheels
 		NwkCarMovementComponent nwk = NwkCarMovementComponent.Cast(v.FindComponent(NwkCarMovementComponent));
 		if (nwk && NET_LIMITS)
 			nwk.SetAllowance(false, NET_DIST, NET_ANGLE, NET_SPEED, NET_SPIN);
-		Print(string.Format("MUD wheels: %1 registered, own net limits %2", v.GetID(), NET_LIMITS));
+		if (MUD_TestKit.TEST_KIT)     // audit C2: one line per vehicle, test logs only
+			Print(string.Format("MUD wheels: %1 registered, own net limits %2", v.GetID(), NET_LIMITS));
 	}
 
 	//------------------------------------------------------------------------------------------------
 	//! Live wheeled vehicles (statics outlive a play session: dead entries are pruned here)
 	static array<Vehicle> GetAll()
 	{
-		Prune();
+		// audit B7: called 5+ times a frame - prune once per world frame (callers skip a null that dies mid-frame)
+		BaseWorld world = GetGame().GetWorld();
+		float now = -1;
+		if (world)
+			now = world.GetWorldTime();
+		if (now != s_fPrunedAt || now < 0)
+		{
+			s_fPrunedAt = now;
+			Prune();
+		}
 		return s_aAll;
 	}
+	protected static float s_fPrunedAt = -2;
 
 	//------------------------------------------------------------------------------------------------
 	protected static void Prune()

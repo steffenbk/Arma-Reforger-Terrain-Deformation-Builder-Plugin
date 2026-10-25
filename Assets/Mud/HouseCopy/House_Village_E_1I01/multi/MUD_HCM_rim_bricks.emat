@@ -1,0 +1,9 @@
+MatPBRBasic {
+ Color 0.514 0.489 0.458 1
+ BCRMap "{DD9280F8C5E216CB}Assets/_SharedData/Brick/ST_Bricks_Bare_01_BCR.edds"
+ NMOMap "{E54A3B6A1C954455}Assets/_SharedData/Brick/ST_Bricks_Bare_01_NMO.edds"
+ GlobalMapsUVTransform MatUVTransform "{4D5543505F800026}" {
+  TilingU 8
+  TilingV 8
+ }
+}

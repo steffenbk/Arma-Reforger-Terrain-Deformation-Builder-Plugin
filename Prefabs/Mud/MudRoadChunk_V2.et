@@ -1,0 +1,12 @@
+StaticModelEntity {
+ ID "4D5552524F414352"
+ components {
+  MeshObject "{4D5552524F414452}" {
+   Object "{64F63C9AEC813FFC}Assets/Structures/Debris/DebrisPiles/DebrisPile_Concrete_01_Debris_V2.xob"
+  }
+  RigidBody "{4D5552524F414652}" {
+   ModelGeometry 1
+   Static 1
+  }
+ }
+}

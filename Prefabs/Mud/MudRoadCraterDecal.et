@@ -1,0 +1,21 @@
+GenericEntity {
+ ID "4D5552524F414441"
+ components {
+  Hierarchy "{4D5552524F414442}" {
+  }
+ }
+ {
+  DecalEntity {
+   ID "4D5552524F414443"
+   components {
+    Hierarchy "{4D5552524F414444}" {
+    }
+   }
+   coords 0 1 0
+   angles -90 0 0
+   scale 1
+   FarPlane 3
+   Mat "{039FA43299C7980D}Assets/Decals/Miscellaneous/Mortar/Decal_Impact_Mortar_01.emat"
+  }
+ }
+}

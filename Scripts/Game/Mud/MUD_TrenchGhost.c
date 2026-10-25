@@ -16,7 +16,6 @@ class MUD_TrenchGhosts
 	protected ref array<ref Resource> m_aRes = {};  // mesh of each entity (a mesh goes with its last ref)
 	protected static bool s_bWarned;
 	protected ref TraceParam m_Trace;               // our ground over dug voxels (GroundY)
-
 	//------------------------------------------------------------------------------------------------
 	void ~MUD_TrenchGhosts()
 	{
@@ -82,9 +81,22 @@ class MUD_TrenchGhosts
 		// (2026-10-15), and lie on top of the mud sheet (ghost was hidden under the 0.15 m mud).
 		// Own trace since 2026-10-15 17:2x: MudSheet.OurGroundY needs the sheet, and with the sheet parked the
 		// ghost fell to our heightfield, sunk 4 m under voxel ground (user: no preview inside a crater)
-		if (!OurGroundY(x, z, y) && !MUD_WorldGroundEntity.SurfaceY(x, z, y))
+		// LOOK LIFT (MUD_LookLift, 2026-10-23): the trace / heightfield give the collider; the look can lie higher
+		float lift = 0;
+		if (OurGroundY(x, z, y))
+		{
+			if (!MUD_VoxelSubEntity.Cast(m_Trace.TraceEnt))
+				lift = MUD_LookLift.DrawnLift(x, z);     // voxel bricks are never lifted
+		}
+		else if (MUD_WorldGroundEntity.SurfaceY(x, z, y))
+		{
+			lift = MUD_LookLift.DrawnLift(x, z);
+		}
+		else
+		{
 			y = GetGame().GetWorld().GetSurfaceY(x, z);
-		return y + MUD_MudSheet.MudOver(x, z);
+		}
+		return y + MUD_MudSheet.MudOver(x, z) + lift;
 	}
 
 	//------------------------------------------------------------------------------------------------

@@ -1,6 +1,0 @@
-23:11:43.772   SCRIPT       : MUD skin: baseline frame 16.2833 ms avg over 308 frames
-23:11:43.774   SCRIPT       : MUD skin: terrain <0,-163,0> .. <4096,148.375,4096>, 64 x 64 chunks of 64 m (2 m step), building 47
-23:11:43.774   SCRIPT       : MUD skin: render 1, trace heights 1, diagonal 1, mem 2043548 KB
-23:11:44.001   SCRIPT       : MUD skin: built 47 chunks (51183 verts, 96256 tris) over 6 frames, 227 ms wall, worst frame 23 ms | heights 97 ms, meshes 11 ms, colliders 17 ms
-23:11:44.001   SCRIPT       : MUD skin: mem +6710 KB | diagonals A 0 B 18484 tie 29644 | trace misses 0
-23:11:50.992   SCRIPT       : MUD skin: after build frame 14.4599 ms avg over 347 frames, mem +7415 KB

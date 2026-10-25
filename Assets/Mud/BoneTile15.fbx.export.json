@@ -1,0 +1,2055 @@
+{
+ "format": "enfusion-export-sidecar",
+ "version": 1,
+ "fbx": "BoneTile15.fbx",
+ "fbx_bytes": 564028,
+ "exported_at": "2026-10-23T00:04:21Z",
+ "blend_file": null,
+ "profile": "enfusion",
+ "forced": false,
+ "verified": true,
+ "colliders": [],
+ "bones": [
+  {
+   "name": "root",
+   "parent": null,
+   "head": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gAA",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gBA",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gCA",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gDA",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gEA",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gFA",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gGA",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gHA",
+   "parent": "root",
+   "head": [
+    0.0,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gIA",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gJA",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gKA",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gLA",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gMA",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gNA",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gOA",
+   "parent": "root",
+   "head": [
+    2.0,
+    -2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gAB",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gBB",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gCB",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gDB",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gEB",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gFB",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gGB",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gHB",
+   "parent": "root",
+   "head": [
+    0.0,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gIB",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gJB",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gKB",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gLB",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gMB",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gNB",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gOB",
+   "parent": "root",
+   "head": [
+    2.0,
+    -1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gAC",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gBC",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gCC",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gDC",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gEC",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gFC",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gGC",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gHC",
+   "parent": "root",
+   "head": [
+    0.0,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gIC",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gJC",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gKC",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gLC",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gMC",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gNC",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gOC",
+   "parent": "root",
+   "head": [
+    2.0,
+    -1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gAD",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gBD",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gCD",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gDD",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gED",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gFD",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gGD",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gHD",
+   "parent": "root",
+   "head": [
+    0.0,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gID",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gJD",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gKD",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gLD",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gMD",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gND",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gOD",
+   "parent": "root",
+   "head": [
+    2.0,
+    -1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gAE",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gBE",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gCE",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gDE",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gEE",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gFE",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gGE",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gHE",
+   "parent": "root",
+   "head": [
+    0.0,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gIE",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gJE",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gKE",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gLE",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gME",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gNE",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gOE",
+   "parent": "root",
+   "head": [
+    2.0,
+    -0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gAF",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gBF",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gCF",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gDF",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gEF",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gFF",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gGF",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gHF",
+   "parent": "root",
+   "head": [
+    0.0,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gIF",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gJF",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gKF",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gLF",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gMF",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gNF",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gOF",
+   "parent": "root",
+   "head": [
+    2.0,
+    -0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gAG",
+   "parent": "root",
+   "head": [
+    -2.0,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gBG",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gCG",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gDG",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gEG",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gFG",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gGG",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gHG",
+   "parent": "root",
+   "head": [
+    0.0,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gIG",
+   "parent": "root",
+   "head": [
+    0.2857,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gJG",
+   "parent": "root",
+   "head": [
+    0.5714,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gKG",
+   "parent": "root",
+   "head": [
+    0.8571,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gLG",
+   "parent": "root",
+   "head": [
+    1.1429,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gMG",
+   "parent": "root",
+   "head": [
+    1.4286,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gNG",
+   "parent": "root",
+   "head": [
+    1.7143,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gOG",
+   "parent": "root",
+   "head": [
+    2.0,
+    -0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gAH",
+   "parent": "root",
+   "head": [
+    -2.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gBH",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gCH",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gDH",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gEH",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gFH",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gGH",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gHH",
+   "parent": "root",
+   "head": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gIH",
+   "parent": "root",
+   "head": [
+    0.2857,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gJH",
+   "parent": "root",
+   "head": [
+    0.5714,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gKH",
+   "parent": "root",
+   "head": [
+    0.8571,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gLH",
+   "parent": "root",
+   "head": [
+    1.1429,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gMH",
+   "parent": "root",
+   "head": [
+    1.4286,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gNH",
+   "parent": "root",
+   "head": [
+    1.7143,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gOH",
+   "parent": "root",
+   "head": [
+    2.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gAI",
+   "parent": "root",
+   "head": [
+    -2.0,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gBI",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gCI",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gDI",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gEI",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gFI",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gGI",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gHI",
+   "parent": "root",
+   "head": [
+    0.0,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gII",
+   "parent": "root",
+   "head": [
+    0.2857,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gJI",
+   "parent": "root",
+   "head": [
+    0.5714,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gKI",
+   "parent": "root",
+   "head": [
+    0.8571,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gLI",
+   "parent": "root",
+   "head": [
+    1.1429,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gMI",
+   "parent": "root",
+   "head": [
+    1.4286,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gNI",
+   "parent": "root",
+   "head": [
+    1.7143,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gOI",
+   "parent": "root",
+   "head": [
+    2.0,
+    0.2857,
+    0.0
+   ]
+  },
+  {
+   "name": "gAJ",
+   "parent": "root",
+   "head": [
+    -2.0,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gBJ",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gCJ",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gDJ",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gEJ",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gFJ",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gGJ",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gHJ",
+   "parent": "root",
+   "head": [
+    0.0,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gIJ",
+   "parent": "root",
+   "head": [
+    0.2857,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gJJ",
+   "parent": "root",
+   "head": [
+    0.5714,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gKJ",
+   "parent": "root",
+   "head": [
+    0.8571,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gLJ",
+   "parent": "root",
+   "head": [
+    1.1429,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gMJ",
+   "parent": "root",
+   "head": [
+    1.4286,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gNJ",
+   "parent": "root",
+   "head": [
+    1.7143,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gOJ",
+   "parent": "root",
+   "head": [
+    2.0,
+    0.5714,
+    0.0
+   ]
+  },
+  {
+   "name": "gAK",
+   "parent": "root",
+   "head": [
+    -2.0,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gBK",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gCK",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gDK",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gEK",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gFK",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gGK",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gHK",
+   "parent": "root",
+   "head": [
+    0.0,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gIK",
+   "parent": "root",
+   "head": [
+    0.2857,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gJK",
+   "parent": "root",
+   "head": [
+    0.5714,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gKK",
+   "parent": "root",
+   "head": [
+    0.8571,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gLK",
+   "parent": "root",
+   "head": [
+    1.1429,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gMK",
+   "parent": "root",
+   "head": [
+    1.4286,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gNK",
+   "parent": "root",
+   "head": [
+    1.7143,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gOK",
+   "parent": "root",
+   "head": [
+    2.0,
+    0.8571,
+    0.0
+   ]
+  },
+  {
+   "name": "gAL",
+   "parent": "root",
+   "head": [
+    -2.0,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gBL",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gCL",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gDL",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gEL",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gFL",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gGL",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gHL",
+   "parent": "root",
+   "head": [
+    0.0,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gIL",
+   "parent": "root",
+   "head": [
+    0.2857,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gJL",
+   "parent": "root",
+   "head": [
+    0.5714,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gKL",
+   "parent": "root",
+   "head": [
+    0.8571,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gLL",
+   "parent": "root",
+   "head": [
+    1.1429,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gML",
+   "parent": "root",
+   "head": [
+    1.4286,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gNL",
+   "parent": "root",
+   "head": [
+    1.7143,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gOL",
+   "parent": "root",
+   "head": [
+    2.0,
+    1.1429,
+    0.0
+   ]
+  },
+  {
+   "name": "gAM",
+   "parent": "root",
+   "head": [
+    -2.0,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gBM",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gCM",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gDM",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gEM",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gFM",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gGM",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gHM",
+   "parent": "root",
+   "head": [
+    0.0,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gIM",
+   "parent": "root",
+   "head": [
+    0.2857,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gJM",
+   "parent": "root",
+   "head": [
+    0.5714,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gKM",
+   "parent": "root",
+   "head": [
+    0.8571,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gLM",
+   "parent": "root",
+   "head": [
+    1.1429,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gMM",
+   "parent": "root",
+   "head": [
+    1.4286,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gNM",
+   "parent": "root",
+   "head": [
+    1.7143,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gOM",
+   "parent": "root",
+   "head": [
+    2.0,
+    1.4286,
+    0.0
+   ]
+  },
+  {
+   "name": "gAN",
+   "parent": "root",
+   "head": [
+    -2.0,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gBN",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gCN",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gDN",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gEN",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gFN",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gGN",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gHN",
+   "parent": "root",
+   "head": [
+    0.0,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gIN",
+   "parent": "root",
+   "head": [
+    0.2857,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gJN",
+   "parent": "root",
+   "head": [
+    0.5714,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gKN",
+   "parent": "root",
+   "head": [
+    0.8571,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gLN",
+   "parent": "root",
+   "head": [
+    1.1429,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gMN",
+   "parent": "root",
+   "head": [
+    1.4286,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gNN",
+   "parent": "root",
+   "head": [
+    1.7143,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gON",
+   "parent": "root",
+   "head": [
+    2.0,
+    1.7143,
+    0.0
+   ]
+  },
+  {
+   "name": "gAO",
+   "parent": "root",
+   "head": [
+    -2.0,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gBO",
+   "parent": "root",
+   "head": [
+    -1.7143,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gCO",
+   "parent": "root",
+   "head": [
+    -1.4286,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gDO",
+   "parent": "root",
+   "head": [
+    -1.1429,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gEO",
+   "parent": "root",
+   "head": [
+    -0.8571,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gFO",
+   "parent": "root",
+   "head": [
+    -0.5714,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gGO",
+   "parent": "root",
+   "head": [
+    -0.2857,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gHO",
+   "parent": "root",
+   "head": [
+    0.0,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gIO",
+   "parent": "root",
+   "head": [
+    0.2857,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gJO",
+   "parent": "root",
+   "head": [
+    0.5714,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gKO",
+   "parent": "root",
+   "head": [
+    0.8571,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gLO",
+   "parent": "root",
+   "head": [
+    1.1429,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gMO",
+   "parent": "root",
+   "head": [
+    1.4286,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gNO",
+   "parent": "root",
+   "head": [
+    1.7143,
+    2.0,
+    0.0
+   ]
+  },
+  {
+   "name": "gOO",
+   "parent": "root",
+   "head": [
+    2.0,
+    2.0,
+    0.0
+   ]
+  }
+ ],
+ "meshes": [
+  "BoneTile15"
+ ],
+ "empties": [
+  "BoneTile15_Arm"
+ ],
+ "armature_max_pose_offset_m": 0.0
+}

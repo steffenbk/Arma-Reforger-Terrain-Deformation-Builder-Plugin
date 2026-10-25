@@ -1,0 +1,14 @@
+GenericEntity {
+ ID "180F1D63354EEC03"
+ components {
+  Hierarchy "{8CBAE66146ED5547}" {
+  }
+  MeshObject "{3F2203ED28FF5343}" {
+   Object "{2E7D74B52ABF4668}Assets/Mud/Kits/House_Village_E_1I01/House_E_1I01_p_L0_X0_Y1.xob"
+  }
+  RigidBody "{2EEF56386D1BB6E9}" {
+   ModelGeometry 1
+   Static 1
+  }
+ }
+}

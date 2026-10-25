@@ -41,6 +41,7 @@ class MUD_TrenchPlanner
 		input.AddActionListener("MUD_TrenchPoint", EActionTrigger.DOWN, OnPoint);
 		input.AddActionListener("MUD_TrenchUndo", EActionTrigger.DOWN, OnUndo);
 		input.AddActionListener("MUD_TrenchWidth", EActionTrigger.DOWN, OnWidth);
+		input.AddActionListener("MUD_TrenchWall", EActionTrigger.DOWN, OnWall);
 		input.AddActionListener("MUD_TrenchBend", EActionTrigger.DOWN, OnBend);
 		input.AddActionListener("MUD_TrenchConfirm", EActionTrigger.DOWN, OnConfirm);
 		m_bListening = true;
@@ -70,6 +71,7 @@ class MUD_TrenchPlanner
 		input.RemoveActionListener("MUD_TrenchPoint", EActionTrigger.DOWN, OnPoint);
 		input.RemoveActionListener("MUD_TrenchUndo", EActionTrigger.DOWN, OnUndo);
 		input.RemoveActionListener("MUD_TrenchWidth", EActionTrigger.DOWN, OnWidth);
+		input.RemoveActionListener("MUD_TrenchWall", EActionTrigger.DOWN, OnWall);
 		input.RemoveActionListener("MUD_TrenchBend", EActionTrigger.DOWN, OnBend);
 		input.RemoveActionListener("MUD_TrenchConfirm", EActionTrigger.DOWN, OnConfirm);
 	}
@@ -126,7 +128,8 @@ class MUD_TrenchPlanner
 	//------------------------------------------------------------------------------------------------
 	//! Ground point under the crosshair (camera ray, then straight down if the ray hits nothing).
 	//! Copy of CSK_SandbagWallPlanner.TraceAim (vanilla SCR_ItemPlacementComponent trace setup).
-	protected bool TraceAim(out vector aim)
+	//! Static since the trench builder stake mode (MUD_BuildStake, F4) aims with it too.
+	static bool TraceAim(out vector aim)
 	{
 		ChimeraCharacter character = ChimeraCharacter.Cast(SCR_PlayerController.GetLocalControlledEntity());
 		CameraManager cameras = GetGame().GetCameraManager();
@@ -239,6 +242,7 @@ class MUD_TrenchPlanner
 		}
 		MUD_TrenchPlan live = new MUD_TrenchPlan();
 		live.m_iWidth = m_Plan.m_iWidth;
+		live.m_iWall = m_Plan.m_iWall;
 		live.m_iLayers = m_Plan.m_iLayers;
 		if (n == 0)
 		{
@@ -320,6 +324,14 @@ class MUD_TrenchPlanner
 	protected void OnWidth(float value = 0, EActionTrigger reason = 0, string actionName = string.Empty)
 	{
 		m_Plan.m_iWidth = (m_Plan.m_iWidth + 1) % MUD_TrenchPlan.WIDTHS;
+		m_bDirty = true;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! C: next wall angle (whole trench, user 2026-10-23)
+	protected void OnWall(float value = 0, EActionTrigger reason = 0, string actionName = string.Empty)
+	{
+		m_Plan.m_iWall = (m_Plan.m_iWall + 1) % MUD_TrenchPlan.WALLS;
 		m_bDirty = true;
 	}
 
@@ -442,8 +454,12 @@ class MUD_TrenchPlanner
 		if (m_iRed > 0)
 			red = string.Format(", %1 red (road / hard ground: not dug)", m_iRed);
 
-		string text = string.Format("%1\nWheel: depth %2 m\nX: width %3 m\nF: confirm, then dig it with the shovel\nCtrl+F: confirm, dug at once\nR: leave\n\nPieces: %4%5\n%6",
-			mouse, m_Plan.m_iLayers * MUD_TrenchPlan.LAYER, m_Plan.Width(), m_iPieces, red, m_sNote);
+		// Ctrl+F line follows the server rule (audit E7): same consts on every machine
+		string ctrlF = "\nCtrl+F: confirm, dug at once";
+		if (!MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG && !MUD_TrenchSiteComponent.DEBUG_INSTANT)
+			ctrlF = "";
+		string text = string.Format("%1\nWheel: depth %2 m\nX: width %3 m\nC: walls %8 deg\nF: confirm, then dig it with the shovel%7\nR: build area mode\n\nPieces: %4%5\n%6",
+			mouse, m_Plan.m_iLayers * MUD_TrenchPlan.LAYER, m_Plan.Width(), m_iPieces, red, m_sNote, ctrlF, MUD_TrenchPlan.WallDegOf(m_Plan.m_iWall));
 		if (text == m_sShownHint)
 			return;
 		m_sShownHint = text;
@@ -525,11 +541,13 @@ modded class SCR_PlayerController
 		if (now - m_fMudLastPlace < MUD_PLACE_GAP_MS)
 		{
 			Print("MUD trench site: refused, placed one less than 2 s ago", LogLevel.WARNING);
+			MUD_Tell("Trench not placed: wait 2 s between trenches");
 			return;
 		}
 		if (!MUD_Dig.HoldsShovel(c, false))
 		{
 			Print("MUD trench site: refused, server sees no entrenching tool in hand", LogLevel.WARNING);
+			MUD_Tell("Trench not placed: hold an entrenching tool");
 			return;
 		}
 		if (packed.Length() > MUD_PLAN_MAX_CHARS)
@@ -549,6 +567,7 @@ modded class SCR_PlayerController
 			if (vector.DistanceSqXZ(p, feet) > MUD_PLACE_RANGE * MUD_PLACE_RANGE)
 			{
 				Print(string.Format("MUD trench site: refused, point %1 more than %2 m from the player", p, MUD_PLACE_RANGE), LogLevel.WARNING);
+				MUD_Tell(string.Format("Trench not placed: every point within %1 m of you", MUD_PLACE_RANGE));
 				return;
 			}
 		}
@@ -557,8 +576,18 @@ modded class SCR_PlayerController
 		string why;
 		MUD_TrenchSiteComponent site = MUD_TrenchSiteComponent.Spawn(plan, why);
 		if (!site)
+		{
 			Print("MUD trench site: refused, " + why, LogLevel.WARNING);
-		else if (instant || MUD_TrenchSiteComponent.DEBUG_INSTANT)
+			MUD_Tell("Trench not placed: " + why);
+			return;
+		}
+		if (instant && !MUD_TrenchSiteComponent.ALLOW_INSTANT_DIG && !MUD_TrenchSiteComponent.DEBUG_INSTANT)
+		{
+			Print("MUD trench site: instant dig refused (ALLOW_INSTANT_DIG false) - site placed for the shovel", LogLevel.WARNING);
+			MUD_Tell("Instant dig is off on this server - trench placed, dig it with the shovel");
+			return;
+		}
+		if (instant || MUD_TrenchSiteComponent.DEBUG_INSTANT)
 			site.DebugDigAll();
 	}
 }

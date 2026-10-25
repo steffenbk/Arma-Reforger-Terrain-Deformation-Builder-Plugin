@@ -3,7 +3,7 @@ class MUD_MudZoneEntityClass : GenericEntityClass
 {
 }
 
-//! Placed mud area (plan docs/superpowers/plans/2026-10-14-mud-zones-plan.md). MUD_MudSheet builds every 3 m tile
+//! Placed mud area (plan docs/superpowers/plans/old/2026-10-14-mud-zones-plan.md). MUD_MudSheet builds every 3 m tile
 //! whose middle is inside a zone at load and only draws mud there.
 class MUD_MudZoneEntity : GenericEntity
 {
@@ -14,6 +14,14 @@ class MUD_MudZoneEntity : GenericEntity
 	protected float m_fSizeZ;
 
 	protected static ref array<MUD_MudZoneEntity> s_aAll = {};
+	// H3 TEST (2026-10-18, user: 'a test to cover all offroad terrain'; v200 = before): the sheet covers EVERY tile whose
+	// middle is on holed ground (= offroad: real terrain stays only under asphalt / concrete, buildings, poles, roads -
+	// project TERRAIN RULE), placed zones or not. The hole map is baked terrain = the same answer on every machine
+	// (synced layer, ops). false = placed zones only, as before.
+	static const bool ALL_OFFROAD = true;
+	protected static ref map<int, int> s_mOffroad = new map<int, int>();    // ALL_OFFROAD: tile key -> 1 holed middle
+	protected static int s_iOffroadAsked;                                    // log: tiles looked up / holed
+	protected static int s_iOffroadHoled;
 
 	//------------------------------------------------------------------------------------------------
 	void MUD_MudZoneEntity(IEntitySource src, IEntity parent)
@@ -53,18 +61,54 @@ class MUD_MudZoneEntity : GenericEntity
 	//! the sheet's own top look shows there and the voxels under it need no grass (user 2026-10-15)
 	static bool SheetCovers(float x, float z)
 	{
-		if (!MUD_MudSheet.ENABLED || s_aAll.IsEmpty())
-			return false;
+		if (!MUD_MudSheet.ENABLED || !MUD_MudSheet.SYNC)
+			return false;     // MUD LAB sheet local (SYNC false): the sheet never changes rut behaviour
 		float t = MUD_MudSheet.TILE_M;
-		float mx = (Math.Floor(x / t) + 0.5) * t;
-		float mz = (Math.Floor(z / t) + 0.5) * t;
+		return TileCovered(Math.Floor(x / t), Math.Floor(z / t));
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Is world sheet tile tx, tz a mud tile? Its middle inside a placed zone, or (ALL_OFFROAD) on holed ground.
+	//! MUD_MudSheet.TileInZone and MUD_MudSync.ZoneTile ask this, so sheet and synced layer agree.
+	static bool TileCovered(int tx, int tz)
+	{
 		BaseWorld w = GetGame().GetWorld();
+		if (!w)
+			return false;
+		float cx = (tx * MUD_MudSheet.TQ + MUD_MudSheet.TQ / 2) * MUD_MudSheet.CELL;
+		float cz = (tz * MUD_MudSheet.TQ + MUD_MudSheet.TQ / 2) * MUD_MudSheet.CELL;
 		foreach (MUD_MudZoneEntity zone : s_aAll)
 		{
-			if (zone && zone.GetWorld() == w && zone.Contains(mx, mz))
+			if (zone && zone.GetWorld() == w && zone.Contains(cx, cz))
 				return true;
 		}
-		return false;
+		if (!ALL_OFFROAD)
+			return false;
+		int key = MUD_MudSheet.TrailKey(tx, tz);
+		int known;
+		if (s_mOffroad.Find(key, known))
+			return known != 0;
+		int holed = 0;
+		if (MUD_Surface.IsHole(w, cx, cz))
+			holed = 1;
+		s_mOffroad.Set(key, holed);
+		s_iOffroadAsked++;
+		s_iOffroadHoled += holed;
+		return holed != 0;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! ALL_OFFROAD: any box may hold mud tiles (the per-tile TileCovered decides). Else the caller checks its zones.
+	static bool AnyBox()
+	{
+		return ALL_OFFROAD;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Log: tiles looked up so far / holed ones (ALL_OFFROAD cache size)
+	static string OffroadStats()
+	{
+		return string.Format("all offroad %1: tiles looked up %2, holed %3", ALL_OFFROAD, s_iOffroadAsked, s_iOffroadHoled);
 	}
 
 	//------------------------------------------------------------------------------------------------
