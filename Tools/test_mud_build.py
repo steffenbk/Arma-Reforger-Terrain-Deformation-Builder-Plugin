@@ -171,3 +171,86 @@ def test_mask_of_another_grid_is_refused(tmp_path):
     assert code == 1 and 'another world' in rep
     assert (d / 'Terrain_0.ttile').read_bytes() == tile(0)
     assert not (tmp_path / 'backup').exists()
+
+
+# --- vanilla mode (2026-10-28): override tiles in the mod, no world copy -------------------------------------
+
+class FakePak:
+    """Stands in for pak_files.PakFiles: {pak path: bytes}."""
+    files = {}
+
+    def __init__(self, data_dir):
+        self.dir = data_dir
+
+    def find(self, pattern):
+        import re
+        r = re.compile(pattern, re.I)
+        return sorted(p for p in self.files if r.search(p))
+
+    def read(self, path):
+        return self.files[path]
+
+
+def vanilla_paks(monkeypatch, name='Terrain', wrong_first=True):
+    """Two same-named pak terrains: worlds/Aaa (wrong heights, sorts first) and worlds/Map (fits the samples)."""
+    files = {}
+    for t in (0, 1):
+        files['worlds/Map/%s/.Data/%s_%d.ttile' % (name, name, t)] = tile(t)
+        if wrong_first:
+            files['worlds/Aaa/%s/.Data/%s_%d.ttile' % (name, name, t)] = tile(t + 5)
+    monkeypatch.setattr(FakePak, 'files', files)
+    monkeypatch.setattr(mb.pf, 'PakFiles', FakePak)
+    return files
+
+
+def run_vanilla(tmp_path, name, extra):
+    rep = tmp_path / 'report_build.txt'
+    args = ['build', '--vanilla', name, '--game-data', str(tmp_path / 'game'), '--addon', str(tmp_path / 'mod'),
+            '--backup', str(tmp_path / 'backup'), '--report', str(rep)] + list(extra)
+    return mb.main(args), rep.read_text()
+
+
+@pytest.mark.parametrize('name', ['Terrain', 'Eden'])
+def test_vanilla_build_writes_override_tiles_and_unbuild_removes_them(tmp_path, monkeypatch, name):
+    files = vanilla_paks(monkeypatch, name)
+    m, p = mask_and_pins(tmp_path, {0: (0, 63), 5: (10, 40)})
+    code, rep = run_vanilla(tmp_path, name, build_args(tmp_path, m, p, samples_file(tmp_path)))
+    assert code == 0, rep
+    d = tmp_path / 'mod' / 'worlds' / 'Map' / name / '.Data'
+    assert 'vanilla terrain worlds/Map/%s/.Data' % name in rep and ('override tiles ' + str(d).replace('\\', '/')) in rep
+    assert not (tmp_path / 'mod' / 'worlds' / 'Aaa').exists()          # the same-named terrain that does not fit
+    assert holes_of((d / ('%s_0.ttile' % name)).read_bytes())[(0, 0)][5] == (1 << 10) - 1
+    assert files['worlds/Map/%s/.Data/%s_0.ttile' % (name, name)] == tile(0)   # the pak copy is never written
+    o = mb.read_override(str(tmp_path / 'backup'))
+    assert sorted(o['created']) == ['%s_0.ttile' % name, '%s_1.ttile' % name]
+
+    rep_u = tmp_path / 'report_unbuild.txt'
+    code = mb.main(['unbuild', '--backup', str(tmp_path / 'backup'), '--report', str(rep_u),
+                    '--heights', str(tmp_path / 'h' / 'x_mud_heights.c')])
+    assert code == 0, rep_u.read_text()
+    assert sorted(x.name for x in d.iterdir()) == []                   # the pak tiles are used again
+    assert (tmp_path / 'backup' / 'override_removed' / ('%s_1.ttile' % name)).read_bytes() == tile(1)
+    assert 'not equal to the pre-build copy: 0' in rep_u.read_text()
+
+
+def test_vanilla_unbuild_keeps_an_override_tile_the_mod_had_before(tmp_path, monkeypatch):
+    vanilla_paks(monkeypatch)
+    d = tmp_path / 'mod' / 'worlds' / 'Map' / 'Terrain' / '.Data'
+    d.mkdir(parents=True)
+    (d / 'Terrain_1.ttile').write_bytes(tile(1, paint=b'\x07' * 8))    # the map maker's own override
+    m, p = mask_and_pins(tmp_path, {0: (0, 63)})
+    assert run_vanilla(tmp_path, 'Terrain', build_args(tmp_path, m, p, samples_file(tmp_path)))[0] == 0
+    assert mb.read_override(str(tmp_path / 'backup'))['created'] == ['Terrain_0.ttile']
+    assert mb.main(['unbuild', '--backup', str(tmp_path / 'backup'), '--report', str(tmp_path / 'r.txt')]) == 0
+    assert sorted(x.name for x in d.iterdir()) == ['Terrain_1.ttile']
+    assert (d / 'Terrain_1.ttile').read_bytes() == tile(1, paint=b'\x07' * 8)
+
+
+def test_vanilla_without_a_fitting_terrain_writes_nothing(tmp_path, monkeypatch):
+    vanilla_paks(monkeypatch)
+    m, p = mask_and_pins(tmp_path, {0: (0, 63)})
+    s = tmp_path / 'samples.txt'
+    s.write_text('\n'.join('MUD bake sample %d 0 %d %d' % (i % 2, i * 31, (i * 7919) % 5000) for i in range(30)))
+    code, rep = run_vanilla(tmp_path, 'Terrain', build_args(tmp_path, m, p, s))
+    assert code == 1 and 'no pak terrain fits' in rep
+    assert not (tmp_path / 'mod').exists() and not (tmp_path / 'backup').exists()

@@ -314,7 +314,7 @@ def set_layout(tile_verts, tiles_x):
 # (swap x/z, flip x, flip z, signed 16-bit): how a tile's HGHT is laid out, picked by fit()
 ORIENTS = [(s, fx, fz, sg) for sg in (0, 1) for s in (0, 1) for fx in (0, 1) for fz in (0, 1)]
 SAMPLE = re.compile(r'MUD bake sample (\d+) (\d+) (\d+) (-?\d+)\s*$')
-TILE_FILE = re.compile(r'Terrain_(\d+)\.ttile$')
+TILE_FILE = re.compile(r'_(\d+)\.ttile$')   # <terrain name>_<n>.ttile (Arland / Cain 'Terrain', Everon 'Eden')
 
 
 def hght_index(lx, lz, o):
@@ -402,7 +402,7 @@ def bake(data_dir, fitd, out_path):
             if not any(rows):
                 continue
             if owner_tile(bx, bz) != t:
-                raise ValueError('block %d %d in Terrain_%d, owner is %d' % (bx, bz, t, owner_tile(bx, bz)))
+                raise ValueError('block %d %d in %s, owner is %d' % (bx, bz, name, owner_tile(bx, bz)))
             hs = [a * vals[hght_index(*vertex_local(bx, bz, v), o)] + b for v in range((BLOCK + 1) ** 2)]
             blocks.append((bz, bx, hs))
     blocks.sort(key=lambda e: (e[0], e[1]))
@@ -470,11 +470,11 @@ def reset_holes(cur, pristine):
 
 
 def tile_names(d):
-    """{tile index: file name} of the Terrain_<n>.ttile files in folder d."""
+    """{tile index: file name} of the <terrain name>_<n>.ttile files in folder d (one terrain per .Data folder)."""
     out = {}
     if os.path.isdir(d):
         for name in os.listdir(d):
-            m = re.fullmatch(r'Terrain_(\d+)\.ttile', name)
+            m = re.fullmatch(r'.+_(\d+)\.ttile', name)
             if m:
                 out[int(m[1])] = name
     return out
@@ -501,7 +501,7 @@ def restore(tiles_dir, backup_dir):
     for t, name in sorted(tile_names(backup_dir).items()):
         with open(os.path.join(backup_dir, name), 'rb') as f:
             pristine = f.read()
-        path = os.path.join(tiles_dir, 'Terrain_%d.ttile' % t)
+        path = os.path.join(tiles_dir, cur.get(t, name))
         if t not in cur:
             with open(path, 'wb') as f:
                 f.write(pristine)

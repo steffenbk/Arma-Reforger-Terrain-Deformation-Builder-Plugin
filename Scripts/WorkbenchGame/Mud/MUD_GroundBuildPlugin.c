@@ -34,6 +34,9 @@ class MUD_BuildManifest
 	string m_sHeightsAbs;
 	float m_fCell;
 	int m_iTilesX;
+	string m_sVanilla;      // vanilla mode: the pak terrain's entity name (empty = the world's own tiles)
+	string m_sGameData;     // vanilla mode: the game's addons/data folder (the .pak files)
+	string m_sAddon;        // vanilla mode: root folder of the mod that holds the world (override tiles go under it)
 
 	//------------------------------------------------------------------------------------------------
 	bool Load(string path)
@@ -66,6 +69,12 @@ class MUD_BuildManifest
 				m_fCell = v.ToFloat();
 			else if (k == "tiles_x")
 				m_iTilesX = v.ToInt();
+			else if (k == "vanilla")
+				m_sVanilla = v;
+			else if (k == "game_data")
+				m_sGameData = v;
+			else if (k == "addon")
+				m_sAddon = v;
 		}
 		f.Close();
 		return !m_sState.IsEmpty();
@@ -85,6 +94,12 @@ class MUD_BuildManifest
 		f.WriteLine("heights_abs " + m_sHeightsAbs);
 		f.WriteLine(string.Format("cell %1", m_fCell));
 		f.WriteLine(string.Format("tiles_x %1", m_iTilesX));
+		if (!m_sVanilla.IsEmpty())
+		{
+			f.WriteLine("vanilla " + m_sVanilla);
+			f.WriteLine("game_data " + m_sGameData);
+			f.WriteLine("addon " + m_sAddon);
+		}
 		f.Close();
 		return true;
 	}
@@ -99,6 +114,11 @@ class MUD_GroundBuilder
 	static const string REQUEST = "$profile:MUD_Build/request.txt";      // = MUD_KeepScan.REQUEST
 	static const string ROADS = "$profile:mud_roads.txt";                // = MUD_KeepScan.ROADS
 	static const string BLANK_WORLD = "worlds/Arland/EmptyArland.ent";   // vanilla, own terrain in the pak (not ours)
+	//! Vanilla mode writes over a PAK terrain (Arland, Everon, Kolguyev), so it opens a world on none of them: the
+	//! MP test world has its own small MPTestTerrain (pak listing 2026-10-28 Stable, worlds001.pak)
+	static const string BLANK_WORLD_VANILLA = "worlds/MP/MpTest/MpTest_Empty.ent";
+	static const string GAME_DATA = "auto";   // mud_build.py reads the game's .pak folder from the Workbench log ('$ArmaReforger:' is packed: GetAbsolutePath fails, WB 2026-10-28)
+	static const string OVERRIDE_LINE = "MUD build: override tiles ";   // mud_build.py report: the tiles dir it wrote
 	static const string PYTHON = "python";
 	static const int PY_WAIT_MS = 1800000;      // 30 min
 	static const int SAMPLE_STRIDE = 3;         // height samples in every 3rd skin chunk (x and z)
@@ -246,20 +266,24 @@ class MUD_GroundBuilder
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Loose tile folder of the world's terrain: <world dir>/<terrain entity name>/.Data (a world finds its terrain
-	//! by location). Empty + why when the tiles are not loose files next to this world.
-	protected static string TilesDir(WorldEditorAPI api, string worldAbs, out string why)
+	//! Name of the world's GenericTerrainEntity (= its tile folder and tile file prefix), empty when none
+	protected static string TerrainName(WorldEditorAPI api)
 	{
-		string terrainName;
 		for (int e = 0, count = api.GetEditorEntityCount(); e < count; e++)
 		{
 			IEntitySource src = api.GetEditorEntity(e);
 			if (src && src.GetClassName() == "GenericTerrainEntity")
-			{
-				terrainName = src.GetName();
-				break;
-			}
+				return src.GetName();
 		}
+		return string.Empty;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Loose tile folder of the world's terrain: <world dir>/<terrain entity name>/.Data with <name>_<n>.ttile (a
+	//! world finds its terrain by location). Empty + why when the tiles are not loose files next to this world.
+	protected static string TilesDir(WorldEditorAPI api, string worldAbs, out string why)
+	{
+		string terrainName = TerrainName(api);
 		if (terrainName.IsEmpty())
 		{
 			why = "no GenericTerrainEntity with a name in this world";
@@ -267,12 +291,36 @@ class MUD_GroundBuilder
 		}
 		int slash = worldAbs.LastIndexOf("/");
 		string dir = worldAbs.Substring(0, slash + 1) + terrainName + "/.Data";
-		if (!FileIO.FileExists(dir + "/Terrain_0.ttile"))
+		if (!FileIO.FileExists(dir + "/" + terrainName + "_0.ttile"))
 		{
-			why = string.Format("no %1/Terrain_0.ttile - the terrain is not this world's own (a parent world or a pak). Use a world with its own terrain folder.", dir);
+			why = string.Format("no %1/%2_0.ttile - the terrain comes from a parent world or the game's paks.", dir, terrainName);
 			return string.Empty;
 		}
 		return dir;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! Vanilla mode inputs for a world on a pak terrain: terrain name, the game's .pak folder and the root of the mod
+	//! that holds the world file. False + why when one is missing.
+	protected static bool VanillaSetup(WorldEditorAPI api, string worldPath, string worldAbs, out string terrainName, out string gameData, out string addon, out string why)
+	{
+		terrainName = TerrainName(api);
+		if (terrainName.IsEmpty())
+		{
+			why = "no GenericTerrainEntity with a name in this world";
+			return false;
+		}
+		gameData = GAME_DATA;
+		string plain = PlainPath(worldPath);
+		if (worldAbs.IsEmpty() || !worldAbs.EndsWith(plain))
+		{
+			why = "cannot tell which mod folder holds " + worldPath;
+			return false;
+		}
+		addon = worldAbs.Substring(0, worldAbs.Length() - plain.Length());
+		while (addon.EndsWith("/"))
+			addon = addon.Substring(0, addon.Length() - 1);
+		return true;
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -431,12 +479,12 @@ class MUD_GroundBuilder
 
 	//------------------------------------------------------------------------------------------------
 	//! steps = the report lines the tool writes when it ends well (progress bar)
-	protected static bool RunTool(WorldEditor we, string worldPath, string cmd, string reportPath, int steps, string title, out string result)
+	protected static bool RunTool(WorldEditor we, string worldPath, string cmd, string reportPath, int steps, string title, string blank, out string result)
 	{
 		FileIO.DeleteFile(reportPath);
-		if (!we.SetOpenedResource(BLANK_WORLD))
+		if (!we.SetOpenedResource(blank))
 		{
-			result = "Could not open " + BLANK_WORLD + " to release the tiles - nothing touched. Close the world and run by hand:\n" + cmd;
+			result = "Could not open " + blank + " to release the tiles - nothing touched. Close the world and run by hand:\n" + cmd;
 			return false;
 		}
 		Print("MUD build: running " + cmd, LogLevel.NORMAL);
@@ -683,13 +731,19 @@ class MUD_GroundBuilder
 		}
 		string worldAbs = Abs(worldPath);
 		string why;
+		string vName, vData, vAddon;
 		if (!worldAbs.IsEmpty() && !TilesDir(api, worldAbs, why).IsEmpty())
 		{
-			report += "ok    The terrain files belong to this world (steps 3-4 can cut holes).\n";
+			report += "ok    The terrain files belong to this world (steps 3-4 cut holes into them).\n";
+		}
+		else if (VanillaSetup(api, worldPath, worldAbs, vName, vData, vAddon, why))
+		{
+			report += "ok    Game terrain '" + vName + "' (from the game's paks): step 4 writes holed copies of its tiles into this mod at the same path,\n      which replace the game's tiles only while this mod is loaded. The terrain tools stay locked; Unbuild removes the copies.\n";
+			report += "      Mod folder: " + vAddon + "\n      Game data: step 4 reads the game's .pak folder from the Workbench log.\n";
 		}
 		else
 		{
-			report += "FAIL  Terrain files: " + why + "\n      A world that uses another world's terrain (e.g. vanilla Arland) cannot be cut - it would change that map for everyone. Use a world with its own terrain folder.\n";
+			report += "FAIL  Terrain files: " + why + "\n";
 			bad = true;
 		}
 		if (ToolPath().IsEmpty())
@@ -829,6 +883,29 @@ class MUD_GroundBuilder
 	}
 
 	//------------------------------------------------------------------------------------------------
+	//! 'Steps 1-3' (user 2026-10-28: one click): check, add entities when due, then the scan (Play starts after the
+	//! dialog). Stops at the first step that fails.
+	static string Prepare()
+	{
+		s_bPlay = false;
+		bool ok;
+		string check = Check(ok);
+		if (!ok)
+			return "Step 1 found faults - fix them first:\n\n" + check;
+		string report = "Step 1: ok.\n\n";
+		string why;
+		int due = Due(why);
+		if (due == STEP_ENTITIES)
+		{
+			report += StepEntities() + "\n\n";
+			due = Due(why);
+		}
+		if (due != STEP_SCAN)
+			return report + "Step 3 not run: " + why;
+		return report + StepScan();
+	}
+
+	//------------------------------------------------------------------------------------------------
 	//! Build run 1: road list, height samples, scan request, manifest 'scan'; asks Run() to start Play
 	protected static string BuildScan(WorldEditor we, WorldEditorAPI api, string worldPath, string folder, MUD_BuildManifest man)
 	{
@@ -837,7 +914,8 @@ class MUD_GroundBuilder
 			return "Terrain: cannot resolve " + worldPath + " to a disk path.";
 		string why;
 		string tiles = TilesDir(api, worldAbs, why);
-		if (tiles.IsEmpty())
+		string vName, vData, vAddon;
+		if (tiles.IsEmpty() && !VanillaSetup(api, worldPath, worldAbs, vName, vData, vAddon, why))
 			return "Terrain: not automated - " + why;
 		string folderAbs = Abs(folder);
 		if (folderAbs.IsEmpty())
@@ -854,7 +932,10 @@ class MUD_GroundBuilder
 		string plain = PlainPath(worldPath);
 		man.m_sWorld = worldPath;
 		man.m_sState = "scan";
-		man.m_sTiles = tiles;
+		man.m_sTiles = tiles;   // vanilla mode: empty until step 4 reports the override folder
+		man.m_sVanilla = vName;
+		man.m_sGameData = vData;
+		man.m_sAddon = vAddon;
 		man.m_sBackup = folderAbs + "tiles_backup";
 		man.m_sHeights = plain.Substring(0, plain.LastIndexOf("/") + 1) + key + "_mud_heights.c";
 		man.m_sHeightsAbs = worldAbs.Substring(0, worldAbs.LastIndexOf("/") + 1) + key + "_mud_heights.c";
@@ -870,7 +951,11 @@ class MUD_GroundBuilder
 	//! Build run 2: save, close the world, mud_build.py build, reopen, skin -> heights file, save
 	protected static string BuildTerrain(WorldEditor we, string worldPath, string folder, MUD_BuildManifest man)
 	{
-		if (Workbench.ScriptDialog("MUD Ground 4: Cut terrain", "Step 4 writes terrain holes into " + man.m_sTiles + " (first copy backed up to " + man.m_sBackup + "). The world is saved, closed while python runs, then opened again. Continue?", new WorkbenchDialog_OKCancel()) == 0)
+		bool isPak = !man.m_sVanilla.IsEmpty();
+		string askText = "Step 4 writes terrain holes into " + man.m_sTiles + " (first copy backed up to " + man.m_sBackup + ").";
+		if (isPak)
+			askText = "Step 4 finds the game terrain '" + man.m_sVanilla + "' in the game's paks and writes holed copies of its tiles into " + man.m_sAddon + " at the same path (they replace the game's tiles only while this mod is loaded; the game files are not touched).";
+		if (Workbench.ScriptDialog("MUD Ground 4: Cut terrain", askText + " The world is saved, closed while python runs, then opened again. Continue?", new WorkbenchDialog_OKCancel()) == 0)
 			return "Terrain: cancelled, nothing touched.";
 		if (!we.Save())
 			return "Terrain: could not save the world - nothing touched.";
@@ -878,20 +963,51 @@ class MUD_GroundBuilder
 		string folderAbs = Abs(folder);
 		if (tool.IsEmpty() || folderAbs.IsEmpty())
 			return "Terrain: Tools/mud_build.py or " + folder + " not found - nothing touched.";
-		string cmd = string.Format("%1 -I \"%2\" build --tiles \"%3\" --backup \"%4\" --mask \"%5mask.txt\" --pins \"%5pins.txt\" --samples \"%5samples.txt\" --heights \"%6\"",
-			PYTHON, tool, man.m_sTiles, man.m_sBackup, folderAbs, man.m_sHeightsAbs);
+		string cmd = string.Format("%1 -I \"%2\" build --tiles \"%3\"", PYTHON, tool, man.m_sTiles);
+		string blank = BLANK_WORLD;
+		int steps = 5;
+		if (isPak)
+		{
+			cmd = string.Format("%1 -I \"%2\" build --vanilla \"%3\" --game-data \"%4\" --addon \"%5\"", PYTHON, tool, man.m_sVanilla, man.m_sGameData, man.m_sAddon);
+			blank = BLANK_WORLD_VANILLA;
+			steps = 7;
+		}
+		cmd += string.Format(" --backup \"%1\" --mask \"%2mask.txt\" --pins \"%2pins.txt\" --samples \"%2samples.txt\" --heights \"%3\"",
+			man.m_sBackup, folderAbs, man.m_sHeightsAbs);
 		cmd += string.Format(" --tiles-x %1 --cell %2 --report \"%3report.txt\"", man.m_iTilesX, man.m_fCell, folderAbs);
 		string result;
-		bool ok = RunTool(we, worldPath, cmd, folder + "report.txt", 5, "MUD Ground 4: cutting terrain holes", result);
+		bool ok = RunTool(we, worldPath, cmd, folder + "report.txt", steps, "MUD Ground 4: cutting terrain holes", blank, result);
+		if (isPak)
+		{
+			string dir = OverrideDir(result);
+			if (!dir.IsEmpty())
+				man.m_sTiles = dir;
+		}
 		man.m_sState = "failed";
 		if (ok)
 		{
 			man.m_sState = "built";
 			FileIO.DeleteFile(REQUEST);
 			result += PointSkin(we, man.m_sHeights);
+			if (isPak)
+				result += "\nThe holed tiles are new files: if the holes do not show in Play, restart Workbench once.";
 		}
 		man.Save(folder + "manifest.txt");
 		return "Terrain run 2 of 2: " + man.m_sState + "\n" + result;
+	}
+
+	//------------------------------------------------------------------------------------------------
+	//! The override tile folder from a vanilla build report ('MUD build: override tiles <dir> (...)'), else empty
+	protected static string OverrideDir(string report)
+	{
+		int at = report.IndexOf(OVERRIDE_LINE);
+		if (at < 0)
+			return string.Empty;
+		string rest = report.Substring(at + OVERRIDE_LINE.Length(), report.Length() - at - OVERRIDE_LINE.Length());
+		int end = rest.IndexOf(" (");
+		if (end < 0)
+			return string.Empty;
+		return rest.Substring(0, end);
 	}
 
 	//------------------------------------------------------------------------------------------------
@@ -963,7 +1079,11 @@ class MUD_GroundBuilder
 	//------------------------------------------------------------------------------------------------
 	protected static string UnbuildTerrain(WorldEditor we, string worldPath, string folder, MUD_BuildManifest man)
 	{
-		if (Workbench.ScriptDialog("MUD Ground: Unbuild", "Put the original terrain holes back into " + man.m_sTiles + "? The world is saved, closed while python runs, then opened again.", new WorkbenchDialog_OKCancel()) == 0)
+		bool isPak = !man.m_sVanilla.IsEmpty();
+		string askText = "Put the original terrain holes back into " + man.m_sTiles + "?";
+		if (isPak)
+			askText = "Remove the holed tile copies this plugin wrote into the mod (" + man.m_sTiles + "), so the game's own '" + man.m_sVanilla + "' tiles are used again?";
+		if (Workbench.ScriptDialog("MUD Ground: Unbuild", askText + " The world is saved, closed while python runs, then opened again.", new WorkbenchDialog_OKCancel()) == 0)
 			return "Terrain: not restored (cancelled). Save the world to keep the entity removal.";
 		if (!we.Save())
 			return "Terrain: could not save the world - terrain not restored.";
@@ -971,10 +1091,19 @@ class MUD_GroundBuilder
 		string folderAbs = Abs(folder);
 		if (tool.IsEmpty() || folderAbs.IsEmpty())
 			return "Terrain: Tools/mud_build.py or " + folder + " not found - terrain not restored.";
-		string cmd = string.Format("%1 -I \"%2\" unbuild --tiles \"%3\" --backup \"%4\" --heights \"%5\" --report \"%6report.txt\"",
-			PYTHON, tool, man.m_sTiles, man.m_sBackup, man.m_sHeightsAbs, folderAbs);
+		string cmd = string.Format("%1 -I \"%2\" unbuild", PYTHON, tool);
+		if (!man.m_sTiles.IsEmpty())   // vanilla mode without it: mud_build.py reads its override.txt in the backup
+			cmd += " --tiles \"" + man.m_sTiles + "\"";
+		cmd += string.Format(" --backup \"%1\" --heights \"%2\" --report \"%3report.txt\"", man.m_sBackup, man.m_sHeightsAbs, folderAbs);
+		string blank = BLANK_WORLD;
+		int steps = 2;
+		if (isPak)
+		{
+			blank = BLANK_WORLD_VANILLA;
+			steps = 3;
+		}
 		string result;
-		if (RunTool(we, worldPath, cmd, folder + "report.txt", 2, "MUD Ground: putting the terrain back", result))
+		if (RunTool(we, worldPath, cmd, folder + "report.txt", steps, "MUD Ground: putting the terrain back", blank, result))
 		{
 			man.m_sState = "unbuilt";
 			man.Save(folder + "manifest.txt");
@@ -1018,6 +1147,8 @@ class MUD_GroundBuilder
 		if (!man.Load(folder + "manifest.txt"))
 			return report + "Terrain: no manifest (" + folder + "manifest.txt) - not built by the plugin." + WhatNext();
 		report += string.Format("Terrain: %1\nTiles: %2\nBackup: %3\nHeights: %4\n", man.m_sState, man.m_sTiles, man.m_sBackup, man.m_sHeights);
+		if (!man.m_sVanilla.IsEmpty())
+			report += "Mode: game terrain '" + man.m_sVanilla + "' - holed tile copies in the mod replace the game's tiles while it is loaded\n";
 		report += string.Format("Scan: mask done %1, pins done %2, request open %3",
 			HasLine(folder + "mask.txt", "MUD mask done"), HasLine(folder + "pins.txt", "MUD pins done"), FileIO.FileExists(REQUEST));
 		string last = folder + "report.txt";
@@ -1051,6 +1182,16 @@ class MUD_GroundBuildPlugin : WorkbenchPlugin
 	override void Run()
 	{
 		MUD_GroundBuilder.Show("MUD Ground: Next step", MUD_GroundBuilder.Next());
+	}
+}
+
+//------------------------------------------------------------------------------------------------
+[WorkbenchPluginAttribute(name: "MUD Ground: Steps 1-3", description: "Check the world, add the entities, read roads + heights, then Play scans (stops at the first fault)", wbModules: { "WorldEditor" }, awesomeFontCode: 0xF04B)]
+class MUD_GroundPreparePlugin : WorkbenchPlugin
+{
+	override void Run()
+	{
+		MUD_GroundBuilder.Show("MUD Ground: Steps 1-3", MUD_GroundBuilder.Prepare());
 	}
 }
 
