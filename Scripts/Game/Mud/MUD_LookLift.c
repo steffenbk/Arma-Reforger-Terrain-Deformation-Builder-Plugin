@@ -54,7 +54,7 @@ class MUD_LookLift
 	// simulate snow'): the north part of the map from SNOW_FROM of its depth (skin rows, cut to a whole skin chunk so
 	// skin chunks and patches switch material on the same line) is lifted SNOW_M and drawn with SNOW_MAT. The lift
 	// ramps up over SNOW_RAMP skin vertices inside the zone edge. Look only, as the rest of the lift; GROW adds on top.
-	static const bool SNOW = true;
+	static const bool SNOW = false;
 	static const float SNOW_M = 0.75;       // m base lift in the snow zone
 	static const float SNOW_FROM = 0.6667;  // share of the map depth (south edge = 0) where the zone starts
 	static const int SNOW_RAMP = 8;         // skin vertices (2 m each) from the zone edge to the full SNOW_M
