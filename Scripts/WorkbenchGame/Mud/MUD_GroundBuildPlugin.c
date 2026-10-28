@@ -249,10 +249,11 @@ class MUD_GroundBuilder
 	}
 
 	//------------------------------------------------------------------------------------------------
-	//! Tools/mud_build.py of this addon (dev folder or the published copy), empty when not found
+	//! Tools/mud_build.py of the project that holds this plugin, empty when not found
 	protected static string ToolPath()
 	{
-		array<string> tries = {"$Testingplanvechmsh:Tools/mud_build.py", "$Terraindeformation:Tools/mud_build.py"};   // lint-ok: the tool lives in our addon only
+		// plain path first: the files may be copied into any project (GitHub setup, user 2026-10-28)
+		array<string> tries = {"Tools/mud_build.py", "$Testingplanvechmsh:Tools/mud_build.py", "$Terraindeformation:Tools/mud_build.py"};   // lint-ok: fallbacks after the plain path
 		foreach (string t : tries)
 		{
 			string abs;
@@ -748,7 +749,7 @@ class MUD_GroundBuilder
 		}
 		if (ToolPath().IsEmpty())
 		{
-			report += "FAIL  Tools/mud_build.py not found in the mod - reinstall / re-download the mod.\n";
+			report += "FAIL  Tools/mud_build.py not found - copy the Tools folder into your project.\n";
 			bad = true;
 		}
 		else
