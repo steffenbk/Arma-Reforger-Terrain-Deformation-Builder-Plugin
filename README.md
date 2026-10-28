@@ -1,4 +1,4 @@
-# Terrain deformation for Arma Reforger maps
+# Arma Reforger Terrain Deformation Builder Plugin
 
 Add deformable ground to your map: vehicle ruts, craters, trenches, shovel digging and tunnels.
 Copy these files into your project, then a World Editor plugin builds the system into your world in a few
@@ -11,9 +11,10 @@ clicks, and takes it out again.
   terrain.
 
 ## 1. Copy the files into your project
-1. Download this repo (Code > Download ZIP) and unpack it.
-2. Copy all its folders (`Assets`, `Common`, `Configs`, `Data`, `Prefabs`, `Scripts`, `Terrains`, `Tools`,
-   `UI`) into your project's folder, next to your `addon.gproj`.
+1. Download this repo (Code > Download ZIP) and unpack it, or clone it:
+   `git clone https://github.com/steffenbk/Arma-Reforger-Terrain-Deformation-Builder-Plugin.git`
+2. Copy all its folders (`Assets`, `Common`, `Configs`, `Prefabs`, `Scripts`, `Tools`, `UI`) into your
+   project's folder, next to your `addon.gproj`.
    - If your project already has `Configs/System/chimeraInputCommon.conf` or `keyBindingMenu.conf`, merge ours
      into yours instead of overwriting them (they hold the trench and build tool key bindings).
 3. Start Arma Reforger Tools (restart it if it was running, so it sees the new files and finds python) and open

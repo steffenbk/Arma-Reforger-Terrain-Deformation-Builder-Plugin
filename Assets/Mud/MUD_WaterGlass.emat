@@ -1,8 +1,0 @@
-MatPBRBasicGlass : "{E6106205426AE5EF}Assets/_BaseMaterials/Characters_MatPBRBasicGlass.emat" {
- Color 0.035 0.075 0.085 1
- Sort translucent
- AlphaMul 0.8
- BlendMode AlphaBlend
- RoughnessScale 0.05
- BCRMap "{DDFA1BE6FC945C12}Assets/_SharedData/Metal/ST_Metal_Stainles01_1m_BCR.edds"
-}

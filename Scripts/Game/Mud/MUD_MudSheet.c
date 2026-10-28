@@ -358,7 +358,7 @@ class MUD_MudSheet
 	// MUD LAB EDGE AUDIT (sheet local meter, user 2026-10-20 DS screenshot: a striped wall along straight tile borders
 	// = the ONE_SKIRT curtain of a raised tile with nothing drawn beside it): each build keeps its border verts, the 10 s
 	// line says what is beside every raised one (ok / lower neighbour / no neighbour and why)
-	static const bool EDGE_AUDIT = true;
+	static const bool EDGE_AUDIT = false;
 	static const float EDGE_RAISED = 0.03;      // m over the ground: a border vert this high shows its skirt if open
 	static const float EDGE_STEP = 0.03;        // m: drawn neighbour this much lower = a visible step
 	protected ref map<int, ref array<float>> m_mEdgeRec = new map<int, ref array<float>>();   // TrailKey -> 12 x TV

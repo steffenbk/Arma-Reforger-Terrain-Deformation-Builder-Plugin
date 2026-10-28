@@ -8,7 +8,7 @@ class MUD_TestKit
 {
 	// true: Stats' 10 s lines print without m_bDebug ('MUD patches ... | queue, oldest dirty, ops'), field / disp
 	// hash per op, settings file, robot code (later stages)
-	static const bool TEST_KIT = true;
+	static const bool TEST_KIT = false;
 	static const string SETTINGS_FILE = "$profile:MUD_TestKit.txt";
 	// defaults (the file overrides them): > 0 = the server issues this many fake kind-4 rut ops once, 30 s after its
 	// ground is ready (Stage 3)

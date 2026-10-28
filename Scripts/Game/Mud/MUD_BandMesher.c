@@ -104,7 +104,7 @@ class MUD_BandMesher
 	// REBUILD 6 LAYOUT_SPLIT (2026-10-19, research/2026-10-19-rebuild-and-bugs-research.md 2.2): kinds / faces / corners
 	// depend only on which skin cells are on - a new m_aSkin with the same on-mask refreshes only m_aCSlot.
 	static bool s_bLayoutSplit = true;     // A/B switch (MUD_StutterRobot sets it per robot run on the client)
-	static const bool LAYOUT_CHECK = true;  // TEMP: every LAYOUT_CHECK_EVERY-th slot refresh also makes the full table, compares
+	static const bool LAYOUT_CHECK = false;  // TEMP: every LAYOUT_CHECK_EVERY-th slot refresh also makes the full table, compares
 	static const int LAYOUT_CHECK_EVERY = 10;
 	protected int m_iLastOnMask = -1;
 	protected int m_aCSlotChk[1156];

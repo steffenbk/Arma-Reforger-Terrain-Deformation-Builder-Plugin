@@ -309,7 +309,7 @@ class MUD_VoxelProbe
 	static const bool RUT_TRAIL_CUT = true;
 	static const float RUT_TRAIL_AHEAD = 0.5;
 	static const float RUT_TRAIL_IN = 0.7;
-	static const bool TRAIL_PROBE = true;          // TEMP 2026-10-19: TrailProbe lines (test kit only)
+	static const bool TRAIL_PROBE = false;          // TEMP 2026-10-19: TrailProbe lines (test kit only)
 	static const int TRAIL_PROBE_MS = 500;
 	protected static ref array<int> s_aTrailPrintAt = {-100000, -100000};
 	static const float RUT_RAMP_LEN = 1.0;
@@ -485,7 +485,7 @@ class MUD_VoxelProbe
 	static const string TUNNEL_STEEP_CONTEXT = "MUD_TunnelShovelContext";
 	static const string TUNNEL_STEEP_ACTION = "MUD_TunnelSteep";
 	static const float TUNNEL_LAG = 0.5;        // server down check: feet may lag the client's by this much
-	static const bool TUNNEL_DEBUG_T = true;    // debug key, user 2026-10-16: OFF before release (false = T does nothing, the server refuses it)
+	static const bool TUNNEL_DEBUG_T = false;    // debug key, user 2026-10-16: OFF before release (false = T does nothing, the server refuses it)
 	static const int TUNNEL_EVERY_MS = 300;
 	// Tunnel darkness (user 2026-10-17, probe): client / host spawns one MudTunnelProbe.et (vanilla ProbeEnvCave_base values
 	// + a 5 m ProbeVolume box; script cannot size a ProbeVolume, no methods) per TUNNEL_DARK_STEP grid cell a tunnel dig
@@ -569,7 +569,7 @@ class MUD_VoxelProbe
 	// each client lays one on the brick entities under the crater (World.CreateDecal, projected down). 'MUD decal:' lines.
 	// run 2 (user 2026-10-17 ~22:40 'just have a decal in our craters'): no trace - the decal goes straight onto every
 	// shown brick entity of the columns under the crater (run 1: the trace hit the hidden terrain, CreateDecal null)
-	static const bool CRATER_DECAL = true;
+	static const bool CRATER_DECAL = false;
 	static const ResourceName DECAL_MAT = "{039FA43299C7980D}Assets/Decals/Miscellaneous/Mortar/Decal_Impact_Mortar_01.emat";   // Warhead_Shell_HE.et SpawnDecalEffect (Exp 1.9 pak)
 	static const float DECAL_SIZE = 1.0;     // decal size per m of crater crest radius (vanilla M821: Scale 2.75 - tune in WB)
 	static const float DECAL_LIFE = 60;      // s, as Warhead_Shell_HE.et

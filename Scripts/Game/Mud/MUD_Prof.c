@@ -10,8 +10,8 @@
 //! Remove: this file + its calls (grep MUD_Prof).
 class MUD_Prof
 {
-	static const bool ON = true;
-	static const bool CSV = true;
+	static const bool ON = false;
+	static const bool CSV = false;
 	static const float EVERY_S = 5;
 	static const int SPIKE_MS = 33;
 

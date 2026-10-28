@@ -6,7 +6,7 @@
 //! Not a release failure: MUD_CamSmooth.ON (user decides, it changes how the vehicle camera feels) - printed as info.
 class MUD_Release
 {
-	static const bool PUBLISH = false;
+	static const bool PUBLISH = true;
 	static const float REPEAT_MS = 30000;
 	protected static string s_sOn;
 	protected static bool s_bRepeat;

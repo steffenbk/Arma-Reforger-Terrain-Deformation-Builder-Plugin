@@ -20,7 +20,7 @@ class MUD_TrenchSiteComponent : ScriptComponent
 	static const bool DEBUG_INSTANT = false;
 	// Review F6 (2026-10-16): server check for a client's instant dig (Ctrl+F sends instant = true). true for testing;
 	// FLIP TO false BEFORE RELEASE (master list Lane 2) - then a client can't dig a whole trench at once.
-	static const bool ALLOW_INSTANT_DIG = true;
+	static const bool ALLOW_INSTANT_DIG = false;
 
 	[RplProp(onRplName: "OnPlanRpl")]
 	protected string m_sPlan;           // MUD_TrenchPlan.Pack text

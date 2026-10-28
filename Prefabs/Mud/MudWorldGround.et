@@ -5,6 +5,6 @@ MUD_WorldGroundEntity {
    Streamable Disabled
   }
  }
- m_bDebug 1
+ m_bDebug 0
  m_bBandMesher 1
 }
