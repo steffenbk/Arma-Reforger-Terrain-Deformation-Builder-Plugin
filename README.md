@@ -2,7 +2,9 @@
 
 Deformable ground for your Arma Reforger map: vehicle ruts, craters, trenches, shovel digging and tunnels.
 
-The ground system itself is the Workshop mod **Terrain deformation** (GUID `6A940DE9528954EE`). It comes with
+The ground system itself is the Workshop mod
+**[Terrain deformation](https://reforger.armaplatform.com/workshop/6A940DE9528954EE-Terraindeformation)**
+(GUID `6A940DE9528954EE`). It comes with
 a ready Arland scenario and the World Editor plugin that builds the system into your own world.
 This repo only holds the python tools that plugin runs. They can't run from inside the Workshop download, so you
 get them here: **Terrain_deformation_map_maker_tools.zip**.
@@ -15,7 +17,8 @@ get them here: **Terrain_deformation_map_maker_tools.zip**.
 ## Setup
 1. Download `Terrain_deformation_map_maker_tools.zip` and unzip it into your project's folder, so you get
    `<your project>/Tools/mud_build.py` next to your `addon.gproj`.
-2. In Workbench, add **Terrain deformation** to your project's dependencies, then restart Workbench so it loads
+2. Subscribe to [Terrain deformation](https://reforger.armaplatform.com/workshop/6A940DE9528954EE-Terraindeformation).
+   In Workbench, add it to your project's dependencies, then restart Workbench so it loads
    the mod and finds python.
 3. Make your world a SubScene of a game map (Arland is tested), open it in the World Editor and save it.
 
