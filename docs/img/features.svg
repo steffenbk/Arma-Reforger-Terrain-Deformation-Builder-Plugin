@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="960" height="300" rx="12" fill="#f4f1ea"/>
+  <defs>
+    <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a6a45"/><stop offset="1" stop-color="#5e4630"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cfe3f2"/><stop offset="1" stop-color="#eef5fa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- panel 1: ruts -->
+  <g transform="translate(20,20)">
+    <rect width="215" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+    <rect x="10" y="10" width="195" height="150" rx="4" fill="url(#sky)"/>
+    <path d="M10 110 H55 Q62 110 64 120 Q68 128 76 120 Q78 110 85 110 H130 Q137 110 139 120 Q143 128 151 120 Q153 110 160 110 H205 V160 H10 Z" fill="url(#soil)"/>
+    <path d="M10 110 H55 M85 110 H130 M160 110 H205" stroke="#6c8a3c" stroke-width="4"/>
+    <!-- wheels -->
+    <circle cx="70" cy="96" r="14" fill="#333"/><circle cx="70" cy="96" r="5" fill="#888"/>
+    <circle cx="145" cy="96" r="14" fill="#333"/><circle cx="145" cy="96" r="5" fill="#888"/>
+    <rect x="50" y="62" width="115" height="22" rx="4" fill="#58663e"/>
+    <text x="107" y="190" text-anchor="middle" font-size="17" font-weight="700" fill="#2b2b2b">Ruts</text>
+    <text x="107" y="212" text-anchor="middle" font-size="12" fill="#555">Wheels and tracks wear the</text>
+    <text x="107" y="228" text-anchor="middle" font-size="12" fill="#555">ground. Each pass cuts deeper;</text>
+    <text x="107" y="244" text-anchor="middle" font-size="12" fill="#555">deep ruts turn to slippery mud.</text>
+  </g>
+
+  <!-- panel 2: craters -->
+  <g transform="translate(255,20)">
+    <rect width="215" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+    <rect x="10" y="10" width="195" height="150" rx="4" fill="url(#sky)"/>
+    <path d="M10 105 H50 Q62 96 70 100 Q85 140 107 142 Q129 140 144 100 Q152 96 164 105 H205 V160 H10 Z" fill="url(#soil)"/>
+    <path d="M10 105 H50 M164 105 H205" stroke="#6c8a3c" stroke-width="4"/>
+    <g fill="#e8a33b">
+      <path d="M107 60 l6 14 l15 -6 l-8 13 l14 7 l-16 2 l3 15 l-14 -9 l-14 9 l3 -15 l-16 -2 l14 -7 l-8 -13 l15 6 z" opacity="0.85"/>
+    </g>
+    <circle cx="80" cy="70" r="3" fill="#6b5236"/><circle cx="140" cy="62" r="2.5" fill="#6b5236"/><circle cx="125" cy="45" r="2" fill="#6b5236"/>
+    <text x="107" y="190" text-anchor="middle" font-size="17" font-weight="700" fill="#2b2b2b">Craters</text>
+    <text x="107" y="212" text-anchor="middle" font-size="12" fill="#555">Shells, rockets and charges</text>
+    <text x="107" y="228" text-anchor="middle" font-size="12" fill="#555">leave a hole with a rim. Size</text>
+    <text x="107" y="244" text-anchor="middle" font-size="12" fill="#555">follows the explosive.</text>
+  </g>
+
+  <!-- panel 3: trenches -->
+  <g transform="translate(490,20)">
+    <rect width="215" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+    <rect x="10" y="10" width="195" height="150" rx="4" fill="url(#sky)"/>
+    <path d="M10 95 H70 L76 140 H138 L144 95 H205 V160 H10 Z" fill="url(#soil)"/>
+    <path d="M10 95 H70 M144 95 H205" stroke="#6c8a3c" stroke-width="4"/>
+    <path d="M150 95 Q165 82 180 95" fill="#7a5b3c"/>
+    <!-- soldier -->
+    <g fill="#4b5a35">
+      <circle cx="100" cy="98" r="6"/>
+      <rect x="94" y="105" width="12" height="22" rx="3"/>
+      <rect x="95" y="126" width="4" height="14"/><rect x="101" y="126" width="4" height="14"/>
+    </g>
+    <line x1="106" y1="110" x2="124" y2="96" stroke="#3a3a3a" stroke-width="3"/>
+    <path d="M44 120 v-6 M30 140 h20" stroke="none"/>
+    <text x="32" y="122" font-size="11" fill="#fff">2.5 m</text>
+    <path d="M60 95 V140" stroke="#fff" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <text x="107" y="190" text-anchor="middle" font-size="17" font-weight="700" fill="#2b2b2b">Trenches + shovel</text>
+    <text x="107" y="212" text-anchor="middle" font-size="12" fill="#555">Dig, fill, pile up or flatten</text>
+    <text x="107" y="228" text-anchor="middle" font-size="12" fill="#555">ground, or plan a whole trench</text>
+    <text x="107" y="244" text-anchor="middle" font-size="12" fill="#555">line and dig it piece by piece.</text>
+  </g>
+
+  <!-- panel 4: tunnels -->
+  <g transform="translate(725,20)">
+    <rect width="215" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+    <rect x="10" y="10" width="195" height="150" rx="4" fill="url(#sky)"/>
+    <path d="M10 130 H40 Q90 40 205 40 V160 H10 Z" fill="url(#soil)"/>
+    <path d="M10 130 H40 Q90 40 205 40" stroke="#6c8a3c" stroke-width="4" fill="none"/>
+    <path d="M58 130 Q60 112 78 110 L195 118 Q200 128 195 138 L78 142 Q60 142 58 130 Z" fill="#2a2018"/>
+    <g fill="#4b5a35">
+      <circle cx="120" cy="117" r="5"/>
+      <rect x="115" y="122" width="10" height="16" rx="3"/>
+    </g>
+    <text x="107" y="190" text-anchor="middle" font-size="17" font-weight="700" fill="#2b2b2b">Tunnels</text>
+    <text x="107" y="212" text-anchor="middle" font-size="12" fill="#555">Dig straight into a hill with</text>
+    <text x="107" y="228" text-anchor="middle" font-size="12" fill="#555">the shovel. Look up or down</text>
+    <text x="107" y="244" text-anchor="middle" font-size="12" fill="#555">to make a ramp.</text>
+  </g>
+</svg>

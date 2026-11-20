@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 250" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="960" height="250" rx="12" fill="#f4f1ea"/>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8a7d63"/>
+    </marker>
+  </defs>
+  <text x="30" y="38" font-size="18" font-weight="700" fill="#2b2b2b">World Editor: Plugins &gt; MUD Ground</text>
+  <text x="930" y="38" text-anchor="end" font-size="13" fill="#6b6b6b">or click "Next step" each time - it runs whichever step is due</text>
+
+  <g font-size="12" fill="#555">
+    <!-- step boxes: x = 30, 214, 398, 582, 766 ; w 164 -->
+    <g transform="translate(30,62)">
+      <rect width="164" height="160" rx="10" fill="#fff" stroke="#c9c1ad"/>
+      <circle cx="30" cy="30" r="18" fill="#4f7a3a"/><text x="30" y="36" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">1</text>
+      <text x="56" y="28" font-size="14" font-weight="700" fill="#2b2b2b">Install /</text>
+      <text x="56" y="45" font-size="14" font-weight="700" fill="#2b2b2b">update tools</text>
+      <text x="14" y="80">Downloads the python</text>
+      <text x="14" y="96">tools from this repo into</text>
+      <text x="14" y="112">&lt;project&gt;/Tools/.</text>
+      <text x="14" y="140" fill="#8a7d63">Run again after a</text>
+      <text x="14" y="155" fill="#8a7d63">mod update.</text>
+    </g>
+    <g transform="translate(214,62)">
+      <rect width="164" height="160" rx="10" fill="#fff" stroke="#c9c1ad"/>
+      <circle cx="30" cy="30" r="18" fill="#4f7a3a"/><text x="30" y="36" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">2</text>
+      <text x="56" y="36" font-size="14" font-weight="700" fill="#2b2b2b">Check world</text>
+      <text x="14" y="80">Checks python, the tools</text>
+      <text x="14" y="96">and the world. Says how</text>
+      <text x="14" y="112">to fix each problem.</text>
+      <text x="14" y="140" fill="#8a7d63">Changes nothing.</text>
+    </g>
+    <g transform="translate(398,62)">
+      <rect width="164" height="160" rx="10" fill="#fff" stroke="#c9c1ad"/>
+      <circle cx="30" cy="30" r="18" fill="#4f7a3a"/><text x="30" y="36" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">3</text>
+      <text x="56" y="36" font-size="14" font-weight="700" fill="#2b2b2b">Add entities</text>
+      <text x="14" y="80">Adds layer MUD_Ground</text>
+      <text x="14" y="96">and its own scenario</text>
+      <text x="14" y="112">Missions/&lt;world&gt;_Mud.conf</text>
+      <text x="14" y="140" fill="#8a7d63">One Undo step.</text>
+    </g>
+    <g transform="translate(582,62)">
+      <rect width="164" height="160" rx="10" fill="#fff" stroke="#c9c1ad"/>
+      <circle cx="30" cy="30" r="18" fill="#4f7a3a"/><text x="30" y="36" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">4</text>
+      <text x="56" y="36" font-size="14" font-weight="700" fill="#2b2b2b">Scan map</text>
+      <text x="14" y="80">Reads roads + heights,</text>
+      <text x="14" y="96">then Play scans what</text>
+      <text x="14" y="112">must stay real terrain.</text>
+      <text x="14" y="140" fill="#8a7d63">Wait for "Scan done",</text>
+      <text x="14" y="155" fill="#8a7d63">then stop Play.</text>
+    </g>
+    <g transform="translate(766,62)">
+      <rect width="164" height="160" rx="10" fill="#fff" stroke="#b5552f" stroke-width="1.5"/>
+      <circle cx="30" cy="30" r="18" fill="#b5552f"/><text x="30" y="36" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">5</text>
+      <text x="56" y="36" font-size="14" font-weight="700" fill="#2b2b2b">Cut terrain</text>
+      <text x="14" y="80">Shows a preview first</text>
+      <text x="14" y="96">(you can still edit it),</text>
+      <text x="14" y="112">then cuts the holes and</text>
+      <text x="14" y="128">bakes the heights.</text>
+      <text x="14" y="155" fill="#8a7d63">Originals backed up.</text>
+    </g>
+  </g>
+  <g stroke="#8a7d63" stroke-width="2" marker-end="url(#ar)">
+    <line x1="196" y1="142" x2="211" y2="142"/>
+    <line x1="380" y1="142" x2="395" y2="142"/>
+    <line x1="564" y1="142" x2="579" y2="142"/>
+    <line x1="748" y1="142" x2="763" y2="142"/>
+  </g>
+</svg>

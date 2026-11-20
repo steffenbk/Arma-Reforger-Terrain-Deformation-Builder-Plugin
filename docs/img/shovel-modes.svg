@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="960" height="420" rx="12" fill="#f4f1ea"/>
+  <defs>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a6a45"/><stop offset="1" stop-color="#5e4630"/>
+    </linearGradient>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#2f7d2f"/>
+    </marker>
+    <marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8a7d63"/>
+    </marker>
+  </defs>
+  <text x="30" y="36" font-size="18" font-weight="700" fill="#2b2b2b">Shovel in hand: press R to switch mode</text>
+
+  <!-- R cycle strip -->
+  <g font-size="12" font-weight="700" text-anchor="middle">
+    <g transform="translate(30,54)">
+      <rect width="88" height="30" rx="15" fill="#e3ddd0"/><text x="44" y="20" fill="#555">Vanilla</text>
+      <rect x="100" width="88" height="30" rx="15" fill="#e3ddd0"/><text x="144" y="20" fill="#555">Normal</text>
+      <rect x="200" width="88" height="30" rx="15" fill="#4f7a3a"/><text x="244" y="20" fill="#fff">Dig</text>
+      <rect x="300" width="88" height="30" rx="15" fill="#4f7a3a"/><text x="344" y="20" fill="#fff">Fill</text>
+      <rect x="400" width="88" height="30" rx="15" fill="#4f7a3a"/><text x="444" y="20" fill="#fff">Mound</text>
+      <rect x="500" width="88" height="30" rx="15" fill="#4f7a3a"/><text x="544" y="20" fill="#fff">Flatten</text>
+      <rect x="600" width="88" height="30" rx="15" fill="#4f7a3a"/><text x="644" y="20" fill="#fff">Tunnel</text>
+      <rect x="700" width="88" height="30" rx="15" fill="#b5552f"/><text x="744" y="20" fill="#fff">Plan trench</text>
+      <rect x="800" width="100" height="30" rx="15" fill="#b5552f"/><text x="850" y="20" fill="#fff">Build area</text>
+    </g>
+    <path d="M880 86 Q880 104 470 104 Q74 104 74 88" stroke="#8a7d63" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#g)"/>
+    <text x="470" y="121" font-weight="400" fill="#8a7d63">R again goes back round</text>
+  </g>
+
+  <!-- five cross sections -->
+  <g font-size="12" fill="#555">
+    <!-- DIG -->
+    <g transform="translate(30,130)">
+      <rect width="170" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+      <path d="M10 70 H50 L62 110 H108 L120 70 H160 V130 H10 Z" fill="url(#s)"/>
+      <path d="M10 70 H50 M120 70 H160" stroke="#6c8a3c" stroke-width="4"/>
+      <path d="M50 70 L62 110 H108 L120 70" stroke="#3ccf3c" stroke-width="2" fill="none" stroke-dasharray="4 3"/>
+      <path d="M85 40 V95" stroke="#2f7d2f" stroke-width="2.5" marker-end="url(#a)"/>
+      <text x="85" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="#2b2b2b">Dig</text>
+      <text x="12" y="184">Green square sinks</text>
+      <text x="12" y="200">0.25 m per swing,</text>
+      <text x="12" y="216">down to 2.5 m. Green</text>
+      <text x="12" y="232">lines show where the</text>
+      <text x="12" y="248">slope ends.</text>
+    </g>
+    <!-- FILL -->
+    <g transform="translate(215,130)">
+      <rect width="170" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+      <path d="M10 70 H50 L62 110 H108 L120 70 H160 V130 H10 Z" fill="url(#s)"/>
+      <path d="M57 95 H113 L120 70 H50 Z" fill="#a8845a"/>
+      <path d="M10 70 H50 M120 70 H160" stroke="#6c8a3c" stroke-width="4"/>
+      <path d="M85 125 V80" stroke="#2f7d2f" stroke-width="2.5" marker-end="url(#a)"/>
+      <text x="85" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="#2b2b2b">Fill</text>
+      <text x="12" y="184">Dug ground in the</text>
+      <text x="12" y="200">square comes back</text>
+      <text x="12" y="216">up 0.25 m per swing.</text>
+    </g>
+    <!-- MOUND -->
+    <g transform="translate(400,130)">
+      <rect width="170" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+      <path d="M10 90 H45 L65 70 H105 L125 90 H160 V130 H10 Z" fill="url(#s)"/>
+      <path d="M10 90 H45 M125 90 H160" stroke="#6c8a3c" stroke-width="4"/>
+      <path d="M85 108 V58" stroke="#2f7d2f" stroke-width="2.5" marker-end="url(#a)"/>
+      <text x="85" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="#2b2b2b">Mound</text>
+      <text x="12" y="184">Piles the square up</text>
+      <text x="12" y="200">0.25 m per swing, up</text>
+      <text x="12" y="216">to 1 m over the</text>
+      <text x="12" y="232">ground. 45 deg sides.</text>
+    </g>
+    <!-- FLATTEN -->
+    <g transform="translate(585,130)">
+      <rect width="170" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+      <path d="M10 90 H160 V130 H10 Z" fill="url(#s)"/>
+      <path d="M45 90 L65 70 H105 L125 90 Z" fill="none" stroke="#8a6a45" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <path d="M10 90 H160" stroke="#6c8a3c" stroke-width="4"/>
+      <path d="M85 50 V84" stroke="#2f7d2f" stroke-width="2.5" marker-end="url(#a)"/>
+      <text x="85" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="#2b2b2b">Flatten</text>
+      <text x="12" y="184">Brings raised ground</text>
+      <text x="12" y="200">(mounds, spoil, crater</text>
+      <text x="12" y="216">rims) down 0.25 m per</text>
+      <text x="12" y="232">swing, to the normal</text>
+      <text x="12" y="248">ground.</text>
+    </g>
+    <!-- TUNNEL -->
+    <g transform="translate(770,130)">
+      <rect width="160" height="260" rx="8" fill="#fff" stroke="#d8d2c4"/>
+      <path d="M10 110 H30 Q60 30 150 30 V130 H10 Z" fill="url(#s)"/>
+      <path d="M44 106 Q46 90 60 88 L130 92 Q134 100 130 108 L60 112 Q46 112 44 106 Z" fill="#2a2018"/>
+      <g stroke="#3ccf3c" stroke-width="2.5"><line x1="126" y1="94" x2="136" y2="104"/><line x1="136" y1="94" x2="126" y2="104"/></g>
+      <text x="80" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="#2b2b2b">Tunnel</text>
+      <text x="12" y="184">Each swing digs</text>
+      <text x="12" y="200">ahead, at the X on</text>
+      <text x="12" y="216">the face. X key:</text>
+      <text x="12" y="232">slope. Look up /</text>
+      <text x="12" y="248">down for a ramp.</text>
+    </g>
+  </g>
+</svg>
